@@ -1,5 +1,9 @@
 # ChemGridMap
 
+[![Tests](https://github.com/Quinnball/ChemGridMap/actions/workflows/tests.yml/badge.svg)](https://github.com/Quinnball/ChemGridMap/actions/workflows/tests.yml)
+[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB.svg)](https://www.python.org/)
+
 ChemGridMap turns a ChEMBL activity export into an inspectable
 one-molecule-per-cell chemical map. A single command can validate the downloaded
 records, aggregate repeated measurements to molecule-level median pChEMBL
@@ -15,18 +19,20 @@ outputs so that the transformation can be audited.
 
 ## Installation
 
-Create a clean environment and install the package from this directory:
+Create a clean environment and install the package from GitHub:
 
 ```bash
 conda create -n chemgridmap -c conda-forge python=3.11 rdkit
 conda activate chemgridmap
-pip install -e .
+pip install "chemgridmap[umap] @ git+https://github.com/Quinnball/ChemGridMap.git@v0.1.0"
 ```
 
-Install UMAP support when it is needed:
+For local development:
 
 ```bash
-pip install -e ".[umap]"
+git clone https://github.com/Quinnball/ChemGridMap.git
+cd ChemGridMap
+pip install -e ".[umap,dev]"
 ```
 
 ## ChEMBL CSV to chemical map

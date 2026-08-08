@@ -41,6 +41,11 @@ dependencies = [
   "scipy>=1.9"
 ]
 
+[project.urls]
+Homepage = "https://github.com/Quinnball/ChemGridMap"
+Repository = "https://github.com/Quinnball/ChemGridMap.git"
+Issues = "https://github.com/Quinnball/ChemGridMap/issues"
+
 [project.optional-dependencies]
 umap = ["umap-learn>=0.5.3"]
 fast = ["lap>=0.5"]
