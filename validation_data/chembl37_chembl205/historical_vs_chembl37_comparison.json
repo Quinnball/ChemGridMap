@@ -1,0 +1,18 @@
+{
+  "chembl_release": "ChEMBL_37",
+  "release_date": "2026-05-01",
+  "target_chembl_id": "CHEMBL205",
+  "target_name": "Carbonic anhydrase 2",
+  "activity_type": "IC50",
+  "historical_raw_rows": 966,
+  "historical_rows_exactly_recovered_in_chembl37": 966,
+  "historical_curated_molecules": 770,
+  "chembl37_raw_rows": 2281,
+  "chembl37_retained_records": 1100,
+  "chembl37_curated_molecules": 892,
+  "shared_canonical_structures": 770,
+  "additional_chembl37_structures": 122,
+  "unchanged_median_pchembl": 750,
+  "activity_class_agreement": 0.9961038961038962,
+  "historical_rows_flagged_potential_duplicate_in_chembl37": 105
+}

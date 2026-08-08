@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chemgridmap"
+version = "0.1.0"
+description = "Curate ChEMBL activity exports and build one-molecule-per-cell chemical maps."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {file = "LICENSE"}
+authors = [
+  {name = "Zhenming Qiu"}
+]
+keywords = [
+  "chemical space",
+  "ChEMBL",
+  "bioactivity curation",
+  "cheminformatics",
+  "dimensionality reduction",
+  "molecular visualization",
+  "grid map"
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: BSD License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Chemistry"
+]
+dependencies = [
+  "matplotlib>=3.6",
+  "numpy>=1.23",
+  "pandas>=1.5",
+  "rdkit>=2022.9.5",
+  "scikit-learn>=1.2",
+  "scipy>=1.9"
+]
+
+[project.optional-dependencies]
+umap = ["umap-learn>=0.5.3"]
+fast = ["lap>=0.5"]
+dev = ["pytest>=7", "build>=1"]
+
+[project.scripts]
+chemgridmap = "chemgridmap.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use ChemGridMap, please cite the accompanying paper and this software."
+title: "ChemGridMap"
+type: software
+version: 0.1.0
+date-released: 2026-07-30
+authors:
+  - family-names: "Qiu"
+    given-names: "Zhenming"
+license: BSD-3-Clause
+preferred-citation:
+  type: article
+  title: "From Molecular Projections to Inspectable Grid Chemical Maps: A Projection-Agnostic Visualization Tool"
+  authors:
+    - family-names: "Qiu"
+      given-names: "Zhenming"
+  year: 2026

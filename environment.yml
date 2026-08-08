@@ -1,0 +1,19 @@
+name: chemgridmap
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - rdkit>=2022.09.5
+  - numpy>=1.23
+  - pandas>=1.5
+  - scipy>=1.9
+  - scikit-learn>=1.2
+  - matplotlib>=3.6
+  - umap-learn>=0.5.3
+  - lap>=0.5
+  - pytest>=7
+  - build>=1
+  - pip
+  - pip:
+      - -e .
+
