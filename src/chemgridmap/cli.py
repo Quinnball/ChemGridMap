@@ -80,7 +80,41 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--random-state", type=int, default=42)
     parser.add_argument("-k", type=int, default=10)
+    parser.add_argument(
+        "--trustworthiness-sample-size",
+        type=int,
+        default=3000,
+        help="Maximum deterministic sample used for trustworthiness.",
+    )
     parser.add_argument("--grid-padding", type=int, default=20)
+    parser.add_argument(
+        "--assignment-method",
+        choices=["auto", "dense", "sparse"],
+        default="auto",
+        help="Use exact dense matching, scalable sparse matching, or auto-select.",
+    )
+    parser.add_argument(
+        "--sparse-neighbors",
+        type=int,
+        default=32,
+        help="Nearest candidate cells per molecule in sparse assignment.",
+    )
+    parser.add_argument(
+        "--render-detail",
+        choices=["auto", "full", "overview"],
+        default="auto",
+        help=(
+            "Draw molecule structures in every cell ('full') or color-only "
+            "cells ('overview'). Auto uses overview above 2,000 molecules."
+        ),
+    )
+    parser.add_argument(
+        "--output-formats",
+        nargs="+",
+        choices=["svg", "png", "pdf"],
+        default=["svg", "png", "pdf"],
+        help="Map formats to write.",
+    )
     return parser
 
 
@@ -135,7 +169,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         duplicate_policy=duplicate_policy,
         random_state=args.random_state,
         k=args.k,
+        trustworthiness_sample_size=args.trustworthiness_sample_size,
         grid_padding=args.grid_padding,
+        assignment_method=args.assignment_method,
+        sparse_neighbors=args.sparse_neighbors,
+        render_detail=args.render_detail,
+        output_formats=args.output_formats,
     )
     result.output_files.update(curation_files)
 

@@ -11,6 +11,7 @@ import pandas as pd
 
 from .core import (
     assign_to_grid,
+    choose_assignment_method,
     compute_metrics,
     normalize_coordinates,
     prepare_molecules,
@@ -53,7 +54,13 @@ def build_grid_map(
     duplicate_policy: str = "error",
     random_state: int = 42,
     k: int = 10,
+    trustworthiness_sample_size: int = 3000,
     grid_padding: int = 20,
+    assignment_method: str = "auto",
+    dense_max_pairs: int = 20_000_000,
+    sparse_neighbors: int = 32,
+    render_detail: str = "auto",
+    output_formats: Optional[List[str]] = None,
     color_map: Optional[Dict[str, str]] = None,
 ) -> GridMapResult:
     """Build and optionally save a one-molecule-per-cell grid chemical map."""
@@ -101,7 +108,19 @@ def build_grid_map(
         representation_name = representation.lower()
         projection_name = projection.lower()
 
-    grid, grid_rows, grid_cols = assign_to_grid(projected, padding=grid_padding)
+    selected_assignment_method = choose_assignment_method(
+        len(projected),
+        padding=grid_padding,
+        method=assignment_method,
+        dense_max_pairs=dense_max_pairs,
+    )
+    grid, grid_rows, grid_cols = assign_to_grid(
+        projected,
+        padding=grid_padding,
+        method=selected_assignment_method,
+        dense_max_pairs=dense_max_pairs,
+        sparse_neighbors=sparse_neighbors,
+    )
     projected_01 = normalize_coordinates(projected)
     result_data = prepared.copy()
     result_data["projection_x"] = projected_01[:, 0]
@@ -128,10 +147,14 @@ def build_grid_map(
         values=values,
         labels=label_values,
         k=k,
+        trustworthiness_sample_size=trustworthiness_sample_size,
+        random_state=random_state,
     )
     metrics.insert(0, "projection_method", projection_name)
     metrics.insert(0, "representation_type", representation_name)
     metrics.insert(0, "map_name", name)
+    metrics["grid_assignment_method"] = selected_assignment_method
+    metrics["grid_candidate_cells"] = int(grid_rows * grid_cols)
 
     output_files = {}
     if output_dir is not None:
@@ -152,6 +175,8 @@ def build_grid_map(
                 result_data,
                 output_dir / name,
                 color_map=color_map,
+                detail=render_detail,
+                formats=output_formats,
             )
         )
 
@@ -165,4 +190,3 @@ def build_grid_map(
         feature_names=feature_names,
         output_files=output_files,
     )
-
