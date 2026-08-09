@@ -1,0 +1,47 @@
+[
+  {
+    "sparse_neighbors": 32,
+    "assignment_seconds": 0.41247529187239707,
+    "mean_displacement": 0.48263135625396,
+    "p95_displacement": 0.8713147692727781,
+    "projection_grid_knn_overlap_k10": 0.32957000415454923,
+    "grid_label_purity_k10": 0.6902679684254259,
+    "trustworthiness_k10_sample3000": 0.9269699670519909
+  },
+  {
+    "sparse_neighbors": 64,
+    "assignment_seconds": 0.7216471249703318,
+    "mean_displacement": 0.48090155026279297,
+    "p95_displacement": 0.8703441139921083,
+    "projection_grid_knn_overlap_k10": 0.33081636892397176,
+    "grid_label_purity_k10": 0.6899667636061487,
+    "trustworthiness_k10_sample3000": 0.9256677053666165
+  },
+  {
+    "sparse_neighbors": 128,
+    "assignment_seconds": 1.4882199161220342,
+    "mean_displacement": 0.4806197274849667,
+    "p95_displacement": 0.8703441139921083,
+    "projection_grid_knn_overlap_k10": 0.3318861653510594,
+    "grid_label_purity_k10": 0.6901017864561695,
+    "trustworthiness_k10_sample3000": 0.9261524096721953
+  },
+  {
+    "sparse_neighbors": 256,
+    "assignment_seconds": 3.5116991251707077,
+    "mean_displacement": 0.48028142054600487,
+    "p95_displacement": 0.8703441139921083,
+    "projection_grid_knn_overlap_k10": 0.3340361445783132,
+    "grid_label_purity_k10": 0.690008309098463,
+    "trustworthiness_k10_sample3000": 0.9263459652649801
+  },
+  {
+    "sparse_neighbors": 512,
+    "assignment_seconds": 8.600404625060037,
+    "mean_displacement": 0.4799182639036809,
+    "p95_displacement": 0.8703441139921083,
+    "projection_grid_knn_overlap_k10": 0.3396447860407146,
+    "grid_label_purity_k10": 0.6899771499792273,
+    "trustworthiness_k10_sample3000": 0.9269069749260066
+  }
+]

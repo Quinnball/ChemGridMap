@@ -8,6 +8,9 @@ import numpy as np
 import pandas as pd
 from rdkit import Chem
 from scipy.optimize import linear_sum_assignment
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import min_weight_full_bipartite_matching
+from scipy.spatial import cKDTree
 from scipy.spatial.distance import cdist
 from sklearn.manifold import trustworthiness
 from sklearn.neighbors import NearestNeighbors
@@ -134,36 +137,170 @@ def make_candidate_grid(n_points: int, padding: int = 20) -> Tuple[np.ndarray, i
     return grid.astype(np.float64), side, side
 
 
+def choose_assignment_method(
+    n_points: int,
+    padding: int = 20,
+    method: str = "auto",
+    dense_max_pairs: int = 20_000_000,
+) -> str:
+    """Choose dense exact matching or scalable sparse matching."""
+    normalized = str(method).strip().lower()
+    if normalized not in {"auto", "dense", "sparse"}:
+        raise ValueError("assignment method must be 'auto', 'dense' or 'sparse'.")
+    if normalized != "auto":
+        return normalized
+    grid, _, _ = make_candidate_grid(n_points, padding=padding)
+    n_pairs = int(n_points) * int(len(grid))
+    return "dense" if n_pairs <= int(dense_max_pairs) else "sparse"
+
+
+def _morton_codes(points: np.ndarray, bits: int = 16) -> np.ndarray:
+    """Return deterministic 2D Morton codes for normalized coordinates."""
+    maximum = (1 << bits) - 1
+    integer = np.rint(np.clip(points, 0.0, 1.0) * maximum).astype(np.uint32)
+
+    def spread(value: np.ndarray) -> np.ndarray:
+        result = value.astype(np.uint32)
+        result = (result | (result << 8)) & np.uint32(0x00FF00FF)
+        result = (result | (result << 4)) & np.uint32(0x0F0F0F0F)
+        result = (result | (result << 2)) & np.uint32(0x33333333)
+        result = (result | (result << 1)) & np.uint32(0x55555555)
+        return result
+
+    return spread(integer[:, 0]) | (spread(integer[:, 1]) << np.uint32(1))
+
+
+def _fallback_matching(points: np.ndarray, grid: np.ndarray) -> np.ndarray:
+    """Build a locality-aware unique matching used to complete a sparse graph."""
+    point_codes = _morton_codes(points)
+    grid_codes = _morton_codes(grid)
+    point_order = np.argsort(point_codes, kind="mergesort")
+    grid_order = np.argsort(grid_codes, kind="mergesort")
+    sorted_grid_codes = grid_codes[grid_order]
+    desired = np.searchsorted(
+        sorted_grid_codes,
+        point_codes[point_order],
+        side="left",
+    )
+
+    selected_positions = np.empty(len(points), dtype=int)
+    previous = -1
+    n_grid = len(grid)
+    n_points = len(points)
+    for rank, preferred in enumerate(desired):
+        upper = n_grid - (n_points - rank)
+        position = min(max(int(preferred), previous + 1), upper)
+        selected_positions[rank] = position
+        previous = position
+
+    selected = np.empty(n_points, dtype=int)
+    selected[point_order] = grid_order[selected_positions]
+    return selected
+
+
+def _assign_sparse(
+    points: np.ndarray,
+    grid: np.ndarray,
+    neighbors: int = 32,
+) -> np.ndarray:
+    """Solve a sparse minimum-weight matching with a guaranteed full fallback."""
+    n_points = len(points)
+    n_grid = len(grid)
+    candidate_count = min(max(1, int(neighbors)), n_grid)
+    distances, indices = cKDTree(grid).query(points, k=candidate_count)
+    if candidate_count == 1:
+        distances = distances[:, None]
+        indices = indices[:, None]
+
+    rows = np.repeat(np.arange(n_points, dtype=int), candidate_count)
+    columns = np.asarray(indices, dtype=int).reshape(-1)
+    costs = np.square(np.asarray(distances, dtype=np.float64).reshape(-1)) + 1e-12
+
+    fallback = _fallback_matching(points, grid)
+    needs_fallback = np.all(indices != fallback[:, None], axis=1)
+    if np.any(needs_fallback):
+        fallback_rows = np.flatnonzero(needs_fallback)
+        fallback_columns = fallback[fallback_rows]
+        fallback_costs = (
+            np.sum(
+                np.square(points[fallback_rows] - grid[fallback_columns]),
+                axis=1,
+            )
+            + 1e-12
+        )
+        rows = np.concatenate([rows, fallback_rows])
+        columns = np.concatenate([columns, fallback_columns])
+        costs = np.concatenate([costs, fallback_costs])
+
+    graph = coo_matrix(
+        (costs, (rows, columns)),
+        shape=(n_points, n_grid),
+        dtype=np.float64,
+    ).tocsr()
+    row_indices, column_indices = min_weight_full_bipartite_matching(graph)
+    selected = np.empty(n_points, dtype=int)
+    selected[row_indices] = column_indices
+    return selected
+
+
 def assign_to_grid(
     points_2d: np.ndarray,
     padding: int = 20,
+    method: str = "auto",
+    dense_max_pairs: int = 20_000_000,
+    sparse_neighbors: int = 32,
 ) -> Tuple[np.ndarray, int, int]:
-    """Assign each projected point to a unique lattice cell at minimum cost."""
+    """Assign each projected point to a unique dense- or sparse-matched cell."""
     points = normalize_coordinates(points_2d)
     grid, rows, cols = make_candidate_grid(len(points), padding=padding)
-    cost = cdist(grid, points, metric="sqeuclidean").astype(np.float64)
+    selected_method = choose_assignment_method(
+        len(points),
+        padding=padding,
+        method=method,
+        dense_max_pairs=dense_max_pairs,
+    )
 
-    if lapjv is not None:
-        scaled = cost * (100000.0 / max(float(cost.max()), 1e-12))
-        _, _, column_to_row = lapjv(scaled.astype(np.float32), extend_cost=True)
-        selected = np.asarray(column_to_row[: len(points)], dtype=int)
+    if selected_method == "sparse":
+        selected = _assign_sparse(points, grid, neighbors=sparse_neighbors)
     else:
-        row_indices, column_indices = linear_sum_assignment(cost)
-        selected = np.empty(len(points), dtype=int)
-        selected[column_indices] = row_indices
+        cost = cdist(grid, points, metric="sqeuclidean").astype(np.float64)
+        if lapjv is not None:
+            scaled = cost * (100000.0 / max(float(cost.max()), 1e-12))
+            _, _, column_to_row = lapjv(scaled.astype(np.float32), extend_cost=True)
+            selected = np.asarray(column_to_row[: len(points)], dtype=int)
+        else:
+            row_indices, column_indices = linear_sum_assignment(cost)
+            selected = np.empty(len(points), dtype=int)
+            selected[column_indices] = row_indices
 
     if len(np.unique(selected)) != len(points):
         raise RuntimeError("Grid assignment did not produce unique cells.")
     return grid[selected], rows, cols
 
 
-def _neighbor_indices(points: np.ndarray, k: int) -> np.ndarray:
+def _neighbor_indices(
+    points: np.ndarray,
+    k: int,
+    batch_size: int = 256,
+) -> np.ndarray:
     points = np.asarray(points, dtype=np.float64)
     if len(points) < 2:
         return np.empty((len(points), 0), dtype=int)
     neighbors = min(max(1, int(k)), len(points) - 1)
     model = NearestNeighbors(n_neighbors=neighbors + 1).fit(points)
-    return model.kneighbors(points, return_distance=False)[:, 1:]
+    output = np.empty((len(points), neighbors), dtype=int)
+    step = max(1, int(batch_size))
+    for start in range(0, len(points), step):
+        stop = min(len(points), start + step)
+        candidates = model.kneighbors(
+            points[start:stop],
+            return_distance=False,
+        )
+        for local_index, candidate_row in enumerate(candidates):
+            source_index = start + local_index
+            without_self = candidate_row[candidate_row != source_index]
+            output[source_index] = without_self[:neighbors]
+    return output
 
 
 def mean_knn_absolute_difference(
@@ -208,6 +345,8 @@ def compute_metrics(
     values: Optional[np.ndarray] = None,
     labels: Optional[np.ndarray] = None,
     k: int = 10,
+    trustworthiness_sample_size: int = 3000,
+    random_state: int = 42,
 ) -> pd.DataFrame:
     """Compute projection-to-grid fidelity and optional annotation metrics."""
     projection_01 = normalize_coordinates(projection)
@@ -217,11 +356,30 @@ def compute_metrics(
     effective_k = min(max(1, int(k)), max(1, n_samples - 1))
 
     if n_samples >= 3:
-        trust_k = min(effective_k, max(1, (n_samples - 1) // 2))
+        sample_size = min(
+            n_samples,
+            max(3, int(trustworthiness_sample_size)),
+        )
+        if sample_size < n_samples:
+            sample_indices = np.sort(
+                np.random.RandomState(random_state).choice(
+                    n_samples,
+                    size=sample_size,
+                    replace=False,
+                )
+            )
+        else:
+            sample_indices = np.arange(n_samples)
+        trust_k = min(effective_k, max(1, (sample_size - 1) // 2))
         trust = float(
-            trustworthiness(projection_01, grid, n_neighbors=trust_k)
+            trustworthiness(
+                projection_01[sample_indices],
+                grid[sample_indices],
+                n_neighbors=trust_k,
+            )
         )
     else:
+        sample_size = n_samples
         trust_k = 0
         trust = float("nan")
 
@@ -229,6 +387,7 @@ def compute_metrics(
         "n_samples": n_samples,
         "k": effective_k,
         "trustworthiness_k": trust_k,
+        "trustworthiness_sample_size": sample_size,
         "projection_to_grid_trustworthiness": trust,
         "projection_grid_knn_overlap": knn_overlap(projection_01, grid, k=effective_k),
         "mean_grid_displacement": float(np.mean(displacement)),

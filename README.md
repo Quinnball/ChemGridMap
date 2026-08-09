@@ -24,7 +24,7 @@ Create a clean environment and install the package from GitHub:
 ```bash
 conda create -n chemgridmap -c conda-forge python=3.11 rdkit
 conda activate chemgridmap
-pip install "chemgridmap[umap] @ git+https://github.com/Quinnball/ChemGridMap.git@v0.1.0"
+pip install "chemgridmap[umap] @ git+https://github.com/Quinnball/ChemGridMap.git@v0.2.0"
 ```
 
 For local development:
@@ -99,7 +99,14 @@ A ChEMBL run writes:
 - `*_curation_report.json`: detected columns, parameters, counts, and warnings;
 - `*_grid_coordinates.csv`: normalized projection and assigned grid cells;
 - `*_metrics.csv`: projection-to-grid fidelity and local annotation metrics;
-- `*.svg`, `*.png`, and `*.pdf`: molecule-resolved chemical maps.
+- `*.svg`, `*.png`, and `*.pdf`: chemical maps in full-detail or overview mode.
+
+Automatic rendering draws a structure in every occupied cell for up to 2,000
+molecules. Larger maps use a color-coded overview by default because whole-map
+molecular thumbnails are not readable at manuscript width and consume
+substantial memory. The exact molecule assigned to every cell remains in the
+coordinate table. Use `--render-detail full` to force complete structure
+rendering, or render a selected local subset at full detail.
 
 ## Bundled example
 
@@ -160,6 +167,40 @@ chemgridmap validation_data/chembl37_chembl205/chembl37_chembl205_ic50_raw.csv \
   --output-dir validation_data/chembl37_chembl205/chemgridmap_output_umap \
   --name chembl37_chembl205_ic50_umap
 ```
+
+### Large-scale validation
+
+The scalable assignment path was additionally tested on the ChEMBL 37 human
+KCNH2/hERG target (CHEMBL240). The official REST API returned 11,709 IC50
+records with non-null pChEMBL values. The default audit retained 10,509 records
+and aggregated them into 9,628 unique molecules. Automatic grid construction
+used sparse minimum-weight matching on a 118 x 118 candidate lattice.
+
+On the reported Apple M2 Max validation system, median curation and map
+construction time over five runs was 17.33 s excluding network download; peak
+resident memory after the first complete run was 1.07 GiB. Projection-to-grid
+trustworthiness was 0.927 on a deterministic
+3,000-molecule sample; full-data local class purity changed from 0.693 in the
+PCA projection to 0.690 on the grid. These results validate the tested scale;
+they are not a claim of unbounded performance on arbitrary data or hardware.
+
+Compact audit, metric, and benchmark summaries are in
+`validation_data/chembl37_chembl240_large_scale/`. The complete input,
+retained-record, molecule-level, coordinate, and map bundle is attached to the
+`v0.2.0` GitHub release. Download and extract it at the repository root before
+re-running the local benchmark without a network request:
+
+```bash
+curl -L -O https://github.com/Quinnball/ChemGridMap/releases/download/v0.2.0/chembl37_chembl240_large_scale.zip
+unzip chembl37_chembl240_large_scale.zip -d validation_data
+```
+
+```bash
+python paper/run_large_scale_validation.py --skip-download
+```
+
+The ChEMBL-derived validation files retain the ChEMBL data license. See
+`validation_data/README.md` for attribution and redistribution terms.
 
 ## Curated tables and existing coordinates
 
@@ -225,7 +266,12 @@ continuous value is supplied without a label column, the default activity
 classes are `<= 6`, `6-7`, and `>= 7`; both thresholds can be changed from the
 command line.
 
-Grid assignment removes overlap but is not lossless. Inspect
+Grid assignment removes overlap but is not lossless. For up to 20 million
+point-cell pairs, automatic mode uses the complete dense assignment problem.
+Larger problems use sparse minimum-weight matching with local candidate cells
+and a deterministic unique fallback matching. The sparse solution is optimal
+for that candidate graph, not necessarily for the complete dense cost matrix.
+Inspect
 projection-to-grid trustworthiness, exact k-nearest-neighbor overlap, and the
 continuous projection coordinates together with the final map.
 `--grid-padding` controls the number of unused candidate cells around the

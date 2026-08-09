@@ -14,7 +14,7 @@ def project_2d(
     random_state: int = 42,
 ) -> np.ndarray:
     """Project a representation matrix with PCA, t-SNE or UMAP."""
-    matrix = np.asarray(representation, dtype=np.float64)
+    matrix = np.asarray(representation, dtype=np.float32)
     if matrix.ndim != 2:
         raise ValueError("Representation must be a two-dimensional matrix.")
     if len(matrix) < 2:
@@ -22,7 +22,7 @@ def project_2d(
     if not np.isfinite(matrix).all():
         raise ValueError("Representation contains missing or non-finite values.")
 
-    scaled = StandardScaler().fit_transform(matrix)
+    scaled = StandardScaler().fit_transform(matrix).astype(np.float32, copy=False)
     if scaled.shape[1] == 1:
         scaled = np.column_stack([scaled, np.zeros(len(scaled))])
 
@@ -63,4 +63,3 @@ def project_2d(
     raise ValueError(
         "Unsupported projection {!r}. Choose pca, tsne or umap.".format(method)
     )
-

@@ -7,13 +7,14 @@ import os
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, Optional, Sequence
 
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.colors import to_rgb
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 from rdkit import Chem
@@ -95,6 +96,7 @@ def render_svg(
     color_map: Optional[Dict[str, str]] = None,
     tile_size: int = 100,
     molecule_margin: int = 8,
+    draw_molecules: bool = True,
 ) -> Path:
     """Render a cropped, molecule-resolved vector SVG map."""
     output_path = Path(output_path)
@@ -131,15 +133,16 @@ def render_svg(
                 x=x, y=y, size=tile_size, color=color
             )
         )
-        molecule = _svg_molecule_content(
-            str(row[smiles_col]), tile_size - 2 * molecule_margin
-        )
-        if molecule:
-            parts.append(
-                '<g transform="translate({},{})">{}</g>'.format(
-                    x + molecule_margin, y + molecule_margin, molecule
-                )
+        if draw_molecules:
+            molecule = _svg_molecule_content(
+                str(row[smiles_col]), tile_size - 2 * molecule_margin
             )
+            if molecule:
+                parts.append(
+                    '<g transform="translate({},{})">{}</g>'.format(
+                        x + molecule_margin, y + molecule_margin, molecule
+                    )
+                )
         parts.append("</g>")
     parts.append("</svg>")
     output_path.write_text("\n".join(parts), encoding="utf-8")
@@ -153,6 +156,7 @@ def render_raster_and_pdf(
     smiles_col: str = "canonical_smiles",
     label_col: str = "activity_class",
     color_map: Optional[Dict[str, str]] = None,
+    draw_molecules: bool = True,
 ) -> None:
     """Render high-resolution PNG and PDF versions with Matplotlib."""
     labels = data[label_col].astype(str).str.lower()
@@ -164,39 +168,59 @@ def render_raster_and_pdf(
     width_cells = max_col - min_col + 1
     height_cells = max_row - min_row + 1
 
-    figure = Figure(
-        figsize=(
+    if draw_molecules:
+        figure_size = (
             max(4.0, min(18.0, width_cells * 0.24)),
             max(4.0, min(18.0, height_cells * 0.24)),
-        ),
-        facecolor="white",
-    )
+        )
+    else:
+        longest = float(max(width_cells, height_cells))
+        figure_size = (
+            max(3.5, 9.0 * width_cells / longest),
+            max(3.5, 9.0 * height_cells / longest),
+        )
+    figure = Figure(figsize=figure_size, facecolor="white")
     FigureCanvasAgg(figure)
     axis = figure.add_axes([0, 0, 1, 1])
 
-    for _, row in data.iterrows():
-        x = int(row["grid_col"]) - min_col
-        y = int(row["grid_row"]) - min_row
-        label = str(row[label_col]).lower()
-        axis.add_patch(
-            Rectangle(
-                (x - 0.5, y - 0.5),
-                1,
-                1,
-                facecolor=colors[label],
-                edgecolor="white",
-                linewidth=0.4,
-                alpha=0.52,
+    if draw_molecules:
+        for _, row in data.iterrows():
+            x = int(row["grid_col"]) - min_col
+            y = int(row["grid_row"]) - min_row
+            label = str(row[label_col]).lower()
+            axis.add_patch(
+                Rectangle(
+                    (x - 0.5, y - 0.5),
+                    1,
+                    1,
+                    facecolor=colors[label],
+                    edgecolor="white",
+                    linewidth=0.4,
+                    alpha=0.52,
+                )
             )
+            molecule = _molecule_rgba(str(row[smiles_col]))
+            if molecule is not None:
+                axis.imshow(
+                    molecule,
+                    extent=(x - 0.43, x + 0.43, y - 0.43, y + 0.43),
+                    interpolation="bilinear",
+                    zorder=2,
+                )
+    else:
+        image = np.ones((height_cells, width_cells, 3), dtype=np.float32)
+        for _, row in data.iterrows():
+            x = int(row["grid_col"]) - min_col
+            y = int(row["grid_row"]) - min_row
+            label = str(row[label_col]).lower()
+            rgb = np.asarray(to_rgb(colors[label]), dtype=np.float32)
+            image[y, x] = 0.52 * rgb + 0.48
+        axis.imshow(
+            image,
+            extent=(-0.5, width_cells - 0.5, -0.5, height_cells - 0.5),
+            origin="lower",
+            interpolation="nearest",
         )
-        molecule = _molecule_rgba(str(row[smiles_col]))
-        if molecule is not None:
-            axis.imshow(
-                molecule,
-                extent=(x - 0.43, x + 0.43, y - 0.43, y + 0.43),
-                interpolation="bilinear",
-                zorder=2,
-            )
 
     axis.set_xlim(-0.55, width_cells - 0.45)
     axis.set_ylim(-0.55, height_cells - 0.45)
@@ -213,30 +237,54 @@ def render_grid_map(
     smiles_col: str = "canonical_smiles",
     label_col: str = "activity_class",
     color_map: Optional[Dict[str, str]] = None,
+    detail: str = "auto",
+    formats: Optional[Sequence[str]] = None,
 ) -> Dict[str, str]:
     """Export the same grid map as SVG, PNG and PDF."""
+    normalized_detail = str(detail).strip().lower()
+    if normalized_detail not in {"auto", "full", "overview"}:
+        raise ValueError("render detail must be 'auto', 'full' or 'overview'.")
+    if normalized_detail == "auto":
+        normalized_detail = "full" if len(data) <= 2000 else "overview"
+    draw_molecules = normalized_detail == "full"
+
+    requested = tuple(formats) if formats is not None else ("svg", "png", "pdf")
+    requested = tuple(str(value).strip().lower() for value in requested)
+    invalid = sorted(set(requested).difference({"svg", "png", "pdf"}))
+    if invalid:
+        raise ValueError("Unknown output format(s): {}.".format(", ".join(invalid)))
+
     output_prefix = Path(output_prefix)
     svg_path = output_prefix.with_suffix(".svg")
     png_path = output_prefix.with_suffix(".png")
     pdf_path = output_prefix.with_suffix(".pdf")
-    render_svg(
-        data,
-        svg_path,
-        smiles_col=smiles_col,
-        label_col=label_col,
-        color_map=color_map,
-    )
-    render_raster_and_pdf(
-        data,
-        png_path,
-        pdf_path,
-        smiles_col=smiles_col,
-        label_col=label_col,
-        color_map=color_map,
-    )
-    return {
-        "svg": str(svg_path),
-        "png": str(png_path),
-        "pdf": str(pdf_path),
-    }
-
+    output_files: Dict[str, str] = {}
+    if "svg" in requested:
+        render_svg(
+            data,
+            svg_path,
+            smiles_col=smiles_col,
+            label_col=label_col,
+            color_map=color_map,
+            draw_molecules=draw_molecules,
+        )
+        output_files["svg"] = str(svg_path)
+    if "png" in requested or "pdf" in requested:
+        render_raster_and_pdf(
+            data,
+            png_path,
+            pdf_path,
+            smiles_col=smiles_col,
+            label_col=label_col,
+            color_map=color_map,
+            draw_molecules=draw_molecules,
+        )
+        if "png" in requested:
+            output_files["png"] = str(png_path)
+        elif png_path.exists():
+            png_path.unlink()
+        if "pdf" in requested:
+            output_files["pdf"] = str(pdf_path)
+        elif pdf_path.exists():
+            pdf_path.unlink()
+    return output_files

@@ -6,6 +6,7 @@ import pandas as pd
 from chemgridmap.core import (
     assign_to_grid,
     canonicalize_smiles,
+    choose_assignment_method,
     prepare_molecules,
 )
 
@@ -36,7 +37,26 @@ class CoreTests(unittest.TestCase):
         assigned, _, _ = assign_to_grid(points, padding=2)
         self.assertEqual(len(np.unique(assigned, axis=0)), len(points))
 
+    def test_sparse_grid_cells_are_unique_for_coincident_points(self):
+        points = np.zeros((64, 2), dtype=float)
+        assigned, _, _ = assign_to_grid(
+            points,
+            padding=4,
+            method="sparse",
+            sparse_neighbors=4,
+        )
+        self.assertEqual(len(np.unique(assigned, axis=0)), len(points))
+
+    def test_auto_assignment_switches_by_pair_count(self):
+        self.assertEqual(
+            choose_assignment_method(20, padding=2, dense_max_pairs=10_000),
+            "dense",
+        )
+        self.assertEqual(
+            choose_assignment_method(200, padding=20, dense_max_pairs=10_000),
+            "sparse",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
-
