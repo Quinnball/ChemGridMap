@@ -1,0 +1,48 @@
+{
+  "input_rows": 11709,
+  "retained_activity_records": 10509,
+  "excluded_activity_records": 1200,
+  "unique_molecules": 9628,
+  "repeated_molecules": 571,
+  "repeated_consistent_molecules": 446,
+  "repeated_conflicted_molecules": 125,
+  "activity_class_counts": {
+    "inactive": 7769,
+    "medium": 1260,
+    "active": 599
+  },
+  "exclusion_counts": {
+    "chembl_potential_duplicate": 1198,
+    "invalid_or_missing_smiles": 2
+  },
+  "detected_columns": {
+    "smiles": "canonical_smiles",
+    "pchembl": "pchembl_value",
+    "molecule_id": "molecule_chembl_id",
+    "target_id": "target_chembl_id",
+    "target_name": "target_pref_name",
+    "standard_type": "standard_type",
+    "standard_relation": "standard_relation",
+    "standard_units": "standard_units",
+    "data_validity_comment": "data_validity_comment",
+    "potential_duplicate": "potential_duplicate",
+    "assay_id": "assay_chembl_id",
+    "document_id": "document_chembl_id",
+    "activity_id": "activity_id"
+  },
+  "parameters": {
+    "target_id": "CHEMBL240",
+    "activity_type": "IC50",
+    "lower_threshold": 6.0,
+    "upper_threshold": 7.0,
+    "conflict_range_threshold": 1.0,
+    "exclude_potential_duplicates": true,
+    "molecule_identity": "RDKit canonical isomeric SMILES",
+    "aggregation": "median pChEMBL",
+    "salt_stripping": false
+  },
+  "warnings": [],
+  "source_url": "https://www.ebi.ac.uk/chembl/api/data/activity.json?target_chembl_id=CHEMBL240&standard_type=IC50&pchembl_value__isnull=false",
+  "chembl_version": "ChEMBL_37",
+  "chembl_release_date": "2026-05-01"
+}

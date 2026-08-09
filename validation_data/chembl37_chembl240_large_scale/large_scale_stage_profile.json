@@ -1,0 +1,44 @@
+{
+  "n_molecules": 9628,
+  "stages": {
+    "read_and_prepare": {
+      "seconds": 3.2812897921539843,
+      "peak_rss_mib": 236.6953125
+    },
+    "morgan_fingerprint": {
+      "seconds": 2.9432219590526074,
+      "peak_rss_mib": 373.68359375
+    },
+    "pca_projection": {
+      "seconds": 0.3391586251091212,
+      "peak_rss_mib": 702.87890625
+    },
+    "sparse_grid_assignment": {
+      "seconds": 0.3904559169895947,
+      "peak_rss_mib": 721.40234375
+    },
+    "quality_metrics": {
+      "seconds": 4.709029791876674,
+      "peak_rss_mib": 822.5390625
+    },
+    "overview_render": {
+      "seconds": 1.1415204578079283,
+      "peak_rss_mib": 1097.734375
+    }
+  },
+  "metrics": {
+    "n_samples": 9628.0,
+    "k": 10.0,
+    "trustworthiness_k": 10.0,
+    "trustworthiness_sample_size": 3000.0,
+    "projection_to_grid_trustworthiness": 0.9269699670519909,
+    "projection_grid_knn_overlap": 0.32957000415454923,
+    "mean_grid_displacement": 0.48263135625396,
+    "p95_grid_displacement": 0.8713147692727781,
+    "representation_knn_value_abs_diff": 0.6145661611965102,
+    "projection_knn_value_abs_diff": 0.867662442874948,
+    "grid_knn_value_abs_diff": 0.8835969048608225,
+    "projection_label_purity": 0.693041130037391,
+    "grid_label_purity": 0.6902679684254259
+  }
+}
