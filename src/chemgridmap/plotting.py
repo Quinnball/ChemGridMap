@@ -23,11 +23,14 @@ from rdkit.Chem.Draw import rdMolDraw2D
 
 
 DEFAULT_COLORS = {
-    "inactive": "#A50F15",
-    "medium": "#F46D43",
-    "active": "#00441B",
+    "inactive": "#C44E52",
+    "medium": "#E6A23C",
+    "active": "#2A9D8F",
     "unlabelled": "#B8C2CC",
 }
+
+MOLECULE_TILE_OPACITY = 0.12
+OVERVIEW_TILE_OPACITY = 0.58
 
 EXTRA_COLORS = [
     "#2B6CB0",
@@ -63,7 +66,9 @@ def _svg_molecule_content(smiles: str, size: int) -> Optional[str]:
     drawer = rdMolDraw2D.MolDraw2DSVG(size, size)
     options = drawer.drawOptions()
     options.clearBackground = False
-    options.padding = 0.08
+    options.padding = 0.04
+    options.bondLineWidth = 4.0
+    options.minFontSize = 10
     drawer.DrawMolecule(mol)
     drawer.FinishDrawing()
     svg = drawer.GetDrawingText()
@@ -80,7 +85,15 @@ def _molecule_rgba(smiles: str, size: int = 220) -> Optional[np.ndarray]:
     mol = Chem.MolFromSmiles(str(smiles))
     if mol is None:
         return None
-    image = Draw.MolToImage(mol, size=(size, size)).convert("RGBA")
+    options = rdMolDraw2D.MolDrawOptions()
+    options.padding = 0.04
+    options.bondLineWidth = 4.0
+    options.minFontSize = 10
+    image = Draw.MolToImage(
+        mol,
+        size=(size, size),
+        options=options,
+    ).convert("RGBA")
     array = np.asarray(image).copy()
     rgb = array[:, :, :3]
     white = (rgb[:, :, 0] > 245) & (rgb[:, :, 1] > 245) & (rgb[:, :, 2] > 245)
@@ -95,7 +108,7 @@ def render_svg(
     label_col: str = "activity_class",
     color_map: Optional[Dict[str, str]] = None,
     tile_size: int = 100,
-    molecule_margin: int = 8,
+    molecule_margin: int = 5,
     draw_molecules: bool = True,
 ) -> Path:
     """Render a cropped, molecule-resolved vector SVG map."""
@@ -123,14 +136,24 @@ def render_svg(
         y = (max_row - min_row - grid_row) * tile_size
         label = str(row[label_col]).lower()
         color = colors[label]
-        title = row.get("name", row.get("Compound", row[smiles_col]))
-        parts.append("<g>")
+        identity = row.get("molecule_identity_key", row.get("name", row[smiles_col]))
+        fields = ["molecule_id", "activity_pchembl", "n_records", "pchembl_min",
+                  "pchembl_max", "is_conflicted", "has_class_boundary_crossing", "source_rows"]
+        title = str(identity) + " | " + "; ".join(
+            "{}={}".format(field, row[field]) for field in fields if field in row.index
+        )
+        parts.append('<g data-molecule-id="{}" data-grid-row="{}" data-grid-col="{}">'.format(
+            html.escape(str(identity), quote=True), int(row["grid_row"]), int(row["grid_col"])))
         parts.append("<title>{}</title>".format(html.escape(str(title))))
         parts.append(
             '<rect x="{x}" y="{y}" width="{size}" height="{size}" '
-            'fill="{color}" fill-opacity="0.52" stroke="#FFFFFF" '
-            'stroke-width="1"/>'.format(
-                x=x, y=y, size=tile_size, color=color
+            'fill="{color}" fill-opacity="{opacity}" stroke="#FFFFFF" '
+            'stroke-opacity="0.95" stroke-width="1" shape-rendering="crispEdges"/>'.format(
+                x=x,
+                y=y,
+                size=tile_size,
+                color=color,
+                opacity=(MOLECULE_TILE_OPACITY if draw_molecules else OVERVIEW_TILE_OPACITY),
             )
         )
         if draw_molecules:
@@ -143,6 +166,12 @@ def render_svg(
                         x + molecule_margin, y + molecule_margin, molecule
                     )
                 )
+        if pd.notna(row.get("is_conflicted")) and row.get("is_conflicted") == 1:
+            corner = tile_size * 0.12
+            parts.append(
+                f'<path data-conflict-marker="true" d="M{x+tile_size-corner},{y+1} '
+                f'L{x+tile_size-1},{y+1} L{x+tile_size-1},{y+corner} Z" fill="#172536"/>'
+            )
         parts.append("</g>")
     parts.append("</svg>")
     output_path.write_text("\n".join(parts), encoding="utf-8")
@@ -196,16 +225,17 @@ def render_raster_and_pdf(
                     facecolor=colors[label],
                     edgecolor="white",
                     linewidth=0.4,
-                    alpha=0.52,
+                    alpha=MOLECULE_TILE_OPACITY,
+                    zorder=1,
                 )
             )
             molecule = _molecule_rgba(str(row[smiles_col]))
             if molecule is not None:
                 axis.imshow(
                     molecule,
-                    extent=(x - 0.43, x + 0.43, y - 0.43, y + 0.43),
+                    extent=(x - 0.47, x + 0.47, y - 0.47, y + 0.47),
                     interpolation="bilinear",
-                    zorder=2,
+                    zorder=3,
                 )
     else:
         image = np.ones((height_cells, width_cells, 3), dtype=np.float32)
@@ -214,7 +244,7 @@ def render_raster_and_pdf(
             y = int(row["grid_row"]) - min_row
             label = str(row[label_col]).lower()
             rgb = np.asarray(to_rgb(colors[label]), dtype=np.float32)
-            image[y, x] = 0.52 * rgb + 0.48
+            image[y, x] = OVERVIEW_TILE_OPACITY * rgb + (1.0 - OVERVIEW_TILE_OPACITY)
         axis.imshow(
             image,
             extent=(-0.5, width_cells - 0.5, -0.5, height_cells - 0.5),

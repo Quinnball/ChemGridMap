@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -19,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Convert molecular representations or existing 2D coordinates into "
             "a one-molecule-per-cell grid chemical map."
         ),
+        epilog="To retrieve measurements behind an existing cell, run: chemgridmap inspect --help",
     )
     parser.add_argument("input", type=Path, help="Input CSV file.")
     parser.add_argument(
@@ -44,6 +47,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--projection", choices=["pca", "tsne", "umap"], default="pca"
+    )
+    parser.add_argument(
+        "--umap-metric",
+        choices=["auto", "euclidean", "jaccard", "cosine"],
+        default="auto",
+        help=(
+            "Distance used by UMAP. Auto selects Jaccard for Morgan "
+            "fingerprints and Euclidean distance otherwise."
+        ),
     )
     parser.add_argument("--x-col", help="Existing 2D x-coordinate column.")
     parser.add_argument("--y-col", help="Existing 2D y-coordinate column.")
@@ -73,11 +85,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Keep rows flagged by ChEMBL as potential duplicate citations.",
     )
     parser.add_argument(
+        "--molecule-identity",
+        choices=["auto", "parent-id", "canonical-smiles"],
+        default="auto",
+        help=(
+            "Group ChEMBL records by parent molecule ID when available, or "
+            "fall back to canonical SMILES."
+        ),
+    )
+    parser.add_argument(
         "--duplicate-policy",
         choices=["error", "first", "keep"],
         default="error",
         help="How repeated canonical structures are handled.",
     )
+    parser.add_argument("--structure-policy", choices=["auto", "parent", "as-recorded"],
+                        default="auto", help="Normalize parent structures, or explicitly retain record forms.")
+    parser.add_argument("--assay-types", nargs="+", help="Optional ChEMBL assay-type filter; not a reliability score.")
     parser.add_argument("--random-state", type=int, default=42)
     parser.add_argument("-k", type=int, default=10)
     parser.add_argument(
@@ -86,7 +110,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=3000,
         help="Maximum deterministic sample used for trustworthiness.",
     )
-    parser.add_argument("--grid-padding", type=int, default=20)
+    parser.add_argument(
+        "--grid-padding",
+        type=int,
+        help=(
+            "Explicit cells added to each grid side. When omitted, grid size "
+            "is determined by --grid-occupancy."
+        ),
+    )
+    parser.add_argument(
+        "--grid-occupancy",
+        type=float,
+        default=0.40,
+        help="Target fraction of occupied candidate cells (default: 0.40).",
+    )
+    parser.add_argument(
+        "--coordinate-scaling",
+        choices=["isotropic", "independent"],
+        default="isotropic",
+        help=(
+            "Scale both axes uniformly to preserve projection geometry, or "
+            "use legacy independent axis scaling."
+        ),
+    )
     parser.add_argument(
         "--assignment-method",
         choices=["auto", "dense", "sparse"],
@@ -96,9 +142,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--sparse-neighbors",
         type=int,
-        default=32,
-        help="Nearest candidate cells per molecule in sparse assignment.",
+        default=128,
+        help=(
+            "Initial nearest candidate cells per molecule in adaptive sparse assignment "
+            "(default: 128)."
+        ),
     )
+    parser.add_argument("--sparse-max-neighbors", type=int, default=1024,
+                        help="Candidate cap for adaptive sparse matching (default: 1024).")
+    parser.add_argument("--fixed-sparse-candidates", action="store_true",
+                        help="Disable candidate expansion, for explicit calibration only.")
     parser.add_argument(
         "--render-detail",
         choices=["auto", "full", "overview"],
@@ -119,8 +172,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "inspect":
+        from .inspection import main as inspect_main
+        return inspect_main(argv[1:])
     args = build_parser().parse_args(argv)
-    data = pd.read_csv(args.input)
+    data = pd.read_csv(args.input, sep=None, engine="python", encoding="utf-8-sig")
+    source = {"input_file": args.input.name,
+              "input_file_sha256": hashlib.sha256(args.input.read_bytes()).hexdigest()}
     curation_files = {}
     if args.input_format == "chembl":
         curation = curate_chembl_activity_data(
@@ -131,8 +190,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             upper_threshold=args.upper_threshold,
             conflict_range_threshold=args.conflict_range_threshold,
             exclude_potential_duplicates=not args.keep_potential_duplicates,
+            molecule_identity=args.molecule_identity,
+            structure_policy=args.structure_policy,
+            assay_types=args.assay_types,
         )
         curation.report["input_file"] = str(args.input.resolve())
+        curation.report["input_file_sha256"] = source["input_file_sha256"]
+        source["curation_parameters"] = curation.report["parameters"]
         curation_files = save_chembl_curation(
             curation,
             output_dir=args.output_dir,
@@ -159,6 +223,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         label_col=label_col,
         representation=args.representation,
         projection=args.projection,
+        umap_metric=args.umap_metric,
         x_col=args.x_col,
         y_col=args.y_col,
         embedding_prefix=args.embedding_prefix,
@@ -171,10 +236,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         k=args.k,
         trustworthiness_sample_size=args.trustworthiness_sample_size,
         grid_padding=args.grid_padding,
+        grid_occupancy=args.grid_occupancy,
+        coordinate_scaling=args.coordinate_scaling,
         assignment_method=args.assignment_method,
         sparse_neighbors=args.sparse_neighbors,
+        sparse_adaptive=not args.fixed_sparse_candidates,
+        sparse_max_neighbors=args.sparse_max_neighbors,
         render_detail=args.render_detail,
         output_formats=args.output_formats,
+        provenance=source,
     )
     result.output_files.update(curation_files)
 

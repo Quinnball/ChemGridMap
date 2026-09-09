@@ -1,0 +1,13 @@
+{
+  "dataset": "CHEMBL205 IC50 activity records",
+  "target": "Human carbonic anhydrase II",
+  "database_release": "ChEMBL 37",
+  "source": "https://www.ebi.ac.uk/chembl/api/data/activity.json?target_chembl_id=CHEMBL205&standard_type=IC50",
+  "raw_records": 2281,
+  "file": "chembl205_ic50.csv",
+  "sha256": "e358cdc68574bd8ca238fe4fc955254ab434ebc26d1ffdac41ba644b90d18241",
+  "attribution": "EMBL-EBI ChEMBL",
+  "license": "CC BY-SA 3.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/3.0/",
+  "note": "Flattened public API export, copied byte-for-byte from the manuscript validation input. Data licensing is separate from the BSD-3-Clause software license."
+}

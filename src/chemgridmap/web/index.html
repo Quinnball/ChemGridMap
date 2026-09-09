@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChemGridMap | Molecular workspace</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" id="home" aria-label="ChemGridMap home"><span class="brand-mark" aria-hidden="true"></span>ChemGridMap<span class="brand-tag">MOLECULAR WORKSPACE</span></a>
+    <div class="top-actions"><span class="local-badge">Local &amp; private</span><span id="version"></span><button id="quit" class="quiet">Quit</button></div>
+  </header>
+  <nav class="stepper" aria-label="Workflow">
+    <button id="step-import" aria-current="step"><span>1</span>Import data</button><i aria-hidden="true"></i>
+    <button id="step-configure" disabled><span>2</span>Configure map</button><i aria-hidden="true"></i>
+    <button id="step-explore" disabled><span>3</span>Explore &amp; export</button>
+  </nav>
+  <div id="status" role="status" aria-live="polite" hidden></div>
+  <main>
+    <section id="page-import" class="page landing" aria-labelledby="import-title">
+      <div class="welcome">
+        <div class="eyebrow">FROM RECORDS TO CHEMICAL SPACE</div>
+        <h1 id="import-title">Your molecules.<br>A clearer picture.</h1>
+        <p class="lede">Turn bioactivity records into a chemical map.<br>Explore every molecule and the evidence behind it.</p>
+        <label class="upload" id="drop-zone" for="csv">
+          <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 22V5m-6 6 6-6 6 6M6 21v6h20v-6"/></svg>
+          <strong>Drop your CSV here</strong><span>or <b>browse files</b></span>
+          <small>ChEMBL export or curated molecule table · up to 50 MB</small>
+          <input type="file" id="csv" accept=".csv,.tsv,text/csv" aria-label="Choose a CSV file">
+        </label>
+        <div class="or-line"><span>JUST EXPLORING?</span></div>
+        <button id="demo" class="example-button"><span class="example-icon" aria-hidden="true">Ca</span><span><strong>Try a real ChEMBL dataset</strong><small>CHEMBL205 · Carbonic anhydrase II · IC50</small></span><span class="arrow" aria-hidden="true">→</span></button>
+        <p class="privacy"><span aria-hidden="true">●</span> Runs on your computer. No data is uploaded to the cloud.</p>
+      </div>
+      <figure class="example-art">
+        <div class="art-header"><span class="eyebrow">A MOLECULE IN EVERY CELL</span><span class="sample-tag">EXAMPLE PREVIEW</span></div>
+        <img class="hero-map" src="/example-map.svg" alt="A real CHEMBL205 grid map, computed from Morgan fingerprints with UMAP">
+        <div class="art-detail"><img src="/example-molecule.svg" alt="Acetazolamide, CHEMBL20"><div><span class="eyebrow">TRACEABLE TO THE SOURCE</span><strong>CHEMBL20</strong><span>Structure → activity → assay records</span></div></div>
+        <figcaption><span><i class="dot active"></i><i class="dot medium"></i><i class="dot inactive"></i> Activity-annotated cells</span><span>ChEMBL 37 · UMAP</span></figcaption>
+      </figure>
+    </section>
+    <section id="page-configure" class="page configure" hidden aria-labelledby="configure-title">
+      <div class="page-heading"><div><div class="eyebrow">YOUR DATA, YOUR MAP</div><h1 id="configure-title">Ready to find the landscape?</h1><p class="muted">Review the input. Start with the defaults, or fine-tune your map.</p></div><button id="replace-input" class="secondary">Change dataset</button></div>
+      <div class="configuration-grid">
+        <aside class="source-card">
+          <span class="eyebrow">SOURCE DATA</span><h2 id="input-name">Your dataset</h2><div id="input-summary" hidden></div>
+          <div id="input-stats" class="source-stats"></div>
+          <div class="source-note"><span aria-hidden="true">✓</span><div><strong>Original records preserved</strong><p>Cleaning and exclusions are recorded. Aggregated molecules remain linked to their retained source records.</p></div></div>
+          <details id="preview" class="preview" hidden><summary>Preview input records</summary><div id="preview-table" class="table-scroll"></div></details>
+          <div class="source-note subtle"><span aria-hidden="true">↗</span><div><strong>What happens next</strong><p>Validate structures, summarize activity, project to 2D and assign one molecule per cell.</p></div></div>
+        </aside>
+        <form id="options" class="settings-card">
+          <div class="settings-section"><div class="section-heading"><span class="number">01</span><h2>Data &amp; activity</h2></div>
+            <label>Input type<select id="input-format"><option value="chembl">ChEMBL activity records</option><option value="molecule">Curated molecule table</option></select></label>
+            <div id="chembl-options" class="form-row"><label>Target ChEMBL ID<input id="target" placeholder="Auto-detect one target" list="target-list"><datalist id="target-list"></datalist></label><label>Activity endpoint<select id="activity-type"><option>IC50</option><option>Ki</option><option>Kd</option><option>EC50</option><option>AC50</option><option>Potency</option></select></label></div>
+            <div id="molecule-options" hidden><div class="form-row"><label>SMILES column<select id="smiles-col"></select></label><label>pChEMBL column (optional)<select id="value-col"></select></label></div><label>Class column (optional)<select id="label-col"></select></label><p class="micro">One row per molecule. Duplicate structures are rejected. Source-assay auditing requires ChEMBL input.</p></div>
+          </div>
+          <div class="settings-section"><div class="section-heading"><span class="number">02</span><h2>Layout</h2><span class="pill">Defaults ready to use</span></div>
+            <div class="form-row"><label>Representation<select id="representation"><option value="morgan">Morgan fingerprint</option><option value="descriptors">Molecular descriptors</option></select></label><label>2D projection<select id="projection"><option value="pca">PCA · fast starting point</option><option value="umap">UMAP · nonlinear neighborhoods</option><option value="tsne">t-SNE · nonlinear neighborhoods</option></select></label></div>
+            <div class="density-control"><div class="density-copy"><label for="occupancy">Grid occupancy <output id="occupancy-value">40%</output></label><input id="occupancy" type="range" min="10" max="100" value="40" step="5"><div class="range-ends"><span>More open space</span><span>More compact</span></div></div><div id="density-preview" class="density-preview" aria-hidden="true"></div></div>
+            <p class="micro">Occupancy controls empty space, not guaranteed neighborhood preservation.</p>
+          </div>
+          <details id="advanced" class="advanced"><summary>Advanced settings <span>Activity thresholds, molecular identity &amp; export</span></summary>
+            <div class="form-row"><label>Lower pChEMBL<input id="lower" type="number" value="6" step="0.1" required></label><label>Upper pChEMBL<input id="upper" type="number" value="7" step="0.1" required></label></div>
+            <div class="form-row"><label>Conflict range threshold<input id="conflict-range" type="number" value="1" min="0" step="0.1" required></label><label>Random seed<input id="seed" type="number" value="42" min="0" step="1" required></label></div>
+            <label>Molecular identity<select id="identity"><option value="auto">Automatic (parent IDs when available)</option><option value="parent-id">Require parent IDs</option><option value="canonical-smiles">Canonical SMILES</option></select></label>
+            <label>Structure policy<select id="structure-policy"><option value="auto">Automatic</option><option value="parent">ChEMBL parent normalization</option><option value="as-recorded">As recorded</option></select></label>
+            <label>Map detail<select id="detail"><option value="auto">Auto: structures up to 2,000 molecules</option><option value="full">All molecular structures</option><option value="overview">Color overview</option></select></label>
+            <label class="checkbox"><input type="checkbox" id="raster" checked> Include PNG and PDF alongside SVG</label>
+          </details>
+          <div class="build-row"><span>All results are saved locally.</span><button id="build" type="submit" class="primary" disabled>Generate map <span aria-hidden="true">→</span></button></div>
+        </form>
+      </div>
+    </section>
+    <section id="page-explore" class="page explore" hidden aria-labelledby="explore-title">
+      <div class="page-heading explore-heading"><div><span class="eyebrow">MOLECULAR LANDSCAPE</span><h1 id="explore-title">Explore the map</h1><p id="run-caption" class="muted"></p></div><div class="result-actions"><button id="adjust-settings" class="secondary">Adjust settings</button><button id="open-audit" class="secondary" disabled>Data audit <span id="audit-count" class="count-badge" hidden></span></button><button id="open-export" class="primary" disabled>Export <span aria-hidden="true">↗</span></button></div></div>
+      <section id="summary" class="stat-strip" hidden aria-label="Run summary"></section>
+      <div class="map-and-inspector" id="map-layout">
+        <section class="map-card">
+          <div class="map-toolbar"><div class="tabs" role="tablist" aria-label="Map view"><button id="grid-tab" class="active" role="tab" aria-selected="true">Grid map</button><button id="projection-tab" role="tab" aria-selected="false">2D projection</button></div><form id="find-molecule" class="find"><input id="molecule-id" placeholder="Find a ChEMBL ID" aria-label="Molecule ID"><button aria-label="Find molecule">Find</button></form><div class="zoom-tools"><button id="zoom-out" aria-label="Zoom out">−</button><button id="fit">Fit</button><button id="zoom-in" aria-label="Zoom in">+</button></div></div>
+          <div id="map-viewport" tabindex="0" aria-label="Chemical map. Click a molecule to inspect. Drag to pan, scroll to zoom, or use plus, minus and zero keys.">
+            <div id="empty-map"><div class="loading-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></div><h2>Building your chemical landscape</h2><p id="build-progress">Preparing input records...</p><small>Keep this window open. Results will appear here automatically.</small></div>
+            <div id="map-stage"></div>
+          </div>
+          <div class="map-bottom"><div id="legend" class="legend"></div><span class="map-hint">Click a cell to inspect · Scroll to zoom · Drag to pan</span></div>
+        </section>
+        <aside id="inspector" class="inspector" hidden aria-label="Selected molecule">
+          <div class="inspector-heading"><span class="eyebrow">MOLECULE INSPECTOR</span><button id="close-inspector" class="icon-button" aria-label="Close molecule inspector">×</button></div>
+          <p id="selection-hint" class="muted">Select a molecule on the map.</p>
+          <div id="selection" hidden><h2 id="selected-id"></h2><div id="cell-location" class="micro"></div><div id="molecule-svg"></div><div id="evidence-summary"></div><details><summary>Local grid neighborhood</summary><div id="neighborhood-svg"></div><p class="micro">Occupied cells in a 3 × 3 grid window, not necessarily high-dimensional nearest neighbors.</p></details><button id="view-records" class="secondary full">View source records</button><button id="download-evidence" class="quiet full">Download source records CSV</button></div>
+        </aside>
+      </div>
+    </section>
+  </main>
+  <dialog id="audit-dialog" class="wide-dialog"><div class="dialog-heading"><div><span class="eyebrow">QUALITY &amp; PROVENANCE</span><h2>Data audit</h2></div><button class="icon-button" data-close-dialog aria-label="Close data audit">×</button></div><details id="audit" class="audit" hidden open><summary>Curation &amp; interpretation</summary><div id="audit-body"></div></details><details id="metrics" class="preview" hidden><summary>Projection &amp; grid diagnostics</summary><p class="micro">Projection-to-grid fidelity is separate from chemical or biological validity. These values describe this run, not predictive performance.</p><div id="metrics-table" class="table-scroll"></div></details><p id="saved-location" class="micro"></p></dialog>
+  <dialog id="export-dialog"><div class="dialog-heading"><div><span class="eyebrow">TAKE YOUR RESULTS WITH YOU</span><h2>Export results</h2></div><button class="icon-button" data-close-dialog aria-label="Close export">×</button></div><p class="muted">Vector figures, data tables and a complete record of this run.</p><button id="download-all" class="primary full" hidden>Complete results <span>ZIP ↓</span></button><div id="figure-downloads" class="figure-downloads"></div><details><summary>Individual data &amp; audit files</summary><div id="downloads" class="downloads"></div></details><p class="micro">Figure exports use the full map, not the current zoom level.</p></dialog>
+  <dialog id="records-dialog" class="wide-dialog"><div class="dialog-heading"><div><span class="eyebrow">BACK TO THE EXPERIMENT</span><h2>Source activity records</h2></div><button class="icon-button" data-close-dialog aria-label="Close source records">×</button></div><section id="record-section" hidden><p id="record-count" class="muted"></p><div id="record-table" class="table-scroll"></div></section></dialog>
+  <footer><span>ChemGridMap <span class="footer-separator">/</span> From molecular space to molecular evidence.</span><span>Example data: EMBL-EBI ChEMBL 37 · CC BY-SA 3.0</span></footer>
+</body>
+</html>

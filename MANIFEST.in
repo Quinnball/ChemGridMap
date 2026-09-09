@@ -1,0 +1,13 @@
+include Makefile environment.yml requirements-paper.lock.txt CITATION.cff
+include Start*.command Start*.bat
+recursive-include src/chemgridmap/web *.html *.css *.js *.svg
+recursive-include src/chemgridmap/data *.csv *.json
+recursive-include examples *.py *.csv *.md
+prune examples/output
+recursive-include scripts *.py
+recursive-include paper *.py *.md
+prune paper/output
+recursive-include docs *.png
+include validation_data/README.md
+recursive-include tests *.py *.csv *.json
+global-exclude __pycache__ *.py[cod] .DS_Store

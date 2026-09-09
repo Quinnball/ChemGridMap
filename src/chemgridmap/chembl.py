@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from .core import canonicalize_smiles
+from .structures import parent_structure
 
 
 COLUMN_ALIASES = {
@@ -32,6 +33,12 @@ COLUMN_ALIASES = {
         "compound chembl id",
         "compound_chembl_id",
         "compound",
+    ],
+    "parent_molecule_id": [
+        "parent molecule chembl id",
+        "parent_molecule_chembl_id",
+        "parent compound chembl id",
+        "parent_compound_chembl_id",
     ],
     "target_id": [
         "target chembl id",
@@ -74,6 +81,8 @@ COLUMN_ALIASES = {
         "activity id",
         "activity_id",
     ],
+    "assay_type": ["assay type", "assay_type"],
+    "assay_description": ["assay description", "assay_description"],
 }
 
 
@@ -147,6 +156,9 @@ def curate_chembl_activity_data(
     upper_threshold: float = 7.0,
     conflict_range_threshold: float = 1.0,
     exclude_potential_duplicates: bool = True,
+    molecule_identity: str = "auto",
+    structure_policy: str = "auto",
+    assay_types: Optional[List[str]] = None,
 ) -> ChemblCurationResult:
     """Convert a ChEMBL activity export into an audited molecule-level table.
 
@@ -159,6 +171,19 @@ def curate_chembl_activity_data(
         raise ValueError("lower_threshold must be smaller than upper_threshold.")
     if conflict_range_threshold < 0:
         raise ValueError("conflict_range_threshold must be non-negative.")
+    requested_identity = str(molecule_identity).strip().lower()
+    if requested_identity not in {"auto", "parent-id", "canonical-smiles"}:
+        raise ValueError(
+            "molecule_identity must be 'auto', 'parent-id' or 'canonical-smiles'."
+        )
+
+    if structure_policy not in {"auto", "parent", "as-recorded"}:
+        raise ValueError("structure_policy must be auto, parent or as-recorded.")
+    effective_structure_policy = structure_policy
+    if structure_policy == "auto":
+        effective_structure_policy = (
+            "as-recorded" if requested_identity == "canonical-smiles" else "parent"
+        )
 
     columns = detect_chembl_columns(data)
     if columns["smiles"] is None:
@@ -221,6 +246,11 @@ def curate_chembl_activity_data(
             "Potential Duplicate column was absent; duplicate-citation flags "
             "could not be removed."
         )
+    if requested_identity == "parent-id" and columns["parent_molecule_id"] is None:
+        raise ValueError(
+            "Parent molecule identity was requested, but no "
+            "parent_molecule_chembl_id column was found."
+        )
 
     records = data.copy()
     records.insert(0, "source_row", np.arange(len(records), dtype=int))
@@ -244,8 +274,18 @@ def curate_chembl_activity_data(
         observed = records[columns["standard_type"]].astype(str).str.strip().str.upper()
         flag(observed.ne(str(activity_type).strip().upper()), "activity_type_mismatch")
 
+    if assay_types:
+        if columns["assay_type"] is None:
+            raise ValueError("Assay-type filtering requires an Assay Type column.")
+        allowed = {str(value).strip().upper() for value in assay_types}
+        observed = records[columns["assay_type"]].fillna("").astype(str).str.upper()
+        flag(~observed.isin(allowed), "assay_type_mismatch")
+
     if columns["standard_relation"] is not None:
-        observed = records[columns["standard_relation"]].astype(str).str.strip()
+        # The web CSV wraps operators in apostrophes to avoid spreadsheet formulas.
+        observed = records[columns["standard_relation"]].astype(str).str.strip().str.replace(
+            r"^'([=<>~]+)'$", r"\1", regex=True
+        )
         flag(observed.ne("="), "non_exact_standard_relation")
 
     if columns["standard_units"] is not None:
@@ -265,8 +305,10 @@ def curate_chembl_activity_data(
     canonical = records[columns["smiles"]].map(canonicalize_smiles)
     flag(canonical.isna(), "invalid_or_missing_smiles")
 
+    records["original_smiles"] = records[columns["smiles"]]
     records["activity_pchembl_raw"] = pchembl
     records["canonical_smiles"] = canonical
+    records["record_canonical_smiles"] = canonical
     records["exclusion_reason"] = [
         ";".join(sorted(set(reasons))) for reasons in exclusion_reasons
     ]
@@ -277,9 +319,71 @@ def curate_chembl_activity_data(
     if retained.empty:
         raise ValueError("No ChEMBL activity records remained after curation.")
 
-    grouped = retained.groupby("canonical_smiles", sort=True)
+    if effective_structure_policy == "parent":
+        structures = retained["canonical_smiles"].map(parent_structure)
+        retained["representation_smiles"] = structures.map(lambda item: item[0])
+        retained["parent_extraction_excluded"] = structures.map(lambda item: int(item[1]))
+    else:
+        retained["representation_smiles"] = retained["canonical_smiles"]
+        retained["parent_extraction_excluded"] = 0
+    retained["structure_changed"] = retained["representation_smiles"].ne(
+        retained["record_canonical_smiles"]
+    ).astype(int)
+
+    parent_column = columns["parent_molecule_id"]
+    use_parent_identity = requested_identity == "parent-id"
+    if requested_identity == "auto" and parent_column is not None:
+        parent_values = retained[parent_column].fillna("").astype(str).str.strip()
+        use_parent_identity = bool(parent_values.ne("").any())
+    if use_parent_identity:
+        parent_values = retained[parent_column].fillna("").astype(str).str.strip()
+        parent_values = parent_values.str.upper()
+        # A missing ID can be recovered only when the same representation has
+        # one unambiguous parent elsewhere in this export.
+        known = pd.DataFrame({"structure": retained["representation_smiles"],
+                              "parent": parent_values})
+        known = known[known["parent"].ne("")].groupby("structure")["parent"].unique()
+        unique_parents = {key: value[0] for key, value in known.items() if len(value) == 1}
+        recovered = retained["representation_smiles"].map(unique_parents).fillna("")
+        inferred = parent_values.eq("") & recovered.ne("")
+        parent_values = parent_values.mask(inferred, recovered)
+        has_parent = parent_values.ne("")
+        retained["molecule_identity_key"] = np.where(
+            has_parent,
+            parent_values,
+            "SMILES:" + retained["representation_smiles"].astype(str),
+        )
+        retained["molecule_identity_source"] = np.where(
+            has_parent,
+            "parent_molecule_chembl_id",
+            "canonical_smiles_fallback",
+        )
+        retained.loc[inferred, "molecule_identity_source"] = "unambiguous_structure_parent_lookup"
+        effective_identity = "parent_molecule_chembl_id_with_smiles_fallback"
+        identity_fallback_records = int((~has_parent).sum())
+    else:
+        retained["molecule_identity_key"] = (
+            "SMILES:" + retained["representation_smiles"].astype(str)
+        )
+        retained["molecule_identity_source"] = "canonical_smiles"
+        effective_identity = "canonical_representation_smiles"
+        identity_fallback_records = 0
+        if requested_identity == "auto" and parent_column is None:
+            warnings.append(
+                "Parent molecule ID column was absent; molecule identity fell "
+                "back to canonical representation SMILES under the selected structure policy."
+            )
+
+    grouped = retained.groupby("molecule_identity_key", sort=True)
     molecule_rows = []
-    for canonical_smiles, group in grouped:
+    for identity_key, group in grouped:
+        structures = sorted(group["representation_smiles"].astype(str).unique())
+        if len(structures) > 1 and effective_structure_policy == "parent":
+            raise ValueError(
+                "Identity {} maps to multiple normalized parent structures. "
+                "Review the records, or explicitly use canonical-smiles identity.".format(identity_key)
+            )
+        canonical_smiles = structures[0]
         values = group["activity_pchembl_raw"].to_numpy(dtype=float)
         median = float(np.median(values))
         minimum = float(np.min(values))
@@ -290,11 +394,25 @@ def curate_chembl_activity_data(
         crosses_clean_boundary = has_inactive and has_active
         is_large_variation = record_range > conflict_range_threshold
         is_conflicted = crosses_clean_boundary or is_large_variation
+        measurement_classes = {
+            _activity_class(float(value), lower_threshold, upper_threshold)
+            for value in values
+        }
         n_records = int(len(group))
 
         row = {
+            "molecule_identity_key": identity_key,
+            "molecule_identity_source": _joined_unique(
+                group["molecule_identity_source"]
+            ),
             "canonical_smiles": canonical_smiles,
             "smiles": canonical_smiles,
+            "representation_smiles": canonical_smiles,
+            "record_canonical_smiles": _joined_unique(group["record_canonical_smiles"]),
+            "structure_policy": effective_structure_policy,
+            "structure_changed": int(group["structure_changed"].any()),
+            "parent_extraction_excluded": int(group["parent_extraction_excluded"].any()),
+            "n_record_structures": int(group["record_canonical_smiles"].nunique()),
             "activity_pchembl": median,
             "activity_class": _activity_class(
                 median,
@@ -306,7 +424,7 @@ def curate_chembl_activity_data(
             "pchembl_max": maximum,
             "pchembl_median": median,
             "pchembl_std": (
-                float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
+                float(np.std(values, ddof=1)) if len(values) > 1 else np.nan
             ),
             "pchembl_range": record_range,
             "has_inactive_measurement": int(has_inactive),
@@ -314,31 +432,37 @@ def curate_chembl_activity_data(
             "crosses_clean_boundary": int(crosses_clean_boundary),
             "is_large_variation": int(is_large_variation),
             "is_conflicted": int(is_conflicted),
+            "has_class_boundary_crossing": int(len(measurement_classes) > 1),
+            "n_measurement_classes": len(measurement_classes),
             "repeat_status": (
                 "singleton"
                 if n_records == 1
                 else (
                     "repeated_conflicted"
                     if is_conflicted
-                    else "repeated_consistent"
+                    else "repeated_unflagged"
                 )
             ),
             "source_rows": _joined_unique(group["source_row"]),
         }
         for field in [
             "molecule_id",
+            "parent_molecule_id",
             "target_id",
             "target_name",
             "assay_id",
             "document_id",
             "activity_id",
+            "assay_type",
         ]:
             column = columns[field]
             if column is not None:
                 row[field] = _joined_unique(group[column])
+        row["n_assays"] = (int(group[columns["assay_id"]].nunique())
+                           if columns["assay_id"] else np.nan)
         molecule_rows.append(row)
 
-    molecules = pd.DataFrame(molecule_rows).sort_values("canonical_smiles")
+    molecules = pd.DataFrame(molecule_rows).sort_values("molecule_identity_key")
     molecules = molecules.reset_index(drop=True)
 
     exclusion_counts: Dict[str, int] = {}
@@ -354,11 +478,22 @@ def curate_chembl_activity_data(
         "excluded_activity_records": int(len(excluded)),
         "unique_molecules": int(len(molecules)),
         "repeated_molecules": int((molecules["n_records"] > 1).sum()),
-        "repeated_consistent_molecules": int(
-            repeat_counts.get("repeated_consistent", 0)
+        "repeated_unflagged_molecules": int(
+            repeat_counts.get("repeated_unflagged", 0)
         ),
         "repeated_conflicted_molecules": int(
             repeat_counts.get("repeated_conflicted", 0)
+        ),
+        "class_boundary_crossing_molecules": int(molecules["has_class_boundary_crossing"].sum()),
+        "unflagged_class_boundary_crossing_molecules": int((
+            molecules["has_class_boundary_crossing"].eq(1) & molecules["is_conflicted"].eq(0)
+        ).sum()),
+        "structure_changed_records": int(retained["structure_changed"].sum()),
+        "structure_changed_molecules": int(molecules["structure_changed"].sum()),
+        "parent_extraction_excluded_records": int(retained["parent_extraction_excluded"].sum()),
+        "retained_assay_type_counts": (
+            {str(key): int(value) for key, value in retained[columns["assay_type"]].fillna("missing").value_counts().items()}
+            if columns["assay_type"] else {}
         ),
         "activity_class_counts": {
             str(key): int(value) for key, value in class_counts.items()
@@ -374,9 +509,16 @@ def curate_chembl_activity_data(
             "upper_threshold": float(upper_threshold),
             "conflict_range_threshold": float(conflict_range_threshold),
             "exclude_potential_duplicates": bool(exclude_potential_duplicates),
-            "molecule_identity": "RDKit canonical isomeric SMILES",
+            "molecule_identity_requested": requested_identity,
+            "molecule_identity": effective_identity,
+            "identity_fallback_records": identity_fallback_records,
             "aggregation": "median pChEMBL",
-            "salt_stripping": False,
+            "structure_policy": effective_structure_policy,
+            "structure_standardizer": (
+                "ChEMBL Structure Pipeline Standardizer + GetParent"
+                if effective_structure_policy == "parent" else "none"
+            ),
+            "assay_types": assay_types,
         },
         "warnings": warnings,
     }

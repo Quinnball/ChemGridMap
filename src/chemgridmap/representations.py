@@ -8,6 +8,11 @@ import numpy as np
 import pandas as pd
 from rdkit import Chem, DataStructs
 from rdkit.Chem import AllChem, Descriptors
+
+try:
+    from rdkit.Chem import rdFingerprintGenerator
+except ImportError:  # pragma: no cover - compatibility with older RDKit releases
+    rdFingerprintGenerator = None
 from sklearn.preprocessing import StandardScaler
 
 
@@ -44,14 +49,23 @@ def morgan_fingerprints(
     n_bits: int = 2048,
 ) -> np.ndarray:
     """Calculate radius-2, 2048-bit Morgan fingerprints by default."""
+    generator = None
+    if rdFingerprintGenerator is not None:
+        generator = rdFingerprintGenerator.GetMorganGenerator(
+            radius=int(radius), fpSize=int(n_bits)
+        )
+
     rows = []
     for item in smiles:
         mol = Chem.MolFromSmiles(str(item))
         if mol is None:
             raise ValueError("Invalid canonical SMILES encountered: {!r}".format(item))
-        fingerprint = AllChem.GetMorganFingerprintAsBitVect(
-            mol, int(radius), nBits=int(n_bits)
-        )
+        if generator is not None:
+            fingerprint = generator.GetFingerprint(mol)
+        else:
+            fingerprint = AllChem.GetMorganFingerprintAsBitVect(
+                mol, int(radius), nBits=int(n_bits)
+            )
         array = np.zeros((int(n_bits),), dtype=np.float32)
         DataStructs.ConvertToNumpyArray(fingerprint, array)
         rows.append(array)
@@ -111,4 +125,3 @@ def compute_representation(
             )
         )
     return np.asarray(matrix, dtype=np.float32), feature_names
-

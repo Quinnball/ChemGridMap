@@ -12,6 +12,7 @@ def project_2d(
     representation: np.ndarray,
     method: str = "pca",
     random_state: int = 42,
+    umap_metric: str = "euclidean",
 ) -> np.ndarray:
     """Project a representation matrix with PCA, t-SNE or UMAP."""
     matrix = np.asarray(representation, dtype=np.float32)
@@ -52,13 +53,19 @@ def project_2d(
                 "UMAP support is optional. Install it with "
                 "`pip install -e '.[umap]'` or `pip install umap-learn`."
             ) from exc
+        metric = str(umap_metric).strip().lower()
+        if metric not in {"euclidean", "jaccard", "cosine"}:
+            raise ValueError(
+                "umap_metric must be 'euclidean', 'jaccard' or 'cosine'."
+            )
+        umap_input = matrix if metric == "jaccard" else scaled
         return umap.UMAP(
             n_components=2,
             n_neighbors=min(15, max(2, len(scaled) - 1)),
             min_dist=0.1,
-            metric="euclidean",
+            metric=metric,
             random_state=random_state,
-        ).fit_transform(scaled)
+        ).fit_transform(umap_input)
 
     raise ValueError(
         "Unsupported projection {!r}. Choose pca, tsne or umap.".format(method)
