@@ -5,6 +5,7 @@ if (token) sessionStorage.setItem('chemgridmap-token', token);
 history.replaceState(null, '', location.pathname);
 let busy = false, job = null, points = [], gridSVG = '', view = 'grid', currentCell = null, requestNumber = 0;
 let transform = {s: 1, x: 0, y: 0}, drawingSize = {w: 1, h: 1};
+let tileWidth = 100, hasStructures = false;
 let inputInfo = null, page = 'import', umapAvailable = false, demoAvailable = false;
 const colors = {active: '#2a9d8f', medium: '#e6a23c', inactive: '#c44e52', unlabelled: '#b8c2cc'};
 
@@ -241,10 +242,20 @@ function setView(name) {
   if (name === 'grid') $('map-stage').innerHTML = gridSVG;
   else $('map-stage').replaceChildren(projectionSVG());
   const svg = $('map-stage').querySelector('svg'), box = svg.viewBox.baseVal;
+  tileWidth = Number(svg.querySelector('g[data-grid-row] > rect')?.getAttribute('width') || 100);
+  hasStructures = !!svg.querySelector('g[data-grid-row] > g');
   drawingSize = {w:box.width,h:box.height}; svg.setAttribute('width',box.width); svg.setAttribute('height',box.height);
   fit(); highlight();
 }
-function applyTransform() { $('map-stage').style.transform = `translate(${transform.x}px,${transform.y}px) scale(${transform.s})`; }
+function applyTransform() {
+  $('map-stage').style.transform = `translate(${transform.x}px,${transform.y}px) scale(${transform.s})`;
+  // Suppress unreadable bonds only in the browser; exported SVGs remain untouched.
+  const overview = view === 'grid' && tileWidth * transform.s < 24;
+  $('map-viewport').classList.toggle('color-overview', overview);
+  $('view-hint').textContent = view === 'projection' ? '2D projection · Click a point to inspect' :
+    overview && hasStructures ? 'Color overview · Zoom in for structures · Click a cell to inspect' :
+    'Click a cell to inspect · Scroll to zoom · Drag to pan';
+}
 function fit() {
   if (!job || page !== 'explore') return;
   const width = $('map-viewport').clientWidth, height = $('map-viewport').clientHeight;

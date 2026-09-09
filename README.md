@@ -63,6 +63,8 @@ The English interface uses three separate steps rather than exposing every
 setting at once. The welcome-page preview is a real CHEMBL205 Morgan/UMAP grid,
 not the output of the current session; its molecule inset is CHEMBL20. Detailed
 source records and the local grid neighborhood open only when requested.
+At small on-screen scales, the grid shows activity-colored cells; zooming in
+reveals molecular structures. This display setting does not alter exported maps.
 
 Files stay on your computer. The server binds only to `127.0.0.1`, has no
 telemetry and does not upload molecular data. Runs are saved under
