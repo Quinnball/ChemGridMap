@@ -91,7 +91,7 @@ def test_invalid_options_rejected(options):
 
 
 def test_packaged_example_matches_archived_source():
-    metadata = json.loads(DEMO.with_name('chembl205_source.json').read_text())
+    metadata = json.loads(DEMO.with_name('chembl205_source.json').read_text(encoding='utf-8'))
     assert hashlib.sha256(DEMO.read_bytes()).hexdigest() == metadata['sha256']
     assert len(pd.read_csv(DEMO)) == 2281
 
@@ -148,9 +148,9 @@ def test_workspace_dom_matches_javascript_controls():
                 self.attributes[attrs['id']] = attrs
 
     html = Elements()
-    html.feed((ASSETS / 'index.html').read_text())
+    html.feed((ASSETS / 'index.html').read_text(encoding='utf-8'))
     assert len(html.ids) == len(set(html.ids)), 'Duplicate IDs break UI navigation.'
-    controls = set(re.findall(r"\$\('([^']+)'\)", (ASSETS / 'app.js').read_text()))
+    controls = set(re.findall(r"\$\('([^']+)'\)", (ASSETS / 'app.js').read_text(encoding='utf-8')))
     assert controls <= set(html.ids)
     for panel in ('page-configure', 'page-explore', 'inspector'):
         assert 'hidden' in html.attributes[panel]

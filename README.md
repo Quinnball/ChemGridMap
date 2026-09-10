@@ -30,26 +30,53 @@ adaptive sparse matching, with a local browser interface using the same core.
 Archived analyses record the version actually used;
 later interface fixes do not overwrite their original manifests.
 
-The 0.3.0 candidate is not yet published. Until its tag and release are available,
-use the supplied source archive and the local installation instructions below.
-After publication, create a clean environment and install the tagged package:
+Use Python 3.10 or 3.12 in a virtual environment; Python 3.12 is recommended.
+Download the source from [GitHub Releases](https://github.com/Quinnball/ChemGridMap/releases),
+extract it, and install from that directory:
 
 ```bash
-conda create -n chemgridmap -c conda-forge python=3.11 rdkit
-conda activate chemgridmap
-pip install "chemgridmap[umap] @ git+https://github.com/Quinnball/ChemGridMap.git@v0.3.0"
+python -m venv .venv
+# macOS / Linux
+source .venv/bin/activate
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install ".[umap]"
+chemgridmap --help
 ```
 
-### Local application
+Alternatively, install the tagged source directly, without cloning the repository:
 
-The desktop candidate includes Python, RDKit and UMAP; no separate Python
-installation is needed. Use an archive built for your operating system and
-processor. Extract the archive, then open `ChemGridMap.app` on macOS,
-`ChemGridMap.exe` on Windows, or `ChemGridMap` on Linux. The app opens in your
-default browser. This is a local application, not a hosted upload service.
-The current macOS candidate is ad-hoc signed, not Apple-notarized. It may require
-explicit approval in macOS Privacy & Security after you verify its source.
-Do not disable system-wide security protections.
+```bash
+python -m pip install "chemgridmap[umap] @ https://github.com/Quinnball/ChemGridMap/archive/refs/tags/v0.3.0.zip"
+```
+
+The release contains a Python package, not a separate desktop app or a hosted
+service. RDKit and the other dependencies are installed by pip. UMAP is optional;
+omit `[umap]` for a smaller installation using PCA. No GitHub account or API key
+is needed to use the downloaded tool. ChEMBL data are supplied as local CSV files.
+
+### Try the real dataset
+
+The installed package contains a ChEMBL 37 / CHEMBL205 IC50 example with 2,281
+raw records. Run the complete pipeline, including source-record retrieval:
+
+```bash
+python -m chemgridmap.app --smoke-test --smoke-projection umap --output-dir example_result
+```
+
+The default policy retains 1,100 records and maps 889 molecules. This check
+also verifies that CHEMBL20 links to 54 source records and median pChEMBL 7.185.
+It does not open a browser. To use your own data, follow
+[ChEMBL CSV to chemical map](#chembl-csv-to-chemical-map) below.
+
+### Optional browser interface
+
+If you prefer not to type plotting commands, start the English interface:
+
+```bash
+chemgridmap-app
+```
+
+This opens a local browser page using the same curation and plotting code.
 
 1. **Import data:** drop a CSV, browse files, or select **Try a real ChEMBL dataset**.
 2. **Configure map:** review the target and endpoint, select a projection, and
@@ -81,26 +108,19 @@ neighborhood**, not a guarantee of the exact high-dimensional kNN set.
 Source URL, SHA-256 and CC BY-SA 3.0 attribution accompany the packaged CSV in
 `src/chemgridmap/data/chembl205_source.json`.
 
-For a source installation, run `chemgridmap-app` after installing the package.
 The source archive also includes `Start ChemGridMap.command` (macOS) and
 `Start ChemGridMap.bat` (Windows). These scripts require Python 3.10+ and internet
-access on their first launch to create a local environment. They are not the
-self-contained desktop binaries. Subsequent launches use that environment.
+access on their first launch to create a local environment. Subsequent launches
+use that environment. They are conveniences, not standalone installers.
 
-To build a native candidate on its target OS:
+### Development and validation
 
-```bash
-python -m pip install ".[umap]" "pyinstaller==6.22.2"
-python scripts/build_desktop.py
-```
+CI checks Python 3.10 and 3.12 on Linux, macOS and Windows, then installs the
+built wheel and runs the bundled PCA and UMAP example outside the source checkout
+on all three operating systems. These are correctness and installation checks,
+not a claim of identical numerical projections across different platforms.
 
-The build writes a platform-specific application and archive under `dist/`.
-CI runs the bundled example through each frozen executable before a release
-can be published. Source and installed-wheel tests remain separate checks;
-neither implies identical numerical projections on different platforms.
-
-For local development, extract the supplied reproduction source
-archive and enter its directory:
+For local development, enter the extracted source directory:
 
 ```bash
 cd chemgridmap-0.3.0
@@ -135,7 +155,7 @@ chemgridmap chembl205_activities.csv \
 PCA works with the base installation. For UMAP:
 
 ```bash
-pip install "chemgridmap[umap] @ git+https://github.com/Quinnball/ChemGridMap.git@v0.3.0"
+python -m pip install "chemgridmap[umap] @ https://github.com/Quinnball/ChemGridMap/archive/refs/tags/v0.3.0.zip"
 chemgridmap chembl205_activities.csv \
   --input-format chembl \
   --target-id CHEMBL205 \
@@ -235,9 +255,9 @@ available only when the export includes them; the program does not invent
 identifiers missing from a web CSV. Neither inspection nor aggregation resolves
 experimental differences or certifies biological comparability.
 
-## Bundled example
+## Historical coordinate example
 
-The bundled example is a historical 770-molecule ChEMBL-derived demonstration,
+The `examples/` directory contains a historical 770-molecule ChEMBL-derived demonstration,
 not the dataset analyzed in the revised manuscript. It contains molecule-level pChEMBL values, activity
 classes, a 128-dimensional external embedding, and the corresponding
 precomputed UMAP coordinates.
