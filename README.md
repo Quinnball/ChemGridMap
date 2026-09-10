@@ -486,6 +486,34 @@ python paper/run_comparisons.py \
 The raw legacy activity table, molecule-level example, and provenance notes are
 provided in `examples/`.
 
+### Source-record task checks
+
+The [0.3.0 release](https://github.com/Quinnball/ChemGridMap/releases/tag/v0.3.0)
+includes archived inputs and saved layouts. `paper/run_record_tasks.py` compares
+all 3289 mapped entries with an explicit, metadata-preserving pandas baseline.
+Both routes recover the same evidence; this is not a human-efficiency test.
+
+An additional controlled comparison uses unmodified MolCompassView visualization
+callbacks with the same saved coordinates and molecular metadata. Nine selected
+cases cover 103 source records. The viewer displays structures and supplied row
+links; an external pandas bridge recovers the same records as `chemgridmap inspect`.
+This demonstrates the packaged evidence-retrieval boundary, not superiority to
+the complete MolCompass application. The
+[task archive](validation_data/viewer_task_comparison_2026-09-10.zip) contains the
+protocol, results, and evidence exports.
+
+To repeat the component comparison in a separate environment:
+
+```bash
+python -m pip install -r paper/requirements-viewer-comparison.txt
+# Extract https://github.com/sergsb/molcompview/archive/27c19943a256d4791984944293999b389eb42e17.zip
+python paper/run_viewer_tasks.py --source paper/output/revision_v6 \
+  --comparator /path/to/molcompview-27c19943a256d4791984944293999b389eb42e17
+```
+
+The adapter bypasses MolCompass's projection calculation and checks the viewer
+source hashes before running. Dash and MolCompass are not ChemGridMap dependencies.
+
 ## License
 
 ChemGridMap source code is released under the BSD 3-Clause License. The
