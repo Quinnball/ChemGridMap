@@ -203,6 +203,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             name=args.name,
         )
         data = curation.molecules
+        from .provenance import file_digests
+        source["curation_outputs"] = file_digests(curation_files)
         smiles_col = "canonical_smiles"
         value_col = "activity_pchembl"
         label_col = "activity_class"

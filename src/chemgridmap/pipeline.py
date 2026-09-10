@@ -22,7 +22,7 @@ from .core import (
 from .plotting import render_grid_map
 from .projection import project_2d
 from .representations import compute_representation
-from .provenance import environment_versions
+from .provenance import environment_versions, file_digests
 
 
 @dataclass
@@ -261,6 +261,7 @@ def build_grid_map(
                                 "render_export": time.perf_counter() - render_started,
                                 "total_map_workflow": time.perf_counter() - started},
             "outputs": {key: Path(value).name for key, value in output_files.items()},
+            "output_digests": file_digests(output_files),
         }
         path = output_dir / (name + "_run_manifest.json")
         path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

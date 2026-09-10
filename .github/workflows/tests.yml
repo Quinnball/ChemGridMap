@@ -109,6 +109,7 @@ jobs:
             const fs = require('fs');
             const version = fs.readFileSync('pyproject.toml', 'utf8').match(/^version = "([^"]+)"/m)[1];
             const tag = `v${version}`;
+            const prerelease = /(?:a|b|rc|dev)\d*/i.test(version);
             const {owner, repo} = context.repo;
             try {
               await github.rest.repos.getReleaseByTag({owner, repo, tag});
@@ -118,10 +119,11 @@ jobs:
               if (error.status !== 404) throw error;
             }
             const result = await github.rest.repos.createRelease({owner, repo, tag_name: tag,
-              target_commitish: context.sha, name: `ChemGridMap ${version}`, draft: false, prerelease: false,
+              target_commitish: context.sha, name: `ChemGridMap ${version}`, draft: false, prerelease,
               body: 'A Python tool for ChEMBL CSV curation, molecular grid maps and source-record inspection. Install the source package or wheel; use the command line or the optional English browser interface. No standalone desktop app or hosted account is required. Python 3.10+ is required; Python 3.12 is recommended.\n\nThis release passed the Python 3.10/3.12 test matrix on Linux, macOS, and Windows, the Linux paper-dependency/wheel job, and independently installed PCA/UMAP example checks on all three operating systems. These checks do not establish bitwise UMAP equivalence or compatibility with every OS version.\n\nThe validation archive contains public ChEMBL inputs, saved coordinates, task results, and vector figures. Extract it at the repository root. See paper/README.md for reproduction commands. The archive preserves earlier layout experiments and their recorded versions; no manuscript drafts are included.'});
             const paths = fs.readdirSync('dist').filter(name => fs.statSync(`dist/${name}`).isFile()).map(name => `dist/${name}`);
-            paths.push(`validation_data/chemgridmap-${version}-validation.zip`);
+            const validation = `validation_data/chemgridmap-${version}-validation.zip`;
+            if (fs.existsSync(validation)) paths.push(validation);
             for (const path of paths) {
               const data = fs.readFileSync(path);
               await github.rest.repos.uploadReleaseAsset({owner, repo, release_id: result.data.id,

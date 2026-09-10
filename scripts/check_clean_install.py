@@ -18,13 +18,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--python", required=True, type=Path)
     parser.add_argument("--output", type=Path, default=ROOT / "paper/output/revision_v5")
+    parser.add_argument("--source", type=Path, help="Archive or current evidence directory used as the reference")
     args = parser.parse_args()
     out = args.output.resolve()
-    raw = out / "web_export_map/chembl205_web_raw.csv"
+    source = (args.source or out).resolve()
+    raw = source / "web_export_map/chembl205_web_raw.csv"
+    if not raw.exists():
+        raw = ROOT / "paper/output/revision_v6/web_export_map/chembl205_web_raw.csv"
     env = dict(os.environ, MPLCONFIGDIR=str(ROOT / ".cache/matplotlib"), NUMBA_NUM_THREADS="1")
     env.pop("PYTHONPATH", None)
     logs = out / "clean_environment"
-    logs.mkdir(exist_ok=True)
+    logs.mkdir(parents=True, exist_ok=True)
     commands = []
     with tempfile.TemporaryDirectory(prefix="chemgridmap-installed-check-") as directory:
         def run(name, arguments):
@@ -55,7 +59,10 @@ def main():
             "--output-dir", str(logs / "record_audit")])
 
     fresh = pd.read_csv(logs / "web_map/web_grid_coordinates.csv").sort_values("molecule_identity_key")
-    original = pd.read_csv(out / "web_export_map/chembl205_web_grid_coordinates.csv").sort_values("molecule_identity_key")
+    reference_map = source / "web_export_map/chembl205_web_grid_coordinates.csv"
+    if not reference_map.exists():
+        reference_map = source / "web_csv_run/web_grid_coordinates.csv"
+    original = pd.read_csv(reference_map).sort_values("molecule_identity_key")
     assert fresh.molecule_identity_key.tolist() == original.molecule_identity_key.tolist()
     comparison = {"molecular_identities_match": True,
                   "raw_projection_exact_match": bool(np.array_equal(fresh[["projection_x_raw", "projection_y_raw"]], original[["projection_x_raw", "projection_y_raw"]])),
@@ -63,12 +70,17 @@ def main():
     assert all(comparison.values())
     web = pd.read_csv(raw, sep=";")
     retained = pd.read_csv(logs / "web_map/web_retained_records.csv")
-    archive = pd.read_csv(out / "chembl205/map_molecules.csv")
+    reference_molecules = source / "chembl205/map_molecules.csv"
+    if not reference_molecules.exists():
+        reference_molecules = source / "chembl205/chembl205_molecule_level.csv"
+    archive = pd.read_csv(reference_molecules)
     left = fresh.set_index("canonical_smiles").activity_pchembl.sort_index()
     right = archive.set_index("canonical_smiles").activity_pchembl.sort_index()
     assert left.index.equals(right.index) and np.allclose(left, right)
     report = json.loads((logs / "web_map/web_curation_report.json").read_text())
     audit = json.loads((logs / "record_audit/audit_summary.json").read_text())
+    if installation['version'] != '0.3.0':
+        assert audit['quality_annotations_verified'] and audit['run_binding_verified']
     result = {"passed": True, "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "installation": installation, "commands": commands, "repeat_comparison": comparison,
         "web_download": {"source": "ChEMBL Activities web interface CSV download",

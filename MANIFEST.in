@@ -5,7 +5,7 @@ recursive-include src/chemgridmap/data *.csv *.json
 recursive-include examples *.py *.csv *.md
 prune examples/output
 recursive-include scripts *.py
-recursive-include paper *.py *.md
+recursive-include paper *.py *.md *.html
 prune paper/output
 recursive-include docs *.png
 include validation_data/README.md

@@ -142,7 +142,9 @@ def run(source, output, comparator):
             baseline.to_csv(folder / "viewer_plus_pandas_records.csv", index=False)
             with contextlib.redirect_stdout(io.StringIO()):
                 inspect_cli([str(coordinate_path), "--records", str(record_path), "--cell",
-                             str(row.grid_row), str(row.grid_col), "--output-dir", str(folder / "chemgridmap")])
+                             str(row.grid_row), str(row.grid_col),
+                             "--curation-report", str(source / target / f"{target}_curation_report.json"),
+                             "--output-dir", str(folder / "chemgridmap")])
             tool = pd.read_csv(folder / "chemgridmap/source_records.csv")
             summary = json.loads((folder / "chemgridmap/audit_summary.json").read_text(encoding="utf-8"))
             pd.testing.assert_frame_equal(tool, baseline.reset_index(drop=True), check_dtype=False)
