@@ -18,7 +18,8 @@ def main():
         label_col="activity_class",
         x_col="projection_x",
         y_col="projection_y",
-        grid_padding=20,
+        grid_occupancy=0.40,
+        coordinate_scaling="isotropic",
     )
     print(result.metrics.to_string(index=False))
 

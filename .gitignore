@@ -2,9 +2,12 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.cache/
 .coverage
 .DS_Store
 .venv/
+.app-venv/
+app_runs/
 build/
 dist/
 gridmap_output/

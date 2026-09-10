@@ -1,0 +1,28 @@
+{
+  "downloaded_at_utc": "2026-09-08T11:19:54.103676+00:00",
+  "api_root": "https://www.ebi.ac.uk/chembl/api/data",
+  "chembl_status": {
+    "activities": 24527044,
+    "chembl_db_version": "ChEMBL_37",
+    "chembl_release_date": "2026-05-01",
+    "compound_records": 3824604,
+    "disinct_compounds": 2921148,
+    "publications": 101100,
+    "status": "UP",
+    "targets": 18552
+  },
+  "target_id": "CHEMBL204",
+  "target_pref_name": "Prothrombin",
+  "activity_type": "IC50",
+  "raw_activity_rows": 3920,
+  "reported_total_count": 3920,
+  "page_size": 1000,
+  "page_urls": [
+    "https://www.ebi.ac.uk/chembl/api/data/activity.json?target_chembl_id__exact=CHEMBL204&standard_type__exact=IC50&limit=1000&offset=0",
+    "https://www.ebi.ac.uk/chembl/api/data/activity.json?target_chembl_id__exact=CHEMBL204&standard_type__exact=IC50&limit=1000&offset=1000",
+    "https://www.ebi.ac.uk/chembl/api/data/activity.json?target_chembl_id__exact=CHEMBL204&standard_type__exact=IC50&limit=1000&offset=2000",
+    "https://www.ebi.ac.uk/chembl/api/data/activity.json?target_chembl_id__exact=CHEMBL204&standard_type__exact=IC50&limit=1000&offset=3000"
+  ],
+  "raw_csv": "validation_data/chembl37_chembl204/chembl37_chembl204_ic50_raw.csv",
+  "raw_csv_sha256": "cbd73608c2026607b144ffdd3617785bc174073b5e8a1a41464b3be5e41b2bf1"
+}

@@ -4,11 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chemgridmap"
-version = "0.2.0"
+version = "0.3.0"
 description = "Curate ChEMBL activity exports and build one-molecule-per-cell chemical maps."
 readme = "README.md"
-requires-python = ">=3.9"
-license = {file = "LICENSE"}
+requires-python = ">=3.10"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [
   {name = "Zhenming Qiu"}
 ]
@@ -24,9 +25,7 @@ keywords = [
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
-  "License :: OSI Approved :: BSD License",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -37,6 +36,7 @@ dependencies = [
   "numpy>=1.23",
   "pandas>=1.5",
   "rdkit>=2022.9.5",
+  "chembl_structure_pipeline>=1.2.0",
   "scikit-learn>=1.2",
   "scipy>=1.9"
 ]
@@ -48,11 +48,18 @@ Issues = "https://github.com/Quinnball/ChemGridMap/issues"
 
 [project.optional-dependencies]
 umap = ["umap-learn>=0.5.3"]
-fast = ["lap>=0.5"]
 dev = ["pytest>=7", "build>=1"]
+paper = ["python-docx>=1.1", "pymupdf>=1.24"]
 
 [project.scripts]
 chemgridmap = "chemgridmap.cli:main"
+chemgridmap-app = "chemgridmap.app:main"
+
+[tool.setuptools.package-data]
+chemgridmap = ["web/*.html", "web/*.css", "web/*.js", "web/*.svg", "data/*.csv", "data/*.json"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

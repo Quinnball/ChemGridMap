@@ -1,43 +1,79 @@
 # Manuscript analyses
 
-`run_comparisons.py` rebuilds the six configurations reported in the
-accompanying manuscript:
+## Current revision
 
-- Morgan fingerprint with PCA, t-SNE and UMAP
-- Morgan fingerprint, RDKit descriptors and an external embedding with UMAP
+The `0.3.0` application uses archived ChEMBL 37 IC50 records for CHEMBL205,
+CHEMBL204 and CHEMBL240. The local reproduction source archive includes all
+three raw CSV files. Analysis outputs are written to `paper/output/revision_v4`.
+The original rc2 layout manifests remain unchanged; v5 adds record-retrieval
+validation, fixed-molecule seed checks and full fingerprint-to-grid metrics.
+The v6 follow-up adds a full metadata-preserving pandas task baseline and
+an assay-condition audit. Earlier numerical layout results are not replaced.
 
-The input must be the prepared molecule-level table, with one canonical
-molecule per row. The expected columns are:
-
-- `smiles`
-- `activity_pchembl`
-- optional `activity_class`
-- `emb_000`, `emb_001`, ... for the external embedding comparison
-
-The prepared table is included in `examples`. Run:
+Download the validation archive from the v0.3.0 release and extract it at the
+repository root. It supplies the public source CSVs and saved layouts:
 
 ```bash
-python paper/run_comparisons.py \
-  examples/chembl205_embedding_umap.csv \
-  --output paper/output
+python paper/run_record_tasks.py --source paper/output/revision_v6
+python paper/build_revision_figures.py --source paper/output/revision_v6 --output paper/output/revision_v6/figures
 ```
 
-`run_large_scale_validation.py` retrieves the official ChEMBL REST API records
-for CHEMBL240, performs the full curation audit, builds the approximately
-10,000-molecule map, and records timing, memory, environment, and fidelity
-metadata. The archived input can be reused without network access:
+Both retrieval routes receive the same coordinate and retained-record tables.
+The pandas baseline explicitly joins by molecular identity and verifies the
+record links and median. It is not a deliberately information-poor control.
+All 3,289 mapped entries are queried by ID and cell; three altered-input
+controls test error handling. This evaluates correctness, not user speed.
+The acetazolamide follow-up uses archived assay descriptions and the metadata
+and abstract for DOI 10.1016/j.bmcl.2008.02.008. It does not claim a new
+experimental finding or independently transcribed full-text tables.
+
+Use a Python 3.12 environment and the supplied dependency snapshot:
 
 ```bash
-python paper/run_large_scale_validation.py \
-  --skip-download \
-  --timing-repeats 5 \
-  --hardware-label "Apple M2 Max, 12 cores, 32 GB"
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements-paper.lock.txt
+.venv/bin/python -m pip install -e '.[dev,umap,paper]'
+make test
+make paper
 ```
 
-`benchmark_sparse_neighbors.py` records sensitivity to the number of sparse
-candidate cells. `profile_large_scale_stages.py` profiles the main processing
-stages. The 966-record historical example, the compact ChEMBL 37 validation
-metadata, and the smaller CHEMBL205 bundle are included under `examples/` and
-`validation_data/`. The complete CHEMBL240 bundle is attached to the `v0.2.0`
-GitHub release; provenance and licensing notes are documented in the
-corresponding README files.
+`run_revision_validation.py` performs record auditing, parent normalization,
+multi-seed projection, assignment controls, occupancy sensitivity and the
+as-recorded ablation. `validate_adaptive_assignment.py` calibrates adaptive
+sparse matching against the same dense layouts. `build_revision_figures.py`
+uses the saved results and native RDKit structures, without generated data.
+`audit_revision_outputs.py` checks saved counts, medians, grid cells and SVG
+identifiers. A real public-CLI check, when present, is compared with the
+manuscript seed-42 layout as well.
+
+The optional full hERG scale check is separate:
+
+```bash
+.venv/bin/python paper/validate_adaptive_assignment.py --large
+.venv/bin/python paper/extend_large_candidate_check.py
+.venv/bin/python paper/build_revision_figures.py
+```
+
+The 1,024-candidate cap does not converge for the saved 9,581-molecule case;
+the separate 2,048-cap check is retained rather than silently replacing it.
+Timing excludes representation, UMAP, curation and rendering unless a field
+explicitly states otherwise. These are software runs, not biological replicates.
+
+After reproducing the baseline and generating its figures, run `make paper-application`
+to create `paper/output/revision_v5` without replacing the baseline. The new
+`run_application_validation.py` tracks molecular identities across saved seeds
+and verifies the same acetazolamide source records through ID and cell selection.
+The real website download is supplied separately in the review archive. After
+placing it at `paper/output/revision_v5/web_export_map/chembl205_web_raw.csv`, run
+the documented ChEMBL-to-map command with name `chembl205_web` in that directory.
+`scripts/check_clean_install.py --python PATH_TO_NEW_ENV_PYTHON` then validates
+an independently installed wheel, runs pytest, maps that CSV and retrieves its
+records. It records missing web-export identifiers rather than filling them in.
+
+## Historical analyses
+
+`run_comparisons.py`, `run_large_scale_validation.py`,
+`benchmark_sparse_neighbors.py` and `profile_large_scale_stages.py` are retained
+for previous versions. The 770-molecule external-vector demo and the earlier
+9,628-entry hERG results are not the current manuscript experiments. No MPNN
+model is trained or evaluated in this software note.

@@ -2,17 +2,9 @@ cff-version: 1.2.0
 message: "If you use ChemGridMap, please cite the accompanying paper and this software."
 title: "ChemGridMap"
 type: software
-version: 0.2.0
-date-released: 2026-08-09
+version: 0.3.0
 repository-code: "https://github.com/Quinnball/ChemGridMap"
 authors:
   - family-names: "Qiu"
     given-names: "Zhenming"
 license: BSD-3-Clause
-preferred-citation:
-  type: article
-  title: "ChemGridMap: Projection-Agnostic One-Molecule-per-Cell Chemical Space Maps"
-  authors:
-    - family-names: "Qiu"
-      given-names: "Zhenming"
-  year: 2026

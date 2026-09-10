@@ -69,9 +69,27 @@ class PipelineTests(unittest.TestCase):
         self.assertIn(
             "projection_to_grid_trustworthiness", result.metrics.columns
         )
+        self.assertIn("projection_distance_metric", result.metrics.columns)
+        self.assertEqual(
+            result.metrics.loc[0, "representation_distance_metric"],
+            "jaccard",
+        )
+        self.assertIn(
+            "projection_grid_tie_aware_recall", result.metrics.columns
+        )
+        self.assertIn(
+            "projection_grid_tie_aware_precision", result.metrics.columns
+        )
         self.assertIn("grid_knn_value_abs_diff", result.metrics.columns)
+        self.assertEqual(
+            result.metrics.loc[0, "coordinate_scaling"],
+            "isotropic",
+        )
+        self.assertEqual(
+            result.metrics.loc[0, "grid_sizing_strategy"],
+            "explicit_padding",
+        )
 
 
 if __name__ == "__main__":
     unittest.main()
-

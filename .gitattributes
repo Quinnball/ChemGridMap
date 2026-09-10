@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+
+# Archived inputs must retain their original bytes for provenance checks.
+*.csv -text
+validation_data/** -text
