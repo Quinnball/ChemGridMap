@@ -19,8 +19,6 @@ paper: paper-current
 paper-current: check
 	$(VENV_PYTHON) scripts/restore_paper_data.py --download
 	$(VENV_PYTHON) paper/validate_current.py
-	$(VENV_PYTHON) paper/verify_source_context.py
-	$(VENV_PYTHON) paper/prepare_tasks.py
 	$(VENV_PYTHON) -m pytest -q --junitxml=paper/output/current/pytest.xml
 
 paper-legacy: check

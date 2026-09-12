@@ -227,7 +227,7 @@ def figure2(data, windows, source, out):
         export(document(window_svg(data, win), 260, 260), out / "components" / f"window_{i+1}")
     result += text(30, 400, "Circles / corner marks: conflict flag", 14)
     result += text(402, 380, "Fill denotes the median-derived activity class.", 14)
-    result += text(402, 400, "Selected windows are illustrative, not discovered biological domains.", 13)
+    result += text(402, 400, "Rule-selected windows link the overview to individual structures.", 13)
     result += '<path d="M25,424 H975" stroke="#CCD4DC"/>'
     result += text(25, 454, "D  Cell-to-record audit: acetazolamide (CHEMBL20)", 19, True)
     row = data[data.molecule_identity_key.eq("CHEMBL20")].iloc[0]
@@ -255,7 +255,7 @@ def condition_plot(source):
         ax.plot(group.concentration_mM, group.pchembl_value, color=color, marker=marker,
                 ms=3.5, lw=0.8, label=label)
     ax.axhline(8.05, color=INK, ls="--", lw=0.7)
-    ax.text(0.011, 8.10, "Reference record: additive not specified", fontsize=7.5)
+    ax.text(0.011, 8.10, "Zero-additive reference (8.9 nM IC50)", fontsize=7.5)
     ax.set(xscale="log", xlabel="Additive concentration (mM; log scale)", ylabel="pChEMBL",
            xlim=(0.008, 13), ylim=(6.2, 8.35))
     ax.legend(frameon=False, ncol=4, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, 1.20))

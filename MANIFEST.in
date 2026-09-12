@@ -6,6 +6,7 @@ recursive-include examples *.py *.csv *.md
 prune examples/output
 recursive-include scripts *.py
 recursive-include paper *.py *.md *.html
+recursive-include paper/data *.csv *.json
 prune paper/output
 recursive-include docs *.png
 include validation_data/README.md

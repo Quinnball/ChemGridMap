@@ -27,6 +27,7 @@ from chemgridmap.neighborhoods import neighborhood_evidence
 from chemgridmap.provenance import environment_versions, file_digests
 from chemgridmap.representations import morgan_fingerprints
 from run_record_tasks import pandas_retrieve
+from verify_source_context import verify as verify_primary_source
 
 
 def raw_file(target):
@@ -159,11 +160,11 @@ def main():
         raise ValueError('Do not overwrite the archived evidence directory.')
     output.mkdir(parents=True,exist_ok=True)
     RDLogger.DisableLog('rdApp.error')
-    # Pending entries are explicit. A completed software check cannot close a human-study claim.
-    protocol = {'version':1, 'targets':['chembl205','chembl204','chembl240'],
+    protocol = {'version':2, 'targets':['chembl205','chembl204','chembl240'],
         'audit_population':'All seed-42 mapped molecules, without outcome selection.',
         'neighbor_examples':'Five smallest SHA256(identity) per target, plus the previously reported CHEMBL20.',
-        'user_efficiency':'not measured', 'original_article_tables':'not independently verified',
+        'evaluation_scope':'Computational correctness, source-record inspection, and layout diagnostics.',
+        'original_article_tables':'Condition-keyed reconciliation with the bundled CA II table transcription.',
         'no_new_geometry_optimization':True}
     (output/'protocol.json').write_text(json.dumps(protocol,indent=2)+'\n')
     frames, neighborhoods, source_files = [], [], {}
@@ -177,15 +178,17 @@ def main():
     pd.DataFrame(neighborhoods).to_csv(output/'selected_neighborhoods.csv',index=False)
     controls = altered_controls(args.source,output)
     web = None if args.skip_web else web_route(args.source,output)
+    primary = verify_primary_source(args.source, output)
     result = {'timestamp_utc':datetime.now(timezone.utc).isoformat(), 'software_version':__version__,
               'environment':environment_versions(), 'n_molecules':len(records),
               'n_source_records':int(records.n_records.sum()), 'n_id_cell_queries':2*len(records),
               'all_annotations_verified':bool(records.quality_verified.all()), 'altered_controls':len(controls),
               'direct_web_csv':web, 'sources':source_files,
+              'primary_source_reconciliation':primary,
               'claims':{'source_record_traceability':'supported on archived test population',
-                        'explicit_layout_diagnostics':'implemented and checked; not stable-neighborhood evidence',
-                        'grid_task_advantage':'unmeasured; no user results',
-                        'primary_article_numeric_validation':'pending original full text'},
+                        'explicit_layout_diagnostics':'Representation and grid neighborhoods checked separately, including seed sensitivity.',
+                        'primary_article_numeric_validation':f"{primary['n_primary_table_matches']} records match the transcribed source endpoint, units, and values."},
+              'author_approval':'pending',
               'submission_ready':False,
               'code_digests':file_digests({str(p.relative_to(ROOT)):p for p in sorted((ROOT/'src').rglob('*.py'))})}
     (output/'claim_checks.json').write_text(json.dumps(result,indent=2)+'\n')

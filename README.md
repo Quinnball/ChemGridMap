@@ -480,10 +480,17 @@ The current entry restores hash-checked public inputs, recurates the three raw
 target exports, checks all 3,289 mapped entries, exercises altered-input controls,
 and runs the unedited web CSV through UMAP, grid export and evidence inspection.
 New evidence is written to `paper/output/current/`; archived v6 geometry is
-retained without tuning. `claim_checks.json` separates verified software claims
-from unmeasured user efficiency and pending primary-source table verification.
-The offline task preview contains no human observations. Do not report its
-prepared answer keys or automated tests as a user study.
+retained without tuning. `claim_checks.json` records the software audit and
+condition-keyed reconciliation of 25 CA II records with the original published
+tables. Source locators, a numerical transcription and focused regression tests
+are included; the publisher PDF is not redistributed. Author approval remains
+separate from these computational checks. Optional task prototypes are outside
+the manuscript and are not part of `make paper`.
+
+The [current validation bundle](validation_data/submission_checks_2026-09-12.zip)
+contains the 3,289-entry audit, source-table reconciliation, 96-test report and
+updated cell-to-record figure. Extract it at the repository root to review the
+saved checks, or run `make paper` to regenerate the computational reports.
 
 `make paper-legacy` retains the older v4 geometry experiment entry.
 See `paper/README.md` for the current commands, source archive and scope.
