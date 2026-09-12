@@ -2,7 +2,7 @@ PYTHON ?= python3
 export MPLCONFIGDIR := $(CURDIR)/.cache/matplotlib
 VENV_PYTHON := .venv/bin/python
 
-.PHONY: setup check test paper paper-application paper-record-tasks
+.PHONY: setup check test paper paper-legacy paper-current paper-application paper-record-tasks
 setup:
 	$(PYTHON) -c "import sys; assert sys.version_info >= (3, 10), 'Use Python 3.10 or newer, not the legacy chemicalmap environment'"
 	$(PYTHON) -m venv .venv
@@ -14,7 +14,14 @@ check:
 test: check
 	$(VENV_PYTHON) -m pytest -q
 
-paper: check
+paper: paper-current
+
+paper-current: check
+	$(VENV_PYTHON) scripts/restore_paper_data.py --download
+	$(VENV_PYTHON) paper/validate_current.py
+	$(VENV_PYTHON) -m pytest -q --junitxml=paper/output/current/pytest.xml
+
+paper-legacy: check
 	$(VENV_PYTHON) paper/run_revision_validation.py
 	$(VENV_PYTHON) paper/validate_adaptive_assignment.py
 	$(VENV_PYTHON) paper/build_revision_figures.py

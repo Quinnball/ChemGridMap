@@ -230,7 +230,7 @@ function projectionSVG() {
     circle.setAttribute('cx',40 + point.projection_x * 820); circle.setAttribute('cy',860 - point.projection_y * 820);
     circle.setAttribute('r','4'); circle.setAttribute('fill',colors[point.activity_class] || '#b8c2cc');
     circle.dataset.gridRow = point.grid_row; circle.dataset.gridCol = point.grid_col;
-    const title = document.createElementNS(ns,'title'); title.textContent = `Grid cell (${point.grid_row}, ${point.grid_col}) · ${point.activity_class}`; circle.append(title); svg.append(circle);
+    const title = document.createElementNS(ns,'title'); title.textContent = `${point.molecule_id || point.molecule_identity_key || 'Molecule'} · ${point.activity_class}`; circle.append(title); svg.append(circle);
   }
   return svg;
 }
@@ -298,9 +298,13 @@ async function inspect(query) {
     for (const [label,value] of fields) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = format(value); stats.append(dt,dd); }
     $('evidence-summary').append(stats);
     const marker = document.createElement('p'); marker.className = summary.is_conflicted ? 'flag' : 'micro';
-    marker.textContent = summary.is_conflicted ? 'Conflict flagged. Review the underlying assays before interpretation.' : summary.median_verified ? 'No conflict rule triggered. This does not establish assay equivalence.' : summary.interpretation;
+    marker.textContent = !summary.quality_annotations_verified && summary.median_verified ? 'Quality flags not verified: original annotation rules are unavailable.' : summary.is_conflicted ? 'Conflict flagged. Review the underlying assays before interpretation.' : summary.median_verified ? 'No conflict rule triggered. This does not establish assay equivalence.' : summary.interpretation;
     $('evidence-summary').append(marker);
-    if (summary.median_verified) { const verified = document.createElement('p'); verified.className = 'verified'; verified.textContent = 'Record count and median verified against source rows.'; $('evidence-summary').append(verified); }
+    if (summary.median_verified) { const verified = document.createElement('p'); verified.className = 'verified'; verified.textContent = summary.quality_annotations_verified ? 'Identity, counts, median, activity class and quality flags checked against retained records and saved rules.' : 'Record count and median verified; quality annotations remain unverified.'; $('evidence-summary').append(verified); }
+    const neighbors = summary.neighborhood;
+    $('neighbor-summary').textContent = `${neighbors.representation} (${neighbors.representation_metric}), k=${neighbors.effective_k}: ${neighbors.shared_count} shared neighbors out of ${neighbors.representation_count} representation neighbors and ${neighbors.grid_count} grid neighbors. Recall ${(100 * neighbors.recall).toFixed(1)}%.`;
+    table(detail.neighbors, $('neighbor-table'));
+    $('download-audit').onclick = () => download('/api/file?name=' + encodeURIComponent(detail.audit_file), detail.audit_file);
     $('download-evidence').hidden = !detail.total_records;
     $('view-records').hidden = !detail.total_records;
     $('record-section').hidden = !detail.total_records;

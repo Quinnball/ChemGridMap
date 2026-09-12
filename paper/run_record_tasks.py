@@ -47,13 +47,14 @@ def compare_target(source, target):
     folder = source / target
     coordinates = pd.read_csv(folder / "coordinates_seed_42.csv")
     records = pd.read_csv(folder / f"{target}_retained_records.csv")
+    parameters = json.loads((folder / f"{target}_curation_report.json").read_text())["parameters"]
     results = []
     for row in coordinates.itertuples():
         cell = (row.grid_row, row.grid_col)
         baseline_id, median, conflict = pandas_retrieve(coordinates, records, identity=row.molecule_identity_key)
         baseline_cell, _, _ = pandas_retrieve(coordinates, records, cell=cell)
-        _, tool_id, summary = inspect_entry(coordinates, records, molecule_id=row.molecule_identity_key)
-        _, tool_cell, _ = inspect_entry(coordinates, records, cell=cell)
+        _, tool_id, summary = inspect_entry(coordinates, records, molecule_id=row.molecule_identity_key, parameters=parameters)
+        _, tool_cell, _ = inspect_entry(coordinates, records, cell=cell, parameters=parameters)
         expected = sorted(records.loc[records.molecule_identity_key.eq(row.molecule_identity_key), "source_row"])
         passed = all(frame.source_row.tolist() == expected for frame in (baseline_id, baseline_cell, tool_id, tool_cell))
         assert passed and np.isclose(summary["median_pchembl"], median, rtol=0, atol=1e-10)

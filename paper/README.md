@@ -1,6 +1,55 @@
 # Manuscript analyses
 
-## Current revision
+## Current candidate: one entry
+
+From a development checkout installed with `.[dev,umap,paper]`, run:
+
+```bash
+make paper
+```
+
+This is an alias for `make paper-current`. It restores the public v0.3.0
+validation ZIP after SHA-256 checks, refusing to replace differing local files;
+recurates all three raw exports; checks both ID and cell queries for all 3,289
+mapped molecules and ten altered-input cases; runs the untouched web CSV through
+the CLI with UMAP; reconciles 25 linked CA II records with the transcription of
+Innocenti et al.'s Tables 2-5; and runs pytest. New evidence lives only in
+`paper/output/current`. The source check matches additive and concentration
+before comparing endpoints, units and IC50 values. It records pChEMBL arithmetic
+differences without overwriting database annotations. The publisher PDF is not
+redistributed; source locators and its digest are in `paper/data/`.
+
+The saved v6 projections and negative geometry findings are not optimized or
+silently replaced. `claim_checks.json` records the current source reconciliation
+alongside the computational checks. Author approval remains a separate step.
+The manuscript evaluates record traceability and layout behavior; it makes no
+participant-level usability claim and requires no participant data to reproduce.
+
+## Optional task prototype (outside the manuscript)
+
+The earlier exploratory task code is retained but is not run by `make paper`.
+Generate its preview explicitly with `.venv/bin/python paper/prepare_tasks.py`.
+
+Open `paper/output/current/task_materials/task_preview.html` to preview the
+controlled tasks. Before collecting data, a human must review the answer key,
+consent/institutional requirements, participant count and stopping rule, and
+provide equal practice. The two modes have identical evidence access. The test
+is of display mode within this interface, not superiority to complete external
+applications. Responses are downloaded locally, not sent to a server.
+
+After real observations have been collected:
+
+```bash
+.venv/bin/python paper/analyze_tasks.py /path/to/responses_*.json \
+  --answer-key paper/output/current/task_materials/answer_key.json \
+  --output /path/to/private-study-analysis
+```
+
+The scorer refuses empty observations and reports participant-level descriptive
+results without inferential or general superiority claims. Keep participant
+responses out of the public repository unless separately reviewed and authorized.
+
+## Archived evidence and legacy commands
 
 The `0.3.0` application uses archived ChEMBL 37 IC50 records for CHEMBL205,
 CHEMBL204 and CHEMBL240. The local reproduction source archive includes all

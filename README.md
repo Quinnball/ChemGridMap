@@ -252,8 +252,18 @@ Alternatively, replace `--molecule-id CHEMBL20` with `--cell ROW COL`, using the
 zero-based `grid_row` and `grid_col` in the coordinate table (rows increase
 upwards). Empty cells are rejected rather than silently selecting a neighbor.
 The export contains a readable molecular SVG, the selected molecular summary,
-all contributing records, and a JSON audit that verifies record count and median.
-The JSON also records input digests and available assay/document counts.
+all contributing records, and a JSON audit. The 0.3.1 candidate also recalculates
+activity classes, spread statistics and quality flags using the saved annotation
+rules, and checks available structure and source-identifier links. Standard CLI
+exports bind coordinate and retained-record files through the run manifest's
+SHA-256 digests. These detect mismatched run files, not malicious rewriting of
+both the files and their manifest.
+
+For legacy maps, supply `--curation-report ORIGINAL_REPORT.json`. Missing rules
+or original file digests are reported as unverified, never replaced by assumed
+defaults. The browser inspector also distinguishes representation-space from
+grid neighbors, including distance ties, and exports both with checked source
+records in an evidence ZIP. A 3 x 3 display window is labeled separately.
 Native SVG maps mark conflicted entries with a dark corner triangle. An active
 color can therefore coexist with a conflict marker: the median is active, but
 the underlying measurements still require review.
@@ -320,8 +330,10 @@ operators while still rejecting inequality measurements. This web export lacks
 parent and activity IDs; it uses structure identity fallback and retains file
 row, assay and document references. The archive's richer provenance is not
 silently assumed. A fresh virtual environment with the independently installed
-wheel passed 38 tests and reproduced the web-CSV-to-UMAP and inspection routes.
-This validation covers one macOS arm64 host, not all supported platforms.
+wheel passed 38 tests at that historical checkpoint and reproduced the
+web-CSV-to-UMAP and inspection routes on macOS arm64. Later public-release CI
+and current-candidate checks are separate; see the versioned logs and the
+current reproduction entry below rather than treating 38 as the current count.
 
 The archived validation input is under `validation_data/chembl37_chembl205/`;
 baseline experiment outputs are under `paper/output/revision_v4/`, and the added
@@ -470,17 +482,26 @@ CHEMBL204, and CHEMBL240. The independent-target dense comparisons use fixed
 
 ```bash
 make paper
-# Optional full-size hERG timing check and candidate-cap sensitivity:
-.venv/bin/python paper/validate_adaptive_assignment.py --large
-.venv/bin/python paper/extend_large_candidate_check.py
-.venv/bin/python paper/build_revision_figures.py
 ```
 
-All revised tables, native-vector figures, and manifests are written to
-`paper/output/revision_v4/`. The tests use a synthetic semicolon-delimited
-web-format fixture and real API-export validation; a browser download session
-is not implied by that fixture. Preserve the raw CSV and its SHA-256 digest
-when reproducing an analysis from a newer ChEMBL release.
+The current entry restores hash-checked public inputs, recurates the three raw
+target exports, checks all 3,289 mapped entries, exercises altered-input controls,
+and runs the unedited web CSV through UMAP, grid export and evidence inspection.
+New evidence is written to `paper/output/current/`; archived v6 geometry is
+retained without tuning. `claim_checks.json` records the software audit and
+condition-keyed reconciliation of 25 CA II records with the original published
+tables. Source locators, a numerical transcription and focused regression tests
+are included; the publisher PDF is not redistributed. Author approval remains
+separate from these computational checks. Optional task prototypes are outside
+the manuscript and are not part of `make paper`.
+
+The [current validation bundle](validation_data/submission_checks_2026-09-12.zip)
+contains the 3,289-entry audit, source-table reconciliation, 96-test report and
+updated cell-to-record figure. Extract it at the repository root to review the
+saved checks, or run `make paper` to regenerate the computational reports.
+
+`make paper-legacy` retains the older v4 geometry experiment entry.
+See `paper/README.md` for the current commands, source archive and scope.
 
 The script in `paper/run_comparisons.py` rebuilds the projection and
 representation comparisons from the included molecule-level table:

@@ -1,0 +1,28 @@
+{
+  "doi": "10.1016/j.bmcl.2008.02.008",
+  "document_chembl_id": "CHEMBL1141531",
+  "source_filename": "1-s2.0-S0960894X08001765-main.pdf",
+  "source_pdf_sha256": "d86322b0ec6a9120dde0778d2e1d4f73c9ea6abd0da392a051c14f2971ab1a3f",
+  "verification_date": "2026-09-11",
+  "verification_method": "AI-assisted transcription checked against rendered original Tables 2-5, followed by condition-keyed comparison to archived ChEMBL records.",
+  "author_signoff": "pending",
+  "scope": "Only the acetazolamide CA II column in Tables 2-5; not the CA IX columns or all 54 acetazolamide records.",
+  "primary_endpoint": "IC50",
+  "primary_units": "nM",
+  "endpoint_locator": "p. 1901, paragraph following Table 5, explicitly reports IC50 rather than calculating Ki; p. 1902, note 13(b), defines 50% activity reduction.",
+  "assay": "Stopped-flow CO2 hydration, 25 degrees C; recombinant human CA II produced in E. coli.",
+  "method_locator": "Tables 2-5 captions and footnotes, pp. 1900-1901; note 13(b), p. 1902.",
+  "buffer": "10 mM HEPES, pH 7.4; 0.1 M Na2SO4 or NaClO4; 0.2 mM phenol red monitored at 557 nm.",
+  "enzyme_concentration_nM": 13,
+  "preincubation": "10 min at room temperature",
+  "replication": "Each tabulated value is a mean of three assays; reported errors are within +/-5%, without designation as SD, SE, or CI.",
+  "shared_reference": "The 0 mM, 8.9 nM CA II reference occurs in all four tables and is represented once, not treated as four independent measurements.",
+  "additive_names": {
+    "DTT": "dithiothreitol",
+    "MET": "2-mercaptoethanol (2-ME in the project figure)",
+    "TCP": "tris(carboxyethyl)phosphine (TCEP in the project figure)",
+    "THT": "threitol, a non-reducing control"
+  },
+  "mechanism_boundary": "Ternary-complex formation is a hypothesis in the paper, not demonstrated by this audit.",
+  "redistribution": "The user-supplied publisher PDF is not included in public code or data exports. The cited numerical transcription and source locators support review."
+}
