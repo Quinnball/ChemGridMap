@@ -31,6 +31,9 @@ FIELDS = ["molecule_identity_key", "canonical_smiles", "activity_pchembl",
           "activity_class", "n_records", "is_conflicted", "grid_col", "grid_row"]
 WINDOW_COL, WINDOW_ROW = 13, 12
 WIDTH, HEIGHT = 1440, 900
+DETAIL_LEFT, DETAIL_TOP = 806, 182
+DETAIL_STEP_X, DETAIL_STEP_Y = 196, 208
+DETAIL_TILE_WIDTH, DETAIL_TILE_HEIGHT = 186, 198
 
 
 def text(x, y, value, size=20, color=INK, bold=False, anchor="start"):
@@ -103,19 +106,26 @@ def compose(data):
               rect(box_x - 3, box_y - 3, 3 * step + 6, 3 * step + 6, "none", BLUE, 3),
               rect(box_x - 4, box_y - 30, 25, 25, BLUE),
               text(box_x + 8.5, box_y - 11, "B", 18, "white", True, "middle")]
-    parts += [f'<path d="M{box_x + step * 3 + 4},{box_y + step * 1.5} '
-              f'L752,{box_y + step * 1.5} L782,498" fill="none" stroke="{BLUE}" '
-              'stroke-width="2" stroke-dasharray="7 6"/>',
-              f'<path d="M774,492 L784,500 L778,485" fill="{BLUE}"/>']
+    # Share the detail-panel geometry with the line and arrowhead.
+    start_x, start_y = box_x + 3 * step + 3, box_y + 1.5 * step
+    end_x = DETAIL_LEFT
+    end_y = DETAIL_TOP + (2 * DETAIL_STEP_Y + DETAIL_TILE_HEIGHT) / 2
+    bend_x = (left + side + end_x) / 2
+    head_base_x = end_x - 12
+    parts += [f'<path id="detail-connector" d="M{start_x},{start_y} H{bend_x} '
+              f'V{end_y} H{head_base_x}" fill="none" stroke="{BLUE}" '
+              'stroke-width="2" stroke-linejoin="round"/>',
+              f'<path id="detail-arrowhead" d="M{head_base_x},{end_y - 6} '
+              f'L{end_x},{end_y} L{head_base_x},{end_y + 6} Z" fill="{BLUE}"/>']
 
     for row in detail.itertuples():
-        x = 806 + (row.grid_col - WINDOW_COL) * 196
-        y = 182 + (WINDOW_ROW + 2 - row.grid_row) * 208
+        x = DETAIL_LEFT + (row.grid_col - WINDOW_COL) * DETAIL_STEP_X
+        y = DETAIL_TOP + (WINDOW_ROW + 2 - row.grid_row) * DETAIL_STEP_Y
         label = row.activity_class
         parts += [f'<g data-detail-molecule-id="{html.escape(row.molecule_identity_key)}" '
                   f'data-grid-col="{row.grid_col}" data-grid-row="{row.grid_row}">',
-                  rect(x, y, 186, 198, PALE[label], "#DCE3E8"),
-                  rect(x, y, 186, 4, COLORS[label]),
+                  rect(x, y, DETAIL_TILE_WIDTH, DETAIL_TILE_HEIGHT, PALE[label], "#DCE3E8"),
+                  rect(x, y, DETAIL_TILE_WIDTH, 4, COLORS[label]),
                   molecule(row.canonical_smiles, x + 8, y + 7),
                   text(x + 93, y + 169, row.molecule_identity_key, 15, bold=True, anchor="middle"),
                   text(x + 93, y + 190, f"{label.capitalize()}  |  pChEMBL {row.activity_pchembl:.2f}",
