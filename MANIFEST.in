@@ -8,7 +8,7 @@ recursive-include scripts *.py
 recursive-include paper *.py *.md *.html
 recursive-include paper/data *.csv *.json
 prune paper/output
-recursive-include docs *.png
+recursive-include docs *.png *.svg *.csv *.json
 include validation_data/README.md
 recursive-include tests *.py *.csv *.json
 global-exclude __pycache__ *.py[cod] .DS_Store

@@ -1,0 +1,15 @@
+{
+  "source": "paper/output/revision_v6/chembl205/coordinates_seed_42.csv",
+  "source_sha256": "9616c0978bd9c174d39dfebf2ac664cea4089091124472d44a006b353a1e6f59",
+  "target": "CHEMBL205",
+  "chembl_release": 37,
+  "molecules": 889,
+  "projection": "Morgan fingerprints / UMAP, archived seed 42",
+  "detail_window": {
+    "min_col": 13,
+    "min_row": 12,
+    "size": 3
+  },
+  "selection": "Previously archived mixed window; illustrative, not a new result.",
+  "data_license": "ChEMBL attribution/share-alike terms; see validation_data/README.md"
+}
