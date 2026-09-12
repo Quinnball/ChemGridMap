@@ -21,7 +21,15 @@ Its contribution is the open, auditable ChEMBL-to-map workflow and explicit
 projection-to-grid validation. See Yoshimori, Tanoue, and Bajorath,
 https://doi.org/10.1021/acsomega.9b00595.
 
-![ChemGridMap example](docs/chemgridmap_demo.png)
+[![ChemGridMap: 889 CA II molecules with an enlarged, source-matched nine-cell structure view](docs/chemgridmap_demo.png)](docs/chemgridmap_demo.svg)
+
+The blue box and the enlarged panel show the same nine cells from the archived
+CHEMBL205 map. Pale activity fills keep the molecular structures visible;
+identifiers and median pChEMBL values remain attached to each molecule.
+[Open the vector figure](docs/chemgridmap_demo.svg) to zoom without losing detail.
+The [plotting table](docs/chemgridmap_demo_data.csv) and
+[drawing script](scripts/build_readme_figure.py) reproduce this preview without
+recomputing the projection or changing cell positions.
 
 ## Installation
 
