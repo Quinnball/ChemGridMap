@@ -62,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--embedding-prefix", default="emb_")
     parser.add_argument("--radius", type=int, default=2)
     parser.add_argument("--n-bits", type=int, default=2048)
+    parser.add_argument("--grouping", choices=["butina", "external", "none"], default="butina")
+    parser.add_argument("--group-similarity", type=float, default=.6,
+                        help="Morgan Tanimoto threshold to a Butina center; not an all-pairs bound.")
+    parser.add_argument("--cluster-col", help="Existing group column in molecule-table input.")
+    parser.add_argument("--cluster-source", help="Provenance of external group assignments.")
     parser.add_argument("--lower-threshold", type=float, default=6.0)
     parser.add_argument("--upper-threshold", type=float, default=7.0)
     parser.add_argument(
@@ -173,6 +178,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "compare":
+        from .comparison import main as compare_main
+        return compare_main(argv[1:])
     if argv and argv[0] == "inspect":
         from .inspection import main as inspect_main
         return inspect_main(argv[1:])
@@ -203,6 +211,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             name=args.name,
         )
         data = curation.molecules
+        from .provenance import file_digests
+        source["curation_outputs"] = file_digests(curation_files)
         smiles_col = "canonical_smiles"
         value_col = "activity_pchembl"
         label_col = "activity_class"
@@ -216,6 +226,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     result = build_grid_map(
         data,
+        grouping=args.grouping, group_similarity=args.group_similarity,
+        cluster_col=args.cluster_col, cluster_source=args.cluster_source,
         output_dir=args.output_dir,
         name=args.name,
         smiles_col=smiles_col,

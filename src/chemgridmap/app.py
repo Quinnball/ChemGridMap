@@ -21,9 +21,13 @@ import pandas as pd
 
 from . import __version__
 from .chembl import curate_chembl_activity_data, detect_chembl_columns, save_chembl_curation
-from .inspection import inspect_entry
+from .inspection import inspect_entry, load_audit_context
 from .pipeline import build_grid_map
 from .plotting import render_svg
+from .provenance import file_digests
+from .neighborhoods import neighborhood_evidence
+from .comparison import group_comparison
+from .plotting import _svg_molecule_content
 
 ASSETS = Path(__file__).with_name("web")
 DEMO = Path(__file__).with_name("data") / "chembl205_ic50.csv"
@@ -47,6 +51,7 @@ class AppSession:
         self.result = None
         self.curation = None
         self.files = {}
+        self.group_cache = {}
         self.job = {"state": "empty", "message": "Choose a CSV or open the example."}
 
     def load(self, content, filename):
@@ -69,6 +74,7 @@ class AppSession:
             self.frame, self.raw = frame, content
             self.filename = Path(filename.replace("\\", "/")).name
             self.result, self.curation, self.files = None, None, {}
+            self.group_cache = {}
             self.job = {"state": "ready", "message": "Input loaded. Review the options, then build the map."}
             return self.input_info()
 
@@ -90,6 +96,7 @@ class AppSession:
                 raise ValueError("A map is already running.")
             options = validate_options(options)
             self.result, self.curation, self.files = None, None, {}
+            self.group_cache = {}
             self.job = {"state": "running", "message": "Preparing input records...", "started": time.time()}
         if background:
             threading.Thread(target=self.run, args=(options,), daemon=True).start()
@@ -117,6 +124,7 @@ class AppSession:
                 curation.report.update(source)
                 source["curation_parameters"] = curation.report["parameters"]
                 curation_files = save_chembl_curation(curation, directory, "map")
+                source["curation_outputs"] = file_digests(curation_files)
                 data = curation.molecules
                 smiles_col, value_col, label_col = "canonical_smiles", "activity_pchembl", "activity_class"
             else:
@@ -129,6 +137,8 @@ class AppSession:
                 upper_threshold=options["upper_threshold"], random_state=options["random_state"],
                 grid_occupancy=options["grid_occupancy"], render_detail=options["render_detail"],
                 output_formats=options["output_formats"], provenance=source,
+                grouping=options["grouping"], group_similarity=options["group_similarity"],
+                cluster_col=options["cluster_col"], cluster_source=options["cluster_source"],
             )
             result.output_files.update(curation_files)
             files = {Path(path).name: Path(path) for path in result.output_files.values()}
@@ -152,6 +162,41 @@ class AppSession:
         with self.lock:
             self.job.update(values)
 
+    def compare_group(self, group_id):
+        with self.lock:
+            if self.result is None:
+                raise ValueError("Build a map first.")
+            if group_id in self.group_cache:
+                return self.group_cache[group_id]
+            summary = next((g for g in self.result.structure_groups if g['structure_group'] == group_id), None)
+            if summary is None:
+                raise ValueError("Unknown structure group.")
+            selected, svg, atom_audit = group_comparison(self.result.data, summary)
+            members = self.result.data[self.result.data.structure_group.eq(group_id)]
+            drawings = {}
+            for field in ('core_smiles', 'representative_smiles'):
+                drawings[field] = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">'
+                                   + (_svg_molecule_content(summary[field], 180) or '') + '</svg>') if summary[field] else ''
+            payload = {'summary': summary, 'svg': svg, 'drawings': drawings,
+                       'members': json_rows(members), 'selected_count': len(selected),
+                       'selection_rule': 'Representative first; then scaffold, canonical SMILES and identifier. At most 12 cards; all members are exported.',
+                       'atom_matches': atom_audit}
+            files = {'comparison.svg': svg.encode(), 'members.csv': members.to_csv(index=False).encode(),
+                     'selected_members.csv': selected.to_csv(index=False).encode(),
+                     'atom_matches.json': json.dumps(atom_audit, indent=2).encode(),
+                     'group_summary.json': json.dumps({'summary': summary, 'protocol': self.result.grouping_protocol}, indent=2).encode()}
+            digests = {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}
+            files['file_digests.json'] = json.dumps(digests, indent=2).encode()
+            name = 'comparison_' + hashlib.sha256(group_id.encode()).hexdigest()[:12] + '.zip'
+            path = Path(self.job['output_dir']) / name
+            with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as archive:
+                for filename, content in files.items():
+                    archive.writestr(filename, content)
+            self.files[name] = path
+            payload['archive'] = name
+            self.group_cache[group_id] = payload
+            return payload
+
     def snapshot(self):
         with self.lock:
             return dict(self.job)
@@ -162,9 +207,14 @@ class AppSession:
                 raise ValueError("Build a map first.")
             data, curation = self.result.data, self.curation
             if curation is not None:
+                _, run_bound, binding_warnings = load_audit_context(
+                    Path(self.result.output_files['coordinates']), Path(self.result.output_files['retained_records']))
                 chosen, records, summary = inspect_entry(
                     data, curation.retained_records, molecule_id=molecule_id,
-                    cell=(row, col) if molecule_id is None else None)
+                    cell=(row, col) if molecule_id is None else None,
+                    parameters=curation.report["parameters"])
+                summary['run_binding_verified'] = run_bound
+                summary['warnings'].extend(binding_warnings)
             else:
                 if molecule_id is not None:
                     raise ValueError("For molecule-table input, select a cell on the map.")
@@ -173,7 +223,8 @@ class AppSession:
                     raise ValueError("Select one occupied cell.")
                 records = pd.DataFrame()
                 summary = {"interpretation": "Molecule-table input: no assay-record audit is available.",
-                           "record_count_verified": False, "median_verified": False}
+                           "record_count_verified": False, "median_verified": False,
+                           "quality_annotations_verified": False, "run_binding_verified": False}
             selected = chosen.iloc[0]
             row, col = int(selected.grid_row), int(selected.grid_col)
             neighbors = data[data.grid_row.sub(row).abs().le(1) & data.grid_col.sub(col).abs().le(1)]
@@ -181,8 +232,29 @@ class AppSession:
             # Fixed per-cell files make reinspection reproducible and avoid re-running the projection.
             image = render_svg(chosen, directory / f"cell_{row}_{col}.svg", tile_size=320, molecule_margin=12)
             neighborhood = render_svg(neighbors, directory / f"neighborhood_{row}_{col}.svg", tile_size=200)
+            position = data.index.get_loc(chosen.index[0])
+            neighbor_table, neighbor_summary = neighborhood_evidence(
+                data, self.result.representation, position,
+                k=int(self.result.metrics.iloc[0].get('k', 10)),
+                metric=str(self.result.metrics.iloc[0].representation_distance_metric))
+            neighbor_summary['representation'] = str(self.result.metrics.iloc[0].representation_type)
+            summary['neighborhood'] = neighbor_summary
+            files = {
+                'selected_molecule.svg': image.read_bytes(),
+                'source_records.csv': records.to_csv(index=False).encode('utf-8'),
+                'selected_molecule.csv': chosen.to_csv(index=False).encode('utf-8'),
+                'neighbors.csv': neighbor_table.to_csv(index=False).encode('utf-8'),
+            }
+            summary['evidence_digests'] = {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}
+            files['audit_summary.json'] = json.dumps(summary, indent=2, allow_nan=False).encode('utf-8')
+            archive = directory / f'audit_{row}_{col}.zip'
+            with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
+                for name, content in files.items():
+                    bundle.writestr(name, content)
+            self.files[archive.name] = archive
             return {"molecule": json_rows(chosen)[0], "summary": summary,
                     "records": json_rows(records.head(100)), "total_records": len(records),
+                    "neighbors": json_rows(neighbor_table), "audit_file": archive.name,
                     "svg": image.read_text(encoding="utf-8"),
                     "neighborhood_svg": neighborhood.read_text(encoding="utf-8")}, records
 
@@ -193,6 +265,7 @@ def validate_options(options):
                 "representation": "morgan", "projection": "pca", "lower_threshold": 6.0,
                 "upper_threshold": 7.0, "conflict_range_threshold": 1.0, "random_state": 42,
                 "grid_occupancy": .4, "render_detail": "auto", "structure_policy": "auto",
+                "grouping": "butina", "group_similarity": .6, "cluster_col": None, "cluster_source": None,
                 "molecule_identity": "auto", "output_formats": ["svg", "png", "pdf"]}
     if not isinstance(options, dict) or set(options) - set(defaults):
         raise ValueError("Unknown map option.")
@@ -201,6 +274,7 @@ def validate_options(options):
                "projection": {"pca", "tsne", "umap"}, "render_detail": {"auto", "full", "overview"},
                "structure_policy": {"auto", "parent", "as-recorded"},
                "molecule_identity": {"auto", "parent-id", "canonical-smiles"}}
+    choices['grouping'] = {'butina', 'external', 'none'}
     for key, allowed in choices.items():
         if values[key] not in allowed:
             raise ValueError(f"Invalid {key}.")
@@ -213,6 +287,11 @@ def validate_options(options):
     if not 0 <= values["conflict_range_threshold"] < 100:
         raise ValueError("Conflict range must be finite and non-negative.")
     values["random_state"] = int(values["random_state"])
+    values['group_similarity'] = float(values['group_similarity'])
+    if not 0 < values['group_similarity'] <= 1:
+        raise ValueError("Group similarity must be in (0, 1].")
+    if values['grouping'] == 'external' and (values['input_format'] != 'molecule' or not values['cluster_col'] or not values['cluster_source']):
+        raise ValueError("External groups require molecule-table input, a group column, and its source.")
     if not 0 <= values["random_state"] < 2**32:
         raise ValueError("The seed must be between 0 and 4294967295.")
     if not isinstance(values["output_formats"], list) or not set(values["output_formats"]).issubset({"svg", "png", "pdf"}):
@@ -283,8 +362,15 @@ class LocalHandler(BaseHTTPRequestHandler):
             elif path == "/api/points":
                 if session.result is None:
                     raise ValueError("Build a map first.")
-                columns = ["projection_x", "projection_y", "grid_x", "grid_y", "grid_row", "grid_col", "activity_class"]
+                columns = [name for name in ("projection_x", "projection_y", "grid_x", "grid_y", "grid_row", "grid_col",
+                           "activity_class", "molecule_id", "molecule_identity_key", "structure_group", "structure_group_color", "comparison_id") if name in session.result.data]
                 self.send(json_rows(session.result.data[columns]))
+            elif path == "/api/groups":
+                if session.result is None:
+                    raise ValueError("Build a map first.")
+                self.send({'groups': session.result.structure_groups, 'protocol': session.result.grouping_protocol})
+            elif path == "/api/compare":
+                self.send(session.compare_group(parse_qs(parsed.query).get('group', [''])[0]))
             elif path == "/api/file":
                 name = parse_qs(parsed.query).get("name", [""])[0]
                 file = session.files.get(name)

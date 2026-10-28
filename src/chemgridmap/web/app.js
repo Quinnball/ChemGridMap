@@ -7,6 +7,7 @@ let busy = false, job = null, points = [], gridSVG = '', view = 'grid', currentC
 let transform = {s: 1, x: 0, y: 0}, drawingSize = {w: 1, h: 1};
 let tileWidth = 100, hasStructures = false;
 let inputInfo = null, page = 'import', umapAvailable = false, demoAvailable = false;
+let structureGroups = [], neighborRelations = new Map();
 const colors = {active: '#2a9d8f', medium: '#e6a23c', inactive: '#c44e52', unlabelled: '#b8c2cc'};
 
 function showPage(name) {
@@ -33,6 +34,7 @@ function updateNavigation() {
   $('demo').disabled = busy || !demoAvailable;
   $('projection').querySelector('[value=umap]').disabled = !umapAvailable;
   document.querySelectorAll('#find-molecule input,#find-molecule button,.tabs button,.zoom-tools button').forEach(el => el.disabled = !job || busy);
+  document.querySelectorAll('#group-controls input,#group-controls select,#group-controls button').forEach(el => el.disabled = !job || busy);
 }
 function densityPreview() {
   $('occupancy-value').textContent = $('occupancy').value + '%';
@@ -46,7 +48,7 @@ function densityPreview() {
 }
 function closeInspector() {
   $('inspector').hidden = true; $('map-layout').classList.remove('has-selection');
-  currentCell = null; requestNumber++; highlight(); requestAnimationFrame(fit);
+  currentCell = null; neighborRelations.clear(); requestNumber++; highlight(); requestAnimationFrame(fit);
 }
 
 async function api(path, options = {}) {
@@ -93,6 +95,8 @@ function selectColumns(id, columns, preferred, optional = false) {
 }
 function resetResult() {
   job = null; currentCell = null; points = []; gridSVG = ''; requestNumber++;
+  structureGroups = []; neighborRelations.clear(); $('group-controls').hidden = true;
+  if ($('comparison-dialog').open) $('comparison-dialog').close();
   ['summary','audit','metrics','selection','record-section','download-all'].forEach(id => $(id).hidden = true);
   $('selection-hint').hidden = false; $('downloads').replaceChildren(); $('map-stage').replaceChildren();
   $('empty-map').hidden = false; $('saved-location').textContent = '';
@@ -145,6 +149,8 @@ function options() {
     conflict_range_threshold: Number($('conflict-range').value), random_state: Number($('seed').value),
     grid_occupancy: Number($('occupancy').value) / 100, render_detail: $('detail').value,
     structure_policy: $('structure-policy').value, molecule_identity: $('identity').value,
+    grouping: $('grouping').value, group_similarity: Number($('group-similarity').value),
+    cluster_col: $('cluster-col').value.trim() || null, cluster_source: $('cluster-source').value.trim() || null,
     output_formats: $('raster').checked ? ['svg','png','pdf'] : ['svg']};
 }
 async function build(event) {
@@ -195,6 +201,15 @@ async function showResult() {
   const svgFile = job.files.find(name => name === 'map.svg');
   gridSVG = await (await api('/api/file?name=' + encodeURIComponent(svgFile))).text();
   points = await getJSON('/api/points');
+  const grouping = await getJSON('/api/groups'); structureGroups = grouping.groups;
+  $('group-controls').hidden = !structureGroups.length;
+  $('group-select').replaceChildren();
+  for (const group of structureGroups) {
+    const option = document.createElement('option'); option.value = group.structure_group;
+    option.textContent = `${group.structure_group} | ${group.size} members | core ${group.core_coverage_count}/${group.size}`;
+    $('group-select').append(option);
+  }
+  $('group-method').textContent = `${grouping.protocol.method} groups are defined before projection. Colors may repeat; group IDs are authoritative.`;
   updateNavigation(); showPage('explore');
   $('run-caption').textContent = [job.options.target_id || inputInfo.filename, job.options.representation === 'morgan' ? 'Morgan fingerprint' : 'Molecular descriptors', job.options.projection.toUpperCase(), `${Math.round(job.options.grid_occupancy * 100)}% occupancy`].join(' · ');
   view = 'grid'; setView('grid');
@@ -230,7 +245,7 @@ function projectionSVG() {
     circle.setAttribute('cx',40 + point.projection_x * 820); circle.setAttribute('cy',860 - point.projection_y * 820);
     circle.setAttribute('r','4'); circle.setAttribute('fill',colors[point.activity_class] || '#b8c2cc');
     circle.dataset.gridRow = point.grid_row; circle.dataset.gridCol = point.grid_col;
-    const title = document.createElementNS(ns,'title'); title.textContent = `Grid cell (${point.grid_row}, ${point.grid_col}) · ${point.activity_class}`; circle.append(title); svg.append(circle);
+    const title = document.createElementNS(ns,'title'); title.textContent = `${point.molecule_id || point.molecule_identity_key || 'Molecule'} · ${point.activity_class}`; circle.append(title); svg.append(circle);
   }
   return svg;
 }
@@ -245,7 +260,20 @@ function setView(name) {
   tileWidth = Number(svg.querySelector('g[data-grid-row] > rect')?.getAttribute('width') || 100);
   hasStructures = !!svg.querySelector('g[data-grid-row] > g');
   drawingSize = {w:box.width,h:box.height}; svg.setAttribute('width',box.width); svg.setAttribute('height',box.height);
-  fit(); highlight();
+  colorMap(); fit(); highlight();
+}
+function colorMap() {
+  const byStructure = $('color-mode').value === 'structure';
+  const lookup = new Map(points.map(p => [`${p.grid_row},${p.grid_col}`, p]));
+  $('map-stage').querySelectorAll('[data-grid-row]').forEach(el => {
+    const point = lookup.get(`${el.dataset.gridRow},${el.dataset.gridCol}`);
+    if (!point) return;
+    const mark = el.tagName === 'circle' ? el : el.querySelector(':scope > rect');
+    if (!mark) return;
+    if (!mark.dataset.activityFill) mark.dataset.activityFill = mark.getAttribute('fill');
+    mark.setAttribute('fill', byStructure ? point.structure_group_color || '#B8C2CC' : mark.dataset.activityFill);
+  });
+  $('legend').hidden = byStructure;
 }
 function applyTransform() {
   $('map-stage').style.transform = `translate(${transform.x}px,${transform.y}px) scale(${transform.s})`;
@@ -271,6 +299,8 @@ function highlight() {
   $('map-stage').querySelectorAll('[data-grid-row]').forEach(el => {
     const selected = currentCell && Number(el.dataset.gridRow) === currentCell.row && Number(el.dataset.gridCol) === currentCell.col;
     el.classList.toggle('selected-cell',!!selected);
+    const relation = $('show-neighbor-links').checked ? neighborRelations.get(`${el.dataset.gridRow},${el.dataset.gridCol}`) : null;
+    for (const category of ['shared','grid_only','representation_only']) el.classList.toggle('neighbor-' + category, relation === category);
     if (el.tagName === 'circle') { el.setAttribute('stroke',selected ? '#183e92' : 'none'); el.setAttribute('stroke-width','3'); }
   });
 }
@@ -283,7 +313,16 @@ async function inspect(query) {
     if (request !== requestNumber) return;
     status('');
     const row = detail.molecule, summary = detail.summary;
-    currentCell = {row:row.grid_row,col:row.grid_col}; highlight();
+    currentCell = {row:row.grid_row,col:row.grid_col};
+    neighborRelations = new Map(detail.neighbors.map(p => [`${p.grid_row},${p.grid_col}`, p.neighbor_relation])); highlight();
+    $('neighbor-key').hidden = false;
+    const group = structureGroups.find(g => g.structure_group === row.structure_group);
+    $('selected-group').hidden = !group;
+    if (group) {
+      $('selected-group-summary').textContent = `${group.structure_group} | ${group.size} members | core covers ${group.core_coverage_count}/${group.size}`;
+      $('selected-group-button').onclick = () => compareGroup(group.structure_group);
+      $('group-select').value = group.structure_group;
+    }
     const wasClosed = $('inspector').hidden;
     $('inspector').hidden = false; $('map-layout').classList.add('has-selection');
     if (wasClosed) requestAnimationFrame(fit);
@@ -298,9 +337,13 @@ async function inspect(query) {
     for (const [label,value] of fields) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = format(value); stats.append(dt,dd); }
     $('evidence-summary').append(stats);
     const marker = document.createElement('p'); marker.className = summary.is_conflicted ? 'flag' : 'micro';
-    marker.textContent = summary.is_conflicted ? 'Conflict flagged. Review the underlying assays before interpretation.' : summary.median_verified ? 'No conflict rule triggered. This does not establish assay equivalence.' : summary.interpretation;
+    marker.textContent = !summary.quality_annotations_verified && summary.median_verified ? 'Quality flags not verified: original annotation rules are unavailable.' : summary.is_conflicted ? 'Conflict flagged. Review the underlying assays before interpretation.' : summary.median_verified ? 'No conflict rule triggered. This does not establish assay equivalence.' : summary.interpretation;
     $('evidence-summary').append(marker);
-    if (summary.median_verified) { const verified = document.createElement('p'); verified.className = 'verified'; verified.textContent = 'Record count and median verified against source rows.'; $('evidence-summary').append(verified); }
+    if (summary.median_verified) { const verified = document.createElement('p'); verified.className = 'verified'; verified.textContent = summary.quality_annotations_verified ? 'Identity, counts, median, activity class and quality flags checked against retained records and saved rules.' : 'Record count and median verified; quality annotations remain unverified.'; $('evidence-summary').append(verified); }
+    const neighbors = summary.neighborhood;
+    $('neighbor-summary').textContent = `${neighbors.representation} (${neighbors.representation_metric}), k=${neighbors.effective_k}: ${neighbors.shared_count} shared neighbors out of ${neighbors.representation_count} representation neighbors and ${neighbors.grid_count} grid neighbors. Recall ${(100 * neighbors.recall).toFixed(1)}%.`;
+    table(detail.neighbors, $('neighbor-table'));
+    $('download-audit').onclick = () => download('/api/file?name=' + encodeURIComponent(detail.audit_file), detail.audit_file);
     $('download-evidence').hidden = !detail.total_records;
     $('view-records').hidden = !detail.total_records;
     $('record-section').hidden = !detail.total_records;
@@ -314,6 +357,30 @@ async function download(path,name) {
   try { const blob = await (await api(path)).blob(), url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url),10000); }
   catch (error) { fail(error); }
 }
+async function compareGroup(groupId) {
+  try {
+    const result = await getJSON('/api/compare?group=' + encodeURIComponent(groupId));
+    const group = result.summary;
+    $('comparison-title').textContent = `${group.structure_group}: ${group.size} molecules`;
+    $('core-svg').innerHTML = result.drawings.core_smiles || '<p>No ring scaffold</p>';
+    $('representative-svg').innerHTML = result.drawings.representative_smiles;
+    $('core-coverage').textContent = `${group.core_status}. This scaffold matches ${group.core_coverage_count}/${group.size} members; ${group.core_exact_scaffold_count} have exactly this scaffold. ${group.distinct_scaffolds} distinct ring scaffolds; ${group.acyclic_members} acyclic members.`;
+    $('comparison-rule').textContent = `${result.selected_count}/${group.size} members shown. ${result.selection_rule} A scaffold summary is not a complete explanation of fingerprint similarity.`;
+    $('comparison-svg').innerHTML = result.svg;
+    const rows = result.members.map(m => ({ID:m.comparison_id, pChEMBL:m.activity_pchembl, Class:m.activity_class, Core:group.core_member_ids.includes(m.comparison_id), Scaffold:m.scaffold_smiles, Row:m.grid_row, Column:m.grid_col}));
+    table(rows, $('group-members'));
+    $('group-members').querySelectorAll('tbody tr').forEach((tr, i) => {
+      tr.tabIndex = 0; tr.setAttribute('role','button');
+      const locate = () => { $('comparison-dialog').close(); inspect(`row=${rows[i].Row}&col=${rows[i].Column}`); };
+      tr.onclick = locate; tr.onkeydown = e => { if (e.key === 'Enter') locate(); };
+    });
+    $('download-comparison').onclick = () => download('/api/file?name=' + encodeURIComponent(result.archive), result.archive);
+    $('comparison-dialog').showModal();
+  } catch (error) { fail(error); }
+}
+$('compare-group').addEventListener('click', () => compareGroup($('group-select').value));
+$('color-mode').addEventListener('change', colorMap);
+$('show-neighbor-links').addEventListener('change', highlight);
 $('demo').addEventListener('click', () => loadInput(true));
 $('csv').addEventListener('change', () => loadInput());
 $('input-format').addEventListener('change',updateInputType);
@@ -366,6 +433,9 @@ document.querySelector('.tabs').addEventListener('keydown', event => {
 });
 densityPreview(); updateNavigation();
 function restoreOptions(config) {
+  $('grouping').value = config.grouping || 'butina';
+  $('group-similarity').value = config.group_similarity ?? .6;
+  $('cluster-col').value = config.cluster_col || ''; $('cluster-source').value = config.cluster_source || '';
   const fields = {'input-format':'input_format',target:'target_id','activity-type':'activity_type',representation:'representation',projection:'projection',lower:'lower_threshold',upper:'upper_threshold',seed:'random_state',detail:'render_detail','conflict-range':'conflict_range_threshold',identity:'molecule_identity','structure-policy':'structure_policy','smiles-col':'smiles_col','value-col':'value_col','label-col':'label_col'};
   for (const [id,key] of Object.entries(fields)) $(id).value = config[key] ?? '';
   $('occupancy').value = config.grid_occupancy*100; densityPreview();

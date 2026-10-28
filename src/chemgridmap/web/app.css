@@ -98,3 +98,14 @@ footer { display: flex; justify-content: space-between; gap: 15px; padding: 18px
   .configure { padding-top: 12px; }#map-viewport { height: max(330px, calc(100vh - 330px)); }
 }
 @media (prefers-reduced-motion: reduce) { *, *:before { animation: none !important; transition: none !important; } }
+.group-controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: end; padding: 14px 0 20px; }
+.group-controls label { margin: 0; }.group-controls .micro { flex-basis: 100%; margin: 0; }
+.group-link { padding: 12px 0; font-size: 12px; border-bottom: 1px solid var(--line); }.group-link button { margin-top: 10px; }
+.core-summary { display: grid; grid-template-columns: 160px 160px 1fr; gap: 18px; align-items: center; font-size: 13px; }
+.core-summary figure { margin: 0; text-align: center; }.core-summary svg { width: 150px; height: 150px; }.core-summary figcaption { font-size: 11px; color: var(--muted); }
+#comparison-svg { margin-top: 20px; overflow-x: auto; }#comparison-svg>svg { width: 100%; min-width: 780px; height: auto; }#group-members tbody tr { cursor: pointer; }#group-members tbody tr:hover { background: #eaf2ef; }
+.neighbor-key { font-size: 10px; margin-top: 12px; }.neighbor-key span { display: block; margin: 6px 0; padding-left: 8px; border-left: 3px solid; }.neighbor-key .shared { border-color: #0072B2; }.neighbor-key .grid-only { border-color: #D55E00; }.neighbor-key .representation-only { border-color: #7A5195; }
+#map-stage .neighbor-shared>rect, #map-stage circle.neighbor-shared { stroke: #0072B2 !important; stroke-width: 4; stroke-opacity: 1; }
+#map-stage .neighbor-grid_only>rect, #map-stage circle.neighbor-grid_only { stroke: #D55E00 !important; stroke-width: 4; stroke-dasharray: 7 4; stroke-opacity: 1; }
+#map-stage .neighbor-representation_only>rect, #map-stage circle.neighbor-representation_only { stroke: #7A5195 !important; stroke-width: 4; stroke-dasharray: 2 3; stroke-opacity: 1; }
+@media(max-width:760px) { .core-summary { grid-template-columns: 1fr 1fr; }.core-summary>div { grid-column: 1 / -1; }.group-controls>label { flex: 1 1 40%; }.group-controls>button { width: 100%; } }

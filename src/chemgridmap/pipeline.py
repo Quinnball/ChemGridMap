@@ -22,7 +22,8 @@ from .core import (
 from .plotting import render_grid_map
 from .projection import project_2d
 from .representations import compute_representation
-from .provenance import environment_versions
+from .provenance import environment_versions, file_digests
+from .comparison import structural_groups, save_group_outputs
 
 
 @dataclass
@@ -37,6 +38,8 @@ class GridMapResult:
     preprocessing: Dict[str, int]
     feature_names: List[str] = field(default_factory=list)
     output_files: Dict[str, str] = field(default_factory=dict)
+    structure_groups: List[Dict] = field(default_factory=list)
+    grouping_protocol: Dict = field(default_factory=dict)
 
 
 def build_grid_map(
@@ -72,6 +75,10 @@ def build_grid_map(
     provenance: Optional[Dict] = None,
     sparse_adaptive: bool = True,
     sparse_max_neighbors: int = 1024,
+    grouping: str = "butina",
+    group_similarity: float = 0.6,
+    cluster_col: Optional[str] = None,
+    cluster_source: Optional[str] = None,
 ) -> GridMapResult:
     """Build and optionally save a one-molecule-per-cell grid chemical map."""
     started = time.perf_counter()
@@ -164,6 +171,17 @@ def build_grid_map(
     result_data["grid_col"] = np.rint(grid[:, 0] * (grid_cols - 1)).astype(int)
     result_data["grid_row"] = np.rint(grid[:, 1] * (grid_rows - 1)).astype(int)
 
+    if grouping not in {"butina", "none", "external"}:
+        raise ValueError("Grouping must be butina, external, or none.")
+    groups, grouping_protocol = [], {"method": "none"}
+    if grouping != "none":
+        if grouping == "external" and not cluster_col:
+            raise ValueError("External grouping requires cluster_col and cluster_source.")
+        result_data, groups, grouping_protocol = structural_groups(
+            result_data, similarity=group_similarity, radius=radius, n_bits=n_bits,
+            cluster_col=cluster_col if grouping == "external" else None,
+            cluster_source=cluster_source if grouping == "external" else None)
+
     values = None
     if value_col:
         numeric = pd.to_numeric(result_data[value_col], errors="coerce").to_numpy()
@@ -226,6 +244,8 @@ def build_grid_map(
                 "metrics": str(metrics_path),
             }
         )
+        if groups:
+            output_files.update(save_group_outputs(result_data, groups, grouping_protocol, output_dir, name))
         render_started = time.perf_counter()
         output_files.update(
             render_grid_map(
@@ -256,11 +276,13 @@ def build_grid_map(
                 "duplicate_policy": duplicate_policy, "render_detail": render_detail,
             },
             "assignment": assignment_diagnostics,
+            "structure_grouping": grouping_protocol,
             "timings_seconds": {"preparation_representation_projection": projection_seconds,
                                 "assignment": assignment_seconds, "metrics": metric_seconds,
                                 "render_export": time.perf_counter() - render_started,
                                 "total_map_workflow": time.perf_counter() - started},
             "outputs": {key: Path(value).name for key, value in output_files.items()},
+            "output_digests": file_digests(output_files),
         }
         path = output_dir / (name + "_run_manifest.json")
         path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -275,4 +297,6 @@ def build_grid_map(
         preprocessing=report,
         feature_names=feature_names,
         output_files=output_files,
+        structure_groups=groups,
+        grouping_protocol=grouping_protocol,
     )

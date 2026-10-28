@@ -1,0 +1,29 @@
+{
+  "software_version": "0.3.1rc1",
+  "checked_on": "2026-09-10",
+  "platform_scope": "macOS arm64, Python 3.12; candidate cross-platform CI is separate",
+  "mapped_molecules": 3289,
+  "contributing_records": 3718,
+  "identifier_and_cell_queries": 6578,
+  "all_quality_annotations_verified": true,
+  "altered_input_controls_rejected": 10,
+  "local_pytest_passed": 91,
+  "fresh_wheel_web_csv_molecules": 889,
+  "fresh_wheel_projection_and_cells_match": true,
+  "fresh_wheel_record_and_annotation_checks_passed": true,
+  "public_archive_download_and_hash_check_passed": true,
+  "archive_sha256": "b8b51f5893fc035825a2f0169fdde31d5d805dd4a39d342615ffb4cfe08e1ba3",
+  "interface_smoke_check": "Grid/scatter inspection, neighbor comparison and evidence ZIP; no JavaScript page errors",
+  "primary_source_check": {
+    "doi": "10.1016/j.bmcl.2008.02.008",
+    "database_records": 25,
+    "maximum_pchembl_arithmetic_difference": 0.005307116465823825,
+    "differences_above_0_005": 3,
+    "database_values_changed": false,
+    "original_tables_verified": false
+  },
+  "human_task_observations": 0,
+  "human_task_status": "Prepared, not run; requires facilitator review and genuine observations",
+  "reproduction": "make paper",
+  "claim_boundary": "These checks support software traceability on the tested data, not assay harmonization, stable biological neighborhoods, or a human-efficiency advantage."
+}

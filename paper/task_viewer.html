@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ChemGridMap | controlled task preview</title>
+<style>
+:root{font-family:Georgia,serif;color:#142d3a;background:#f5f7f6}body{margin:24px auto;max-width:1440px;padding:0 20px}h1{font-size:28px;margin-bottom:8px}p{line-height:1.5}.note{background:#fff5de;padding:12px;border-left:4px solid #bc7615}button,input,select,textarea{font:15px sans-serif;padding:9px;border:1px solid #aabdb9;border-radius:4px}button{background:#fff;cursor:pointer}button.primary{background:#175a52;color:white}button:disabled{opacity:.5;cursor:default}.bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:14px 0}.workspace{display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,1fr);gap:18px}#viewport{height:650px;overflow:hidden;background:white;border:1px solid #c6d3d0;touch-action:none;position:relative}#stage{transform-origin:0 0;width:900px;height:700px}#inspector{background:white;padding:18px;overflow:auto;max-height:614px}#molecule{width:240px;height:240px}#records{overflow:auto;max-height:230px;font:12px sans-serif}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #dbe3e1;padding:5px;text-align:left}#answers{margin:12px 0;background:#fff;padding:14px}#answers input{max-width:180px}textarea{width:95%;min-height:50px}.selected{stroke:#163c91;stroke-width:3}small{font-family:sans-serif;color:#56706b}[hidden]{display:none!important}@media(max-width:850px){.workspace{grid-template-columns:1fr}#viewport{height:500px}}
+</style></head><body>
+<h1>ChemGridMap: structure and evidence tasks</h1>
+<p class="note">Protocol preview, not a completed user study. Before collecting observations, the facilitator must review the answer keys, consent and institutional requirements, recruitment count, stopping rule, and equal practice on both views.</p>
+<div class="bar"><label>Anonymous code <input id="code" placeholder="P001" maxlength="16"></label><label>Sequence <select id="sequence"><option>1</option><option>2</option><option>3</option><option>4</option></select></label><button id="start" class="primary">Start task sequence</button><button id="export" disabled>Export local responses</button></div>
+<label><input type="checkbox" id="reviewed"> Facilitator confirms the collection prerequisites have been reviewed. This checkbox is not an ethics approval.</label>
+<section id="work" hidden><div class="bar"><strong id="title"></strong><span id="mode"></span><button id="minus">Zoom out</button><button id="fit">Fit</button><button id="plus">Zoom in</button></div><p id="prompt"></p>
+<p><small>Green: active (pChEMBL ≥7) · Amber: medium (6&lt;pChEMBL&lt;7) · Red: inactive (pChEMBL ≤6). Colors are observed median annotations, not predictions.</small></p><div class="workspace"><div id="viewport"><div id="stage"></div></div><aside id="inspector"><h2 id="identity">Select a molecule</h2><svg id="molecule" viewBox="0 0 240 240"></svg><p id="summary"></p><button id="download" disabled>Download source records</button><div id="records"></div></aside></div>
+<div id="answers"></div><label>Notes or difficulty <textarea id="notes"></textarea></label><div class="bar"><button id="finish" class="primary">Submit task</button><button id="skip">Cannot complete</button><small>Responses stay on this computer. Export before closing the page.</small></div></section>
+<script>
+'use strict';
+/* TASK_DATA */
+const $ = id => document.getElementById(id), ns='http://www.w3.org/2000/svg';
+const colors={active:'#2A9D8F',medium:'#E6A23C',inactive:'#C44E52'};
+let tasks=[],step=0,startTime=0,observations=[],selected=null,transform={x:0,y:0,s:1},drag=null,code='',sequence=1;
+function make(tag,attrs={}){const node=document.createElementNS(ns,tag);for(const [key,value] of Object.entries(attrs))node.setAttribute(key,value);return node;}
+function csv(rows){const keys=Object.keys(rows[0]||{}),quote=value=>'"'+String(value??'').replaceAll('"','""')+'"';return [keys,...rows.map(row=>keys.map(key=>row[key]))].map(row=>row.map(quote).join(',')).join('\n');}
+function download(name,content,type){const url=URL.createObjectURL(new Blob([content],{type})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+function render(){
+ const {form,view}=tasks[step];$('title').textContent=`Task ${step+1} of 4`;$('mode').textContent=view==='grid'?'Structure grid':'2D scatter';
+ $('prompt').textContent=form.kind==='structure'?'For each molecule, indicate whether it contains an aromatic nitrogen atom (including aromatic [nH]) and report its displayed activity class. Use structures, not activity colors, to identify the motif.':`For ${form.target_id}, report the number of measurements, median pChEMBL, number of distinct source documents, and conflict flag. A flag does not imply that a record is erroneous.`;
+ const svg=make('svg',{viewBox:'0 0 900 700',width:900,height:700});
+ const xs=form.points.map(p=>view==='grid'?p.gx:p.px),ys=form.points.map(p=>view==='grid'?p.gy:p.py);
+ const span=Math.max(Math.max(...xs)-Math.min(...xs),Math.max(...ys)-Math.min(...ys),.01),scale=570/span;
+ const gridWidth=570*form.grid_step/span*.9;
+ form.points.forEach((point,index)=>{
+   const x=450+(xs[index]-(Math.min(...xs)+Math.max(...xs))/2)*scale,y=350-(ys[index]-(Math.min(...ys)+Math.max(...ys))/2)*scale;
+   const group=make('g',{'data-id':point.id,transform:`translate(${x},${y})`});group.style.cursor='pointer';
+   if(view==='grid'){
+    group.append(make('rect',{x:-gridWidth/2,y:-gridWidth/2,width:gridWidth,height:gridWidth,fill:colors[point.label],'fill-opacity':.12,stroke:colors[point.label],'stroke-width':.8}));
+    const structure=make('g',{transform:`translate(${-gridWidth/2},${-gridWidth/2}) scale(${gridWidth/240})`});structure.innerHTML=point.svg;group.append(structure);
+   }else group.append(make('circle',{r:6,fill:colors[point.label]}));
+   const title=make('title');title.textContent=point.id+' | '+point.label;group.append(title);svg.append(group);
+ });
+ $('stage').replaceChildren(svg);$('answers').replaceChildren();$('identity').textContent='Select a molecule';$('molecule').replaceChildren();$('summary').textContent='';$('records').replaceChildren();$('download').disabled=true;selected=null;
+ if(form.kind==='structure'){
+   const table=document.createElement('table');const head=table.insertRow();['Molecule','Aromatic nitrogen?','Activity class'].forEach(t=>{const th=document.createElement('th');th.textContent=t;head.append(th)});
+   form.points.forEach(point=>{const row=table.insertRow();row.insertCell().textContent=point.id;row.dataset.id=point.id;
+    [['','Yes','No'],['','inactive','medium','active']].forEach(options=>{const select=document.createElement('select');options.forEach(value=>{const option=new Option(value||'Select',value);select.add(option)});row.insertCell().append(select)});});$('answers').append(table);
+ }else{
+   for(const [key,label,options] of [['n_records','Measurement count'],['median_pchembl','Median pChEMBL'],['n_documents','Document count'],['is_conflicted','Conflict flag',['','Yes','No']]]){
+    const labelNode=document.createElement('label');labelNode.textContent=label+' ';let input;
+    if(options){input=document.createElement('select');options.forEach(value=>input.add(new Option(value||'Select',value)))}else{input=document.createElement('input');input.type='number';input.step=key==='median_pchembl'?'0.001':'1';}
+    input.dataset.field=key;labelNode.append(input);$('answers').append(labelNode,document.createTextNode(' '));
+   }
+ }
+ $('notes').value='';fit();requestAnimationFrame(()=>{startTime=performance.now()});
+}
+function inspect(id){const point=tasks[step].form.points.find(p=>p.id===id);if(!point)return;selected=point;$('identity').textContent=id;$('molecule').innerHTML=point.svg;
+const s=point.summary;$('summary').textContent=`Median ${s.median_pchembl.toFixed(3)} | ${point.label} | ${s.n_records} measurements | ${s.n_documents??'unknown'} documents | conflict: ${s.is_conflicted?'Yes':'No'}. Range ${s.minimum_pchembl}–${s.maximum_pchembl}.`;const table=document.createElement('table');const keys=Object.keys(point.records[0]||{});const head=table.insertRow();keys.forEach(key=>{const th=document.createElement('th');th.textContent=key;head.append(th)});point.records.forEach(record=>{const row=table.insertRow();keys.forEach(key=>row.insertCell().textContent=record[key]??'')});$('records').replaceChildren(table);$('download').disabled=false;
+$('stage').querySelectorAll('[data-id]').forEach(node=>node.classList.toggle('selected',node.dataset.id===id));}
+function apply(){$('stage').style.transform=`translate(${transform.x}px,${transform.y}px) scale(${transform.s})`;}
+function fit(){const w=$('viewport').clientWidth,h=$('viewport').clientHeight,s=Math.min(w/900,h/700);transform={x:(w-900*s)/2,y:(h-700*s)/2,s};apply();}
+function zoom(factor,x=$('viewport').clientWidth/2,y=$('viewport').clientHeight/2){const s=Math.min(12,Math.max(.1,transform.s*factor)),r=s/transform.s;transform={x:x-(x-transform.x)*r,y:y-(y-transform.y)*r,s};apply();}
+$('start').onclick=()=>{code=$('code').value.trim();sequence=Number($('sequence').value);if(!/^[A-Za-z0-9_-]{1,16}$/.test(code)||!$('reviewed').checked){alert('Enter an anonymous code and review the prerequisites first.');return;}
+ const reverse=sequence>2,views=sequence%2===1?['grid','scatter']:['scatter','grid'];const forms=reverse?[1,0,3,2]:[0,1,2,3];tasks=forms.map((index,i)=>({form:TASKS[index],view:views[i%2]}));step=0;observations=[];$('work').hidden=false;$('start').disabled=true;$('code').disabled=true;$('sequence').disabled=true;$('export').disabled=false;render();};
+function finish(status){const {form,view}=tasks[step];const answers=form.kind==='structure'?[...$('answers').querySelectorAll('tr[data-id]')].map(row=>({id:row.dataset.id,motif:row.querySelectorAll('select')[0].value,activity_class:row.querySelectorAll('select')[1].value})):Object.fromEntries([...$('answers').querySelectorAll('[data-field]')].map(input=>[input.dataset.field,input.value]));
+ observations.push({participant_code:code,sequence,form:form.id,view,kind:form.kind,status,elapsed_seconds:(performance.now()-startTime)/1000,answers,notes:$('notes').value});step++;if(step===tasks.length){$('work').hidden=true;alert('Sequence complete. Export the local responses. No scores have been shown.');}else render();}
+$('finish').onclick=()=>finish('submitted');$('skip').onclick=()=>finish('abandoned');$('export').onclick=()=>download(`responses_${code}.json`,JSON.stringify({schema:1,study:'ChemGridMap two-view exploratory preview',observations},null,2),'application/json');
+$('download').onclick=()=>selected&&download('source_records.csv',csv(selected.records),'text/csv');$('fit').onclick=fit;$('plus').onclick=()=>zoom(1.4);$('minus').onclick=()=>zoom(1/1.4);
+const viewport=$('viewport');viewport.onwheel=event=>{event.preventDefault();const b=viewport.getBoundingClientRect();zoom(Math.exp(-event.deltaY*.002),event.clientX-b.left,event.clientY-b.top)};
+viewport.onpointerdown=event=>{if(event.button!==0)return;drag={x:event.clientX,y:event.clientY,tx:transform.x,ty:transform.y,target:event.target,moved:false};viewport.setPointerCapture(event.pointerId)};
+viewport.onpointermove=event=>{if(!drag)return;const dx=event.clientX-drag.x,dy=event.clientY-drag.y;drag.moved ||= Math.abs(dx)+Math.abs(dy)>5;if(drag.moved){transform.x=drag.tx+dx;transform.y=drag.ty+dy;apply()}};
+viewport.onpointerup=()=>{if(drag&&!drag.moved){const point=drag.target.closest('[data-id]');if(point)inspect(point.dataset.id)}drag=null};viewport.onpointercancel=()=>drag=null;window.onresize=fit;
+</script></body></html>

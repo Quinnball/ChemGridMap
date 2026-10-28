@@ -13,6 +13,7 @@ import pandas as pd
 
 from .core import canonicalize_smiles
 from .structures import parent_structure
+from .activity import RULE_KEYS, activity_annotations
 
 
 COLUMN_ALIASES = {
@@ -134,18 +135,6 @@ def _joined_unique(values: pd.Series) -> str:
         if not pd.isna(value) and str(value).strip()
     }
     return ";".join(sorted(cleaned))
-
-
-def _activity_class(
-    value: float,
-    lower_threshold: float,
-    upper_threshold: float,
-) -> str:
-    if value <= lower_threshold:
-        return "inactive"
-    if value >= upper_threshold:
-        return "active"
-    return "medium"
 
 
 def curate_chembl_activity_data(
@@ -385,20 +374,8 @@ def curate_chembl_activity_data(
             )
         canonical_smiles = structures[0]
         values = group["activity_pchembl_raw"].to_numpy(dtype=float)
-        median = float(np.median(values))
-        minimum = float(np.min(values))
-        maximum = float(np.max(values))
-        record_range = maximum - minimum
-        has_inactive = bool(np.any(values <= lower_threshold))
-        has_active = bool(np.any(values >= upper_threshold))
-        crosses_clean_boundary = has_inactive and has_active
-        is_large_variation = record_range > conflict_range_threshold
-        is_conflicted = crosses_clean_boundary or is_large_variation
-        measurement_classes = {
-            _activity_class(float(value), lower_threshold, upper_threshold)
-            for value in values
-        }
-        n_records = int(len(group))
+        rules = dict(zip(RULE_KEYS, (lower_threshold, upper_threshold, conflict_range_threshold)))
+        annotations = activity_annotations(values, **rules)
 
         row = {
             "molecule_identity_key": identity_key,
@@ -413,36 +390,8 @@ def curate_chembl_activity_data(
             "structure_changed": int(group["structure_changed"].any()),
             "parent_extraction_excluded": int(group["parent_extraction_excluded"].any()),
             "n_record_structures": int(group["record_canonical_smiles"].nunique()),
-            "activity_pchembl": median,
-            "activity_class": _activity_class(
-                median,
-                lower_threshold=lower_threshold,
-                upper_threshold=upper_threshold,
-            ),
-            "n_records": n_records,
-            "pchembl_min": minimum,
-            "pchembl_max": maximum,
-            "pchembl_median": median,
-            "pchembl_std": (
-                float(np.std(values, ddof=1)) if len(values) > 1 else np.nan
-            ),
-            "pchembl_range": record_range,
-            "has_inactive_measurement": int(has_inactive),
-            "has_active_measurement": int(has_active),
-            "crosses_clean_boundary": int(crosses_clean_boundary),
-            "is_large_variation": int(is_large_variation),
-            "is_conflicted": int(is_conflicted),
-            "has_class_boundary_crossing": int(len(measurement_classes) > 1),
-            "n_measurement_classes": len(measurement_classes),
-            "repeat_status": (
-                "singleton"
-                if n_records == 1
-                else (
-                    "repeated_conflicted"
-                    if is_conflicted
-                    else "repeated_unflagged"
-                )
-            ),
+            **annotations,
+            **{"audit_" + key: float(value) for key, value in rules.items()},
             "source_rows": _joined_unique(group["source_row"]),
         }
         for field in [

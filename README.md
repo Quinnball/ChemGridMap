@@ -4,8 +4,9 @@
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg)](https://www.python.org/)
 
-ChemGridMap turns a ChEMBL activity export into an inspectable
-one-molecule-per-cell chemical map. A single command can validate the downloaded
+ChemGridMap connects structure-defined molecular groups, core-aligned comparison,
+and source bioactivity records on a one-molecule-per-cell chemical map.
+A single command can validate the downloaded
 records, aggregate repeated measurements to molecule-level median pChEMBL
 values, calculate a molecular representation and two-dimensional projection,
 assign every molecule to a unique grid cell, and export the final map.
@@ -17,30 +18,35 @@ outputs so that the transformation can be audited.
 
 ChemGridMap implements and extends the established molecular-grid-map concept;
 it does not claim the regular-grid layout or linear-assignment method as new.
-Its contribution is the open, auditable ChEMBL-to-map workflow and explicit
-projection-to-grid validation. See Yoshimori, Tanoue, and Bajorath,
+Its contribution is a reproducible comparison workflow: defined group membership,
+checked scaffold coverage, explicit neighbor disagreements, and auditable activity
+annotations. It does not introduce a clustering algorithm or establish improved
+human task performance. See Yoshimori, Tanoue, and Bajorath,
 https://doi.org/10.1021/acsomega.9b00595.
 
-[![ChemGridMap: 889 CA II molecules with an enlarged, source-matched nine-cell structure view](docs/chemgridmap_demo.png)](docs/chemgridmap_demo.svg)
+[![Defined molecular groups, checked scaffold coverage, and core-aligned structural comparison](docs/structure_comparison.png)](docs/structure_comparison.svg)
 
-The blue box and the enlarged panel show the same nine cells from the archived
-CHEMBL205 map. Pale activity fills keep the molecular structures visible;
-identifiers and median pChEMBL values remain attached to each molecule.
-[Open the vector figure](docs/chemgridmap_demo.svg) to zoom without losing detail.
-The [plotting table](docs/chemgridmap_demo_data.csv) and
-[drawing script](scripts/build_readme_figure.py) reproduce this preview without
-recomputing the projection or changing cell positions.
+The fixed CA II grid contains 889 molecules and 314 fingerprint-defined groups.
+Three groups are highlighted; the selected G002 scaffold matches 27 of its 28
+members. The aligned structures highlight atoms outside that core, while thin
+strips retain the observed activity annotation. Group membership is independent
+of map position. [Open the vector figure](docs/structure_comparison.svg).
+The [figure script](paper/build_structure_figures.py) and accompanying numerical
+evidence archive reproduce the comparison from frozen layouts.
+An [activity-colored nine-cell example](docs/chemgridmap_demo.svg) is also retained.
 
 ## Installation
 
-Version 0.3.0 adds source-record inspection, parent-structure handling, and
-adaptive sparse matching, with a local browser interface using the same core.
+Version 0.4.0 adds fingerprint-space Butina groups, checked Murcko scaffold
+coverage, shared-core alignment, and atom-level comparison exports. The local
+English browser interface uses the same core as the command-line program.
 Archived analyses record the version actually used;
 later interface fixes do not overwrite their original manifests.
 
 Use Python 3.10 or 3.12 in a virtual environment; Python 3.12 is recommended.
-Download the source from [GitHub Releases](https://github.com/Quinnball/ChemGridMap/releases),
-extract it, and install from that directory:
+Extract the accompanying 0.4.0 source archive and install from that directory.
+[GitHub Releases](https://github.com/Quinnball/ChemGridMap/releases) currently
+contains earlier public versions; this local revision has not been uploaded:
 
 ```bash
 python -m venv .venv
@@ -51,7 +57,9 @@ python -m pip install ".[umap]"
 chemgridmap --help
 ```
 
-Alternatively, install the tagged source directly, without cloning the repository:
+The earlier public 0.3.0 release can also be installed directly without cloning;
+it does not contain the new structural comparison layer. Use the accompanying
+0.4.0 archive for the features described here until that version is published:
 
 ```bash
 python -m pip install "chemgridmap[umap] @ https://github.com/Quinnball/ChemGridMap/archive/refs/tags/v0.3.0.zip"
@@ -98,6 +106,33 @@ The English interface uses three separate steps rather than exposing every
 setting at once. The welcome-page preview is a real CHEMBL205 Morgan/UMAP grid,
 not the output of the current session; its molecule inset is CHEMBL20. Detailed
 source records and the local grid neighborhood open only when requested.
+
+### Compare molecular structures
+
+In **Explore**, switch **Color by** between activity and structure groups without
+moving any molecule. Select a group and choose **Compare group**. The comparison
+shows a representative, the selected scaffold with its measured coverage, aligned
+members, and the complete member table. Download the comparison ZIP to retain the
+native SVG, member identifiers, atom matches, and grouping parameters.
+
+```bash
+chemgridmap compare example_result/map_grid_coordinates.csv -o comparison --similarity 0.6
+```
+
+Use the coordinate-table filename printed by your mapping command. Existing group
+labels can be used with `--cluster-col cluster_id --cluster-source "My curated series"`.
+Default groups use Morgan radius 2, 2048 bits and a Butina center similarity of
+0.6, not an all-pairs similarity guarantee. A scaffold summarizes a group; its
+substructure coverage need not equal its exact scaffold frequency. Orange marks
+atoms and bonds outside the matched core, not a causal activity effect. If a core
+alignment changes encoded stereochemistry, the molecule is shown unaligned and
+the fallback is recorded. Grouping is exact up to 10,000 molecules; choose no
+grouping for larger maps.
+
+The neighbor agreement overlay distinguishes shared, grid-only, and
+representation-only neighbors. It is a layout diagnostic, not chemical confidence.
+Group labels stay fixed across projections because membership is computed
+independently; this does not make the layouts stable.
 At small on-screen scales, the grid shows activity-colored cells; zooming in
 reveals molecular structures. This display setting does not alter exported maps.
 
@@ -252,8 +287,18 @@ Alternatively, replace `--molecule-id CHEMBL20` with `--cell ROW COL`, using the
 zero-based `grid_row` and `grid_col` in the coordinate table (rows increase
 upwards). Empty cells are rejected rather than silently selecting a neighbor.
 The export contains a readable molecular SVG, the selected molecular summary,
-all contributing records, and a JSON audit that verifies record count and median.
-The JSON also records input digests and available assay/document counts.
+all contributing records, and a JSON audit. The 0.3.1 candidate also recalculates
+activity classes, spread statistics and quality flags using the saved annotation
+rules, and checks available structure and source-identifier links. Standard CLI
+exports bind coordinate and retained-record files through the run manifest's
+SHA-256 digests. These detect mismatched run files, not malicious rewriting of
+both the files and their manifest.
+
+For legacy maps, supply `--curation-report ORIGINAL_REPORT.json`. Missing rules
+or original file digests are reported as unverified, never replaced by assumed
+defaults. The browser inspector also distinguishes representation-space from
+grid neighbors, including distance ties, and exports both with checked source
+records in an evidence ZIP. A 3 x 3 display window is labeled separately.
 Native SVG maps mark conflicted entries with a dark corner triangle. An active
 color can therefore coexist with a conflict marker: the median is active, but
 the underlying measurements still require review.
@@ -320,8 +365,10 @@ operators while still rejecting inequality measurements. This web export lacks
 parent and activity IDs; it uses structure identity fallback and retains file
 row, assay and document references. The archive's richer provenance is not
 silently assumed. A fresh virtual environment with the independently installed
-wheel passed 38 tests and reproduced the web-CSV-to-UMAP and inspection routes.
-This validation covers one macOS arm64 host, not all supported platforms.
+wheel passed 38 tests at that historical checkpoint and reproduced the
+web-CSV-to-UMAP and inspection routes on macOS arm64. Later public-release CI
+and current-candidate checks are separate; see the versioned logs and the
+current reproduction entry below rather than treating 38 as the current count.
 
 The archived validation input is under `validation_data/chembl37_chembl205/`;
 baseline experiment outputs are under `paper/output/revision_v4/`, and the added
@@ -470,17 +517,26 @@ CHEMBL204, and CHEMBL240. The independent-target dense comparisons use fixed
 
 ```bash
 make paper
-# Optional full-size hERG timing check and candidate-cap sensitivity:
-.venv/bin/python paper/validate_adaptive_assignment.py --large
-.venv/bin/python paper/extend_large_candidate_check.py
-.venv/bin/python paper/build_revision_figures.py
 ```
 
-All revised tables, native-vector figures, and manifests are written to
-`paper/output/revision_v4/`. The tests use a synthetic semicolon-delimited
-web-format fixture and real API-export validation; a browser download session
-is not implied by that fixture. Preserve the raw CSV and its SHA-256 digest
-when reproducing an analysis from a newer ChEMBL release.
+The current entry restores hash-checked public inputs, recurates the three raw
+target exports, checks all 3,289 mapped entries, exercises altered-input controls,
+and runs the unedited web CSV through UMAP, grid export and evidence inspection.
+New evidence is written to `paper/output/current/`; archived v6 geometry is
+retained without tuning. `claim_checks.json` records the software audit and
+condition-keyed reconciliation of 25 CA II records with the original published
+tables. Source locators, a numerical transcription and focused regression tests
+are included; the publisher PDF is not redistributed. Author approval remains
+separate from these computational checks. Optional task prototypes are outside
+the manuscript and are not part of `make paper`.
+
+The [current validation bundle](validation_data/submission_checks_2026-09-12.zip)
+contains the 3,289-entry audit, source-table reconciliation, 96-test report and
+updated cell-to-record figure. Extract it at the repository root to review the
+saved checks, or run `make paper` to regenerate the computational reports.
+
+`make paper-legacy` retains the older v4 geometry experiment entry.
+See `paper/README.md` for the current commands, source archive and scope.
 
 The script in `paper/run_comparisons.py` rebuilds the projection and
 representation comparisons from the included molecule-level table:
