@@ -5,13 +5,22 @@ from __future__ import annotations
 import argparse
 import hashlib
 import sys
+import zipfile
 from pathlib import Path
 from typing import Optional, Sequence
 
 import pandas as pd
 
 from .chembl import curate_chembl_activity_data, save_chembl_curation
+from .evidence import annotate_activity_confidence
 from .pipeline import build_grid_map
+
+
+def _core_min_coverage(value: str) -> float:
+    coverage = float(value)
+    if not 0.5 <= coverage <= 1:
+        raise argparse.ArgumentTypeError("Core coverage target must be between 0.5 and 1 (inclusive).")
+    return coverage
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -173,6 +182,27 @@ def build_parser() -> argparse.ArgumentParser:
         default=["svg", "png", "pdf"],
         help="Map formats to write.",
     )
+    parser.add_argument(
+        "--grid-refinement", choices=["neighbors", "none"], default="neighbors",
+        help="Refine the minimum-displacement grid so representation neighbours sit closer "
+             "('none' reproduces 0.4.0 layouts).")
+    parser.add_argument(
+        "--core-rule", choices=["coverage", "most_frequent"], default="coverage",
+        help="Group core: largest scaffold or ring fragment covering --core-min-coverage of members, "
+             "or the most frequent scaffold (0.4.0 rule).")
+    parser.add_argument(
+        "--core-min-coverage", type=_core_min_coverage, default=0.8,
+        help="Coverage target for --core-rule coverage; range: 0.5–1 (default: 0.8).")
+    parser.add_argument(
+        "--no-activity-confidence", action="store_true",
+        help="Skip document-level class-support estimation for ChEMBL input.")
+    parser.add_argument(
+        "--no-merge-identical-documents", action="store_true",
+        help="Keep documents with identical entry medians as separate evidence units (default: merge).")
+    parser.add_argument(
+        "--map-color-modes", nargs="+", default=[],
+        choices=["activity", "class_support", "neighbor_recall", "structure_group"],
+        help="Additional map layers to export as SVG and, when requested in --output-formats, PNG.")
     return parser
 
 
@@ -187,7 +217,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     data = pd.read_csv(args.input, sep=None, engine="python", encoding="utf-8-sig")
     source = {"input_file": args.input.name,
-              "input_file_sha256": hashlib.sha256(args.input.read_bytes()).hexdigest()}
+              "input_file_sha256": hashlib.sha256(args.input.read_bytes()).hexdigest(),
+              "reliability_parameters": {"activity_confidence": not args.no_activity_confidence,
+                                         "merge_identical_documents": not args.no_merge_identical_documents}}
     curation_files = {}
     if args.input_format == "chembl":
         curation = curate_chembl_activity_data(
@@ -205,6 +237,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         curation.report["input_file"] = str(args.input.resolve())
         curation.report["input_file_sha256"] = source["input_file_sha256"]
         source["curation_parameters"] = curation.report["parameters"]
+        document_column = curation.report["detected_columns"].get("document_id")
+        if not args.no_activity_confidence and document_column:
+            try:
+                curation.molecules, fit = annotate_activity_confidence(
+                    curation.molecules, curation.retained_records, lower=args.lower_threshold,
+                    upper=args.upper_threshold, value="activity_pchembl_raw", document=document_column,
+                    merge_identical=not args.no_merge_identical_documents)
+                curation.report["activity_confidence"] = fit
+                source["activity_confidence"] = fit
+            except ValueError as exc:
+                curation.report["warnings"].append(f"Activity class support was not estimated: {exc}")
+        elif not args.no_activity_confidence:
+            curation.report["warnings"].append(
+                "Activity class support was not estimated: the input has no document identifiers.")
         curation_files = save_chembl_curation(
             curation,
             output_dir=args.output_dir,
@@ -257,8 +303,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         render_detail=args.render_detail,
         output_formats=args.output_formats,
         provenance=source,
+        grid_refinement=args.grid_refinement,
+        core_rule=args.core_rule,
+        core_min_coverage=args.core_min_coverage,
+        map_color_modes=args.map_color_modes,
     )
     result.output_files.update(curation_files)
+    archive = args.output_dir / (args.name + "_results.zip")
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+        for path in result.output_files.values():
+            bundle.write(path, Path(path).name)
+    result.output_files["results_zip"] = str(archive)
 
     report = result.preprocessing
     print(

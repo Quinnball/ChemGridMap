@@ -7,7 +7,7 @@ from pathlib import Path
 import hashlib
 import json
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -20,7 +20,10 @@ from .core import (
     prepare_molecules,
 )
 from .plotting import render_grid_map
+from .evidence import DOCUMENT_OFFSET_COLUMNS
 from .projection import project_2d
+from .refinement import refine_grid_layout
+from .reliability import grid_neighbor_sets, reliability_columns, representation_neighbor_sets
 from .representations import compute_representation
 from .provenance import environment_versions, file_digests
 from .comparison import structural_groups, save_group_outputs
@@ -79,11 +82,38 @@ def build_grid_map(
     group_similarity: float = 0.6,
     cluster_col: Optional[str] = None,
     cluster_source: Optional[str] = None,
+    grid_refinement: str = "none",
+    core_rule: str = "most_frequent",
+    core_min_coverage: float = 0.8,
+    map_color_modes: Optional[List[str]] = None,
+    map_color_formats: Optional[Sequence[str]] = None,
 ) -> GridMapResult:
-    """Build and optionally save a one-molecule-per-cell grid chemical map."""
+    """Build and optionally save a one-molecule-per-cell grid chemical map.
+
+    ``grid_refinement="neighbors"`` refines the minimum-displacement assignment
+    so that representation-space neighbours sit closer on the lattice. Every
+    run reports per-molecule neighbour reliability (``neighbor_recall``).
+    Extra color layers use ``map_color_formats`` (SVG/PNG); ``None`` keeps SVG
+    plus PNG when enabled by ``output_formats``. Main-map formats are unchanged.
+    """
     started = time.perf_counter()
     if bool(x_col) != bool(y_col):
         raise ValueError("x_col and y_col must be supplied together.")
+    if grid_refinement not in {"none", "neighbors"}:
+        raise ValueError("grid_refinement must be 'none' or 'neighbors'.")
+    map_color_modes = list(dict.fromkeys(map_color_modes or []))
+    if set(map_color_modes) - {"activity", "class_support", "neighbor_recall", "structure_group"}:
+        raise ValueError("Unknown map color mode.")
+    if map_color_formats is not None:
+        map_color_formats = list(dict.fromkeys(map_color_formats))
+        if set(map_color_formats) - {"svg", "png"}:
+            raise ValueError("map_color_formats only supports 'svg' and 'png'.")
+    confidence_fit = data.attrs.get("activity_confidence_fit") or (provenance or {}).get("activity_confidence")
+    reliability_parameters = {"activity_confidence": confidence_fit is not None,
+                              "merge_identical_documents": True}
+    reliability_parameters.update((provenance or {}).get("reliability_parameters", {}))
+    if confidence_fit is not None:
+        reliability_parameters["merge_identical_documents"] = confidence_fit["merge_identical_documents"]
 
     prepared, report = prepare_molecules(
         data,
@@ -161,6 +191,21 @@ def build_grid_map(
     )
     assignment_seconds = time.perf_counter() - assignment_started
     projected_01 = normalize_coordinates(projected, mode=coordinate_scaling)
+    reliability_started = time.perf_counter()
+    reference_neighbors = representation_neighbor_sets(
+        representation_matrix, k=k,
+        metric="jaccard" if representation_distance_metric == "jaccard" else "euclidean")
+    refinement_diagnostics = {"method": "none"}
+    if grid_refinement == "neighbors":
+        cells = np.rint(grid * np.array([grid_cols - 1, grid_rows - 1])).astype(int)
+        refined = refine_grid_layout(cells, projected_01 * np.array([grid_cols - 1, grid_rows - 1]),
+                                     reference_neighbors, int(grid_rows), random_state=random_state,
+                                     diagnostics=refinement_diagnostics)
+        grid = refined / np.array([grid_cols - 1, grid_rows - 1], dtype=np.float64)
+    reliability = reliability_columns(
+        reference_neighbors,
+        grid_neighbor_sets(np.rint(grid * np.array([grid_cols - 1, grid_rows - 1])), k=k))
+    reliability_seconds = time.perf_counter() - reliability_started
     result_data = prepared.copy()
     result_data["projection_x_raw"] = projected[:, 0]
     result_data["projection_y_raw"] = projected[:, 1]
@@ -170,6 +215,8 @@ def build_grid_map(
     result_data["grid_y"] = grid[:, 1]
     result_data["grid_col"] = np.rint(grid[:, 0] * (grid_cols - 1)).astype(int)
     result_data["grid_row"] = np.rint(grid[:, 1] * (grid_rows - 1)).astype(int)
+    for column, values in reliability.items():
+        result_data[column] = values
 
     if grouping not in {"butina", "none", "external"}:
         raise ValueError("Grouping must be butina, external, or none.")
@@ -180,7 +227,8 @@ def build_grid_map(
         result_data, groups, grouping_protocol = structural_groups(
             result_data, similarity=group_similarity, radius=radius, n_bits=n_bits,
             cluster_col=cluster_col if grouping == "external" else None,
-            cluster_source=cluster_source if grouping == "external" else None)
+            cluster_source=cluster_source if grouping == "external" else None,
+            core_rule=core_rule, core_min_coverage=core_min_coverage)
 
     values = None
     if value_col:
@@ -227,6 +275,8 @@ def build_grid_map(
         np.nan if grid_padding is None else int(grid_padding)
     )
     metrics["coordinate_scaling"] = str(coordinate_scaling).strip().lower()
+    metrics["grid_refinement"] = grid_refinement
+    metrics["representation_grid_tie_aware_recall"] = float(np.nanmean(reliability["neighbor_recall"]))
     for key, value in assignment_diagnostics.items():
         metrics["assignment_" + key] = json.dumps(value) if isinstance(value, (dict, list)) else value
 
@@ -246,6 +296,14 @@ def build_grid_map(
         )
         if groups:
             output_files.update(save_group_outputs(result_data, groups, grouping_protocol, output_dir, name))
+        if confidence_fit is not None:
+            offsets = pd.DataFrame(confidence_fit["document_offsets"], columns=DOCUMENT_OFFSET_COLUMNS)
+            offsets["total_evaluated_pairs"] = confidence_fit["document_pair_count"]
+            offsets["total_observed_pairs"] = confidence_fit["observed_document_pair_count"]
+            offsets["total_possible_pairs"] = confidence_fit["document_pair_possible_count"]
+            offset_path = output_dir / (name + "_document_offsets.csv")
+            offsets.to_csv(offset_path, index=False)
+            output_files["document_offsets"] = str(offset_path)
         render_started = time.perf_counter()
         output_files.update(
             render_grid_map(
@@ -256,7 +314,16 @@ def build_grid_map(
                 formats=output_formats,
             )
         )
+        mode_formats = map_color_formats if map_color_formats is not None else (
+            ["svg"] + (["png"] if output_formats is None or "png" in output_formats else []))
+        for mode in map_color_modes:
+            mode_files = render_grid_map(result_data, output_dir / (name + "_" + mode),
+                                         color_map=color_map, detail=render_detail,
+                                         formats=mode_formats, color_by=mode)
+            output_files.update({mode + "_" + key: path for key, path in mode_files.items()})
+        from . import __version__
         manifest = {
+            "software_version": __version__,
             "map_name": name,
             "input_table_sha256": hashlib.sha256(data.to_csv(index=False).encode()).hexdigest(),
             "source": provenance or {},
@@ -274,11 +341,20 @@ def build_grid_map(
                 "annotation_neighborhood_policy": "tie_inclusive_kth_distance_shell",
                 "lower_threshold": lower_threshold, "upper_threshold": upper_threshold,
                 "duplicate_policy": duplicate_policy, "render_detail": render_detail,
+                "grid_refinement": grid_refinement, "core_rule": core_rule,
+                "core_min_coverage": core_min_coverage,
+                "map_color_modes": map_color_modes,
+                "map_color_formats": map_color_formats,
+                **reliability_parameters,
             },
+            "activity_confidence": confidence_fit,
             "assignment": assignment_diagnostics,
+            "grid_refinement": refinement_diagnostics,
             "structure_grouping": grouping_protocol,
             "timings_seconds": {"preparation_representation_projection": projection_seconds,
-                                "assignment": assignment_seconds, "metrics": metric_seconds,
+                                "assignment": assignment_seconds,
+                                "neighbor_reliability_and_refinement": reliability_seconds,
+                                "metrics": metric_seconds,
                                 "render_export": time.perf_counter() - render_started,
                                 "total_map_workflow": time.perf_counter() - started},
             "outputs": {key: Path(value).name for key, value in output_files.items()},

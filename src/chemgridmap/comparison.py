@@ -19,6 +19,7 @@ from rdkit.Chem.Scaffolds import MurckoScaffold
 from rdkit.ML.Cluster import Butina
 from scipy.spatial.distance import cdist
 
+from .cores import select_core
 from .plotting import DEFAULT_COLORS, render_svg
 
 GROUP_COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#8B6914", "#56B4E9",
@@ -49,10 +50,18 @@ def fingerprint_distances(smiles, radius=2, n_bits=2048):
 
 
 def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=None,
-                      radius=2, n_bits=2048):
-    """Butina groups use a center threshold, not an all-pairs similarity bound."""
+                      radius=2, n_bits=2048, core_rule="most_frequent", core_min_coverage=0.8):
+    """Butina groups use a center threshold, not an all-pairs similarity bound.
+
+    ``core_rule="coverage"`` selects the largest member scaffold or scaffold-network
+    ring fragment that matches at least ``core_min_coverage`` of the members.
+    """
     if not 0 < similarity <= 1:
         raise ValueError("Group similarity must be in (0, 1].")
+    if core_rule not in {"most_frequent", "coverage"}:
+        raise ValueError("core_rule must be 'most_frequent' or 'coverage'.")
+    if not 0 < core_min_coverage <= 1:
+        raise ValueError("core_min_coverage must be in (0, 1].")
     if len(data) > 10000:
         raise ValueError("Exact grouping is limited to 10,000 molecules; compare an explicit subset.")
     frame = data.copy().reset_index(drop=True)
@@ -84,9 +93,15 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
         scaffolds = [MurckoScaffold.MurckoScaffoldSmiles(mol=m, includeChirality=True) for m in selected]
         counts = Counter(s for s in scaffolds if s)
         ranked = sorted(counts, key=lambda s: (-counts[s], -Chem.MolFromSmiles(s).GetNumHeavyAtoms(), s))
-        core = ranked[0] if ranked else ""
-        pattern = Chem.MolFromSmiles(core) if core else None
-        matched = [bool(pattern and m.HasSubstructMatch(pattern, useChirality=True)) for m in selected]
+        most_frequent = ranked[0] if ranked else ""
+        frequent_pattern = Chem.MolFromSmiles(most_frequent) if most_frequent else None
+        frequent_matched = [bool(frequent_pattern and m.HasSubstructMatch(frequent_pattern, useChirality=True))
+                            for m in selected]
+        if core_rule == "coverage" and most_frequent:
+            choice = select_core(selected, min_coverage=core_min_coverage)
+            core, matched = choice["core_smiles"], choice["matched"]
+        else:
+            choice, core, matched = None, most_frequent, frequent_matched
         covered = sum(matched)
         original_positions = [order[i] for i in indices]
         color = GROUP_COLORS[rank % len(GROUP_COLORS)]
@@ -101,6 +116,11 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
             "core_smiles": core, "core_exact_scaffold_count": counts.get(core, 0),
             "core_coverage_count": covered, "core_coverage_fraction": covered / len(indices),
             "core_member_ids": [keys[order[i]] for i, yes in zip(indices, matched) if yes],
+            "core_rule": core_rule, "core_heavy_atoms": Chem.MolFromSmiles(core).GetNumHeavyAtoms() if core else 0,
+            "core_coverage_target": core_min_coverage if core_rule == "coverage" else None,
+            "core_target_met": None if choice is None else bool(choice["target_met"]),
+            "most_frequent_scaffold": most_frequent,
+            "most_frequent_scaffold_coverage_count": sum(frequent_matched),
             "distinct_scaffolds": len(counts), "acyclic_members": scaffolds.count(""),
             "core_status": "no ring scaffold" if not core else "selected scaffold has majority coverage" if covered > len(indices) / 2 else "selected scaffold has no majority coverage",
             "scaffold_counts": [{"smiles": s, "count": counts[s]} for s in ranked],
@@ -112,7 +132,11 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
                 "use_chirality_in_fingerprint": False, "reordering": True,
                 "input_order": "canonical isomeric SMILES, then molecular identifier",
                 "rdkit_version": rdBase.rdkitVersion, "scaffold": "typed Bemis-Murcko, chirality retained",
-                "core_rule": "most frequent nonempty exact scaffold; ties: heavy atoms descending, then SMILES",
+                "core_rule": ("largest member scaffold or scaffold-network ring fragment matching at least "
+                              f"{core_min_coverage:.0%} of members; otherwise the highest-coverage candidate"
+                              if core_rule == "coverage" else
+                              "most frequent nonempty exact scaffold; ties: heavy atoms descending, then SMILES"),
+                "core_min_coverage": core_min_coverage if core_rule == "coverage" else None,
                 "coverage_rule": "explicit substructure matches with chirality; not inferred from cluster membership",
                 "interpretation": "Groups are representation- and threshold-dependent, not chemical ground truth. Scaffold summaries do not explain every fingerprint bit. Colors may repeat; use group IDs.",
                 "structure_sha256": hashlib.sha256(ordered.canonical_smiles.to_csv(index=False).encode()).hexdigest()}
