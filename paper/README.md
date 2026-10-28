@@ -126,3 +126,74 @@ records. It records missing web-export identifiers rather than filling them in.
 for previous versions. The 770-molecule external-vector demo and the earlier
 9,628-entry hERG results are not the current manuscript experiments. No MPNN
 model is trained or evaluated in this software note.
+
+## Reliability analysis (0.5)
+
+T2a analyzes grid layouts and scale using frozen `output/revision_v6` inputs.
+Outputs are written to `output/reliability_v1/{layouts,neighborhoods,stability,baselines,scale,cases,figure_data}`
+and `RESULTS.md`. From the repository root, use the existing environment:
+
+```bash
+.venv/bin/python paper/run_reliability_analysis.py --steps layouts neighborhoods stability baselines scale cases figure-data
+.venv/bin/python -m pytest -q tests paper/test_source_context.py paper/test_task_analysis.py \
+  paper/test_reliability_analysis.py paper/test_grid_baselines.py
+```
+
+`--steps` selects individual stages; downstream stages read existing upstream outputs.
+The analysis scripts respect an existing `MPLCONFIGDIR`; otherwise they use
+`chemgridmap-t2a-mpl` or `chemgridmap-t2b-mpl` under Python's temporary directory.
+This controls Matplotlib's cache location only.
+
+For the optional UI acceptance check, Node must be able to resolve `playwright`.
+Set `CHEMGRIDMAP_NODE_PATH` to its containing `node_modules` directory when needed:
+
+```bash
+CHEMGRIDMAP_NODE_PATH=/path/to/node_modules \
+  .venv/bin/python paper/check_reliability_merge.py --sections ui
+```
+
+When set, `CHEMGRIDMAP_NODE_PATH` supplies `NODE_PATH` for the UI subprocess.
+Otherwise the existing `NODE_PATH` and Node's normal module lookup are preserved.
+
+Each target uses ten seeds. Neighbor sets retain distance ties, and refinement uses
+the map seed. Seed 42 baseline methods run sequentially in fresh processes; other
+seeds use two workers by default. Avoid concurrent timing tasks.
+`--baseline-phase timing` / `remaining` separates these stages;
+`--resume-baselines` reuses checkpoints only when input, source, and output hashes
+match. Without resume, selected construction stages recompute their outputs.
+
+To supplement the existing 360 baseline rows without rerunning layouts or timings:
+
+```bash
+.venv/bin/python paper/run_reliability_analysis.py --steps baselines --baseline-phase metrics-only
+.venv/bin/python paper/run_reliability_analysis.py --steps figure-data
+```
+
+`metrics-only` checks input hashes, checkpoint CSV/NPZ hashes, molecule identity
+order, old metric rows, and recomputed optimistic Tanimoto DPQ16 (absolute tolerance
+1e-12). It reads `baselines/checkpoints/` directly, independently of construction
+cache keys, and preserves the original metric columns and `runtime_seed42.csv`.
+It appends `dpq16_minus_tanimoto`, `dpq2_minus_tanimoto`,
+`dpq16_minus_euclidean`, `spearman_vs_projection`, and
+`mean_displacement_vs_projection_cells`; summaries include mean/min/max.
+The last two metrics use all unique pairwise distances and normalized saved UMAP
+coordinates multiplied by `(grid_side - 1)`, respectively. No alignment is fitted.
+`checkpoint_dpq_verification.csv` and `metrics_only_verification.json` record checks.
+The updated manifest retains the original layout-generation provenance.
+
+`dpq_scores(..., ties="sorted")` is the optimistic DPQ default; `ties="mean"`
+computes pessimistic DPQ by replacing high-dimensional distances within each exact
+2D-distance tie group by their mean. For the 20×20 color gradient, both DPQ16
+variants equal 1 in place. With seed 42 random placement, optimistic DPQ16 is
+0.4249241333 and pessimistic DPQ⁻16 is 0.0114411272; the corrected tests require
+<0.6 and <0.1, respectively.
+
+Figure outputs are CSV tables with column descriptions for Prism. Figure 1 currently
+contains CA II layouts, groups, recall, and case markers; T2b adds activity evidence.
+Each stage manifest records source version, import path, installed distribution
+version, and input/source/output hashes. LAS/FLAS use independent implementations,
+floating-point LAP costs, and vacancy-mask filtering.
+
+If the sandbox blocks `time -l` memory statistics, preserve the original error and
+record `resource.getrusage` peak RSS separately. This does not count as a successful
+native `time -l` memory measurement.
