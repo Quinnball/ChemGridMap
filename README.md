@@ -37,6 +37,10 @@ An [activity-colored nine-cell example](docs/chemgridmap_demo.svg) is also retai
 
 ## Installation
 
+The development checkout is version **0.5.0.dev0**. The frozen 0.4.0 source
+archive remains the reference for earlier manuscript results; use this checkout
+for the reliability layers described below.
+
 Version 0.4.0 adds fingerprint-space Butina groups, checked Murcko scaffold
 coverage, shared-core alignment, and atom-level comparison exports. The local
 English browser interface uses the same core as the command-line program.
@@ -177,6 +181,65 @@ running pytest. It does not use a previously activated conda environment.
 On Windows, use `.venv\Scripts\python -m pytest -q` after installing the same extras.
 The manuscript environment is recorded in `requirements-paper.lock.txt`; it is
 a Python 3.12 environment snapshot, not a promise of bitwise agreement on every OS.
+
+## Reliability layers (0.5)
+
+The CLI and browser enable three reliability methods by default. Activity class
+support uses one median per entry and source document, merging identical values
+at two-decimal precision by default. A pooled Gaussian document-noise model gives
+the document-balanced estimate, probabilities for the displayed classes, and
+agreement probabilities for a new document. Fewer than five multi-unit entries
+use an SD of 0.64 log units. Class support below 0.8 is shown with a faded color;
+the original median, activity class, and source records are preserved. Use
+`--no-merge-identical-documents` (or the corresponding Advanced setting) to keep
+identical document values as separate evidence units. The policy is saved in the
+curation report and run manifest.
+
+Neighbor refinement moves or swaps occupied grid cells to bring representation
+neighbors closer while retaining a weak anchor to the projection. Defaults are
+k=10, Gaussian distance scales 3/2/1.5 cells, search radius 3, anchor 0.003, and
+the map's random seed. Each cell reports tie-aware neighbor recall. Group cores
+use the largest member scaffold or scaffold-network ring fragment covering at
+least 80% of members; if no candidate meets the target, the highest-coverage
+candidate is reported with the missed target. The most frequent scaffold's
+coverage remains available for comparison. `--core-min-coverage` sets the target
+for `--core-rule coverage`, accepts 0.5–1 inclusive, and defaults to 0.8.
+The lower-level `build_grid_map`
+API retains its legacy layout/core defaults; opt in with
+`grid_refinement="neighbors", core_rule="coverage"` and annotate source records
+with `chemgridmap.evidence.annotate_activity_confidence` before mapping.
+
+Document-offset diagnostics compare the per-entry medians of every document pair
+sharing at least three entries. Pairs are flagged when the absolute median
+offset is at least 1 log unit and at least 80% of shared entries have the same
+sign as that offset. Differences are document B minus document A, with document
+IDs sorted lexically; SD uses the sample denominator. Flagged pairs appear in
+`<name>_document_offsets.csv`, and affected shared entries carry pair counts and
+document IDs. The report records all evaluated pair counts (including when none
+are flagged) and the ten flagged pairs with the most shared entries. The
+inspector shows a warning. This is a diagnostic; it does not correct activities
+or turn documents into independent laboratories.
+
+Export additional layers with
+`--map-color-modes activity class_support neighbor_recall structure_group`.
+Each requested layer has `<name>_<mode>.svg` and a PNG when PNG is enabled in
+`--output-formats`; non-activity layers include legends and share the same cell
+positions. Neighbor recall uses five blue levels and remains available with
+`--grouping none`. The browser renders available additional layers only as SVG
+and uses the main `map.*` files for observed activity, in the selected formats.
+The Export panel lists these files, and both CLI and browser result ZIPs include
+the layers and document-offset diagnostics. Library callers
+can use `render_grid_map(..., color_by="neighbor_recall")` or pass
+`map_color_modes` to `build_grid_map`; `map_color_formats=["svg"]` limits the
+additional layers to SVG. Its default `None` preserves the CLI behavior above.
+
+To reproduce 0.4.0 layout and core behavior on the same input and environment:
+
+```bash
+chemgridmap src/chemgridmap/data/chembl205_ic50.csv --input-format chembl \
+  --projection umap --random-state 42 --grid-refinement none \
+  --core-rule most_frequent --no-activity-confidence --output-dir legacy_result
+```
 
 ## ChEMBL CSV to chemical map
 

@@ -8,7 +8,7 @@ manuscript.
   CHEMBL205 IC50 activity export retrieved from the ChEMBL 37 REST API.
 - `chembl37_chembl205/chembl_status.json` records the ChEMBL service release
   metadata observed during retrieval.
-- `chembl37_chembl204/chembl37_chembl204_ic50_raw.csv` contains the D3 IC50
+- `chembl37_chembl204/chembl37_chembl204_ic50_raw.csv` contains the thrombin (prothrombin; CHEMBL204) IC50
   export, with release and retrieval metadata in the same directory.
 - `chembl37_chembl205/historical_vs_chembl37_comparison.json` summarizes the
   comparison with the archived 966-record project table.
