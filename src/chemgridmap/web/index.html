@@ -64,8 +64,11 @@
             <p class="micro">Occupancy controls empty space, not guaranteed neighborhood preservation.</p>
           </div>
           <details id="advanced" class="advanced"><summary>Advanced settings <span>Activity thresholds, molecular identity &amp; export</span></summary>
-            <div class="form-row"><label>Structure grouping<select id="grouping"><option value="butina">Morgan / Butina</option><option value="external">Supplied groups (molecule table)</option><option value="none">No grouping</option></select></label><label>Center similarity threshold<input id="group-similarity" type="number" min="0.01" max="1" step="0.01" value="0.6"></label></div>
-            <div class="form-row"><label>External group column<input id="cluster-col" placeholder="cluster_id"></label><label>External group source<input id="cluster-source" placeholder="Method, parameters or provenance"></label></div>
+            <div class="form-row"><label>Structure grouping<select id="grouping"><option value="butina">Morgan / Butina</option><option value="external">Supplied groups (molecule table)</option><option value="none">No grouping</option></select></label><label data-butina-setting>Center similarity threshold<input id="group-similarity" type="number" min="0.01" max="1" step="0.01" value="0.6"></label></div>
+            <div class="form-row" data-external-setting><label>External group column<input id="cluster-col" placeholder="cluster_id"></label><label>External group source<input id="cluster-source" placeholder="Method, parameters or provenance"></label></div>
+            <div class="form-row" data-core-setting><label>Group core<select id="core-rule"><option value="coverage">Largest core covering the target share</option><option value="most_frequent">Most frequent scaffold (0.4 rule)</option></select></label><label>Core coverage target<input id="core-coverage-target" type="number" min="0.5" max="1" step="0.05" value="0.8"></label></div>
+            <div class="form-row"><label>Grid layout<select id="grid-refinement"><option value="neighbors">Neighbor-refined</option><option value="none">Minimum displacement (0.4 rule)</option></select></label><label class="checkbox"><input type="checkbox" id="activity-confidence" checked> Estimate activity class support from source documents</label></div>
+            <label class="checkbox"><input type="checkbox" id="merge-identical-documents" checked> Merge identical activity values across source documents into one evidence unit</label>
             <p class="micro">Groups use original Morgan fingerprints, not 2D islands. Exact grouping supports up to 10,000 molecules; choose No grouping for larger maps.</p>
             <div class="form-row"><label>Lower pChEMBL<input id="lower" type="number" value="6" step="0.1" required></label><label>Upper pChEMBL<input id="upper" type="number" value="7" step="0.1" required></label></div>
             <div class="form-row"><label>Conflict range threshold<input id="conflict-range" type="number" value="1" min="0" step="0.1" required></label><label>Random seed<input id="seed" type="number" value="42" min="0" step="1" required></label></div>
@@ -82,11 +85,11 @@
       <div class="page-heading explore-heading"><div><span class="eyebrow">MOLECULAR LANDSCAPE</span><h1 id="explore-title">Explore the map</h1><p id="run-caption" class="muted"></p></div><div class="result-actions"><button id="adjust-settings" class="secondary">Adjust settings</button><button id="open-audit" class="secondary" disabled>Data audit <span id="audit-count" class="count-badge" hidden></span></button><button id="open-export" class="primary" disabled>Export <span aria-hidden="true">↗</span></button></div></div>
       <section id="summary" class="stat-strip" hidden aria-label="Run summary"></section>
       <section id="group-controls" class="group-controls" hidden aria-label="Structural comparison">
-        <label>Color by<select id="color-mode"><option value="activity">Observed activity</option><option value="structure">Structure group</option></select></label>
-        <label>Compare a structural group<select id="group-select"></select></label>
-        <button id="compare-group" class="secondary">Compare structures</button>
+        <label>Color by<select id="color-mode"><option value="activity">Observed activity</option><option value="support">Activity class support</option><option value="reliability">Neighbor reliability</option><option value="structure">Structure group</option></select></label>
+        <label data-group-only>Compare a structural group<select id="group-select"></select></label>
+        <button id="compare-group" class="secondary" data-group-only>Compare structures</button>
         <label class="checkbox"><input id="show-neighbor-links" type="checkbox" checked> Mark neighbor agreement</label>
-        <span id="group-method" class="micro"></span>
+        <span id="group-method" class="micro" data-group-only></span>
       </section>
       <div class="map-and-inspector" id="map-layout">
         <section class="map-card">
@@ -108,7 +111,7 @@
     </section>
   </main>
   <dialog id="comparison-dialog" class="wide-dialog"><div class="dialog-heading"><div><span class="eyebrow">STRUCTURAL COMPARISON</span><h2 id="comparison-title"></h2></div><button class="icon-button" data-close-dialog aria-label="Close structural comparison">×</button></div>
-    <div class="core-summary"><figure><div id="core-svg"></div><figcaption>Selected scaffold</figcaption></figure><figure><div id="representative-svg"></div><figcaption>Representative molecule</figcaption></figure><div><p id="core-coverage"></p><p id="comparison-rule" class="micro"></p><p class="micro">Orange highlights atoms and bonds outside the matched core. Activity is shown only in the top strip. This is not a causal structure-activity claim.</p><button id="download-comparison" class="secondary">Download comparison and atom matches</button></div></div>
+    <div class="core-summary"><figure><div id="core-svg"></div><figcaption>Selected core</figcaption></figure><figure><div id="representative-svg"></div><figcaption>Representative molecule</figcaption></figure><div><p id="core-coverage"></p><p id="comparison-rule" class="micro"></p><p class="micro">Orange highlights atoms and bonds outside the matched core. Activity is shown only in the top strip. This is not a causal structure-activity claim.</p><button id="download-comparison" class="secondary">Download comparison and atom matches</button></div></div>
     <p class="micro">On a narrow screen, scroll the comparison horizontally to keep structures readable.</p><div id="comparison-svg"></div><details><summary>All group members and scaffold coverage</summary><div id="group-members" class="table-scroll"></div><p class="micro">Select a row to locate the molecule on the unchanged map. Complete metadata and atom mappings are included in the ZIP.</p></details>
   </dialog>
   <dialog id="audit-dialog" class="wide-dialog"><div class="dialog-heading"><div><span class="eyebrow">QUALITY &amp; PROVENANCE</span><h2>Data audit</h2></div><button class="icon-button" data-close-dialog aria-label="Close data audit">×</button></div><details id="audit" class="audit" hidden open><summary>Curation &amp; interpretation</summary><div id="audit-body"></div></details><details id="metrics" class="preview" hidden><summary>Projection &amp; grid diagnostics</summary><p class="micro">Projection-to-grid fidelity is separate from chemical or biological validity. These values describe this run, not predictive performance.</p><div id="metrics-table" class="table-scroll"></div></details><p id="saved-location" class="micro"></p></dialog>

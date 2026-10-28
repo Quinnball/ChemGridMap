@@ -21,6 +21,7 @@ import pandas as pd
 
 from . import __version__
 from .chembl import curate_chembl_activity_data, detect_chembl_columns, save_chembl_curation
+from .evidence import annotate_activity_confidence
 from .inspection import inspect_entry, load_audit_context
 from .pipeline import build_grid_map
 from .plotting import render_svg
@@ -111,6 +112,10 @@ class AppSession:
             (directory / "app_options.json").write_text(json.dumps(options, indent=2), encoding="utf-8")
             source = {"input_file": self.filename, "input_file_sha256": hashlib.sha256(self.raw).hexdigest(),
                       "interface": "local-browser", "chemgridmap_version": __version__}
+            source["reliability_parameters"] = {
+                "activity_confidence": options["activity_confidence"],
+                "merge_identical_documents": options["merge_identical_documents"],
+            }
             data = self.frame.copy()
             curation, curation_files = None, {}
             if options["input_format"] == "chembl":
@@ -123,6 +128,21 @@ class AppSession:
                 )
                 curation.report.update(source)
                 source["curation_parameters"] = curation.report["parameters"]
+                document_column = curation.report["detected_columns"].get("document_id")
+                if options["activity_confidence"] and document_column:
+                    self.update(message="Estimating how well source documents support each activity class...")
+                    try:
+                        curation.molecules, fit = annotate_activity_confidence(
+                            curation.molecules, curation.retained_records, lower=options["lower_threshold"],
+                            upper=options["upper_threshold"], value="activity_pchembl_raw", document=document_column,
+                            merge_identical=options["merge_identical_documents"])
+                        curation.report["activity_confidence"] = fit
+                        source["activity_confidence"] = fit
+                    except ValueError as exc:
+                        curation.report["warnings"].append(f"Activity class support was not estimated: {exc}")
+                elif options["activity_confidence"]:
+                    curation.report["warnings"].append(
+                        "Activity class support was not estimated: the input has no document identifiers.")
                 curation_files = save_chembl_curation(curation, directory, "map")
                 source["curation_outputs"] = file_digests(curation_files)
                 data = curation.molecules
@@ -130,6 +150,11 @@ class AppSession:
             else:
                 smiles_col, value_col, label_col = options["smiles_col"], options["value_col"], options["label_col"]
             self.update(message="Calculating the projection, assigning grid cells and rendering. UMAP's first run may take longer.")
+            color_modes = ["neighbor_recall"]
+            if "class_status" in data:
+                color_modes.append("class_support")
+            if options["grouping"] != "none":
+                color_modes.append("structure_group")
             result = build_grid_map(
                 data, output_dir=directory, name="map", smiles_col=smiles_col,
                 value_col=value_col, label_col=label_col, representation=options["representation"],
@@ -139,6 +164,9 @@ class AppSession:
                 output_formats=options["output_formats"], provenance=source,
                 grouping=options["grouping"], group_similarity=options["group_similarity"],
                 cluster_col=options["cluster_col"], cluster_source=options["cluster_source"],
+                grid_refinement=options["grid_refinement"], core_rule=options["core_rule"],
+                core_min_coverage=options["core_min_coverage"],
+                map_color_modes=color_modes, map_color_formats=["svg"],
             )
             result.output_files.update(curation_files)
             files = {Path(path).name: Path(path) for path in result.output_files.values()}
@@ -226,6 +254,17 @@ class AppSession:
                            "record_count_verified": False, "median_verified": False,
                            "quality_annotations_verified": False, "run_binding_verified": False}
             selected = chosen.iloc[0]
+            if curation is not None and selected.get("discordant_document_pairs", 0):
+                document_column = curation.report["detected_columns"].get("document_id")
+                documents = set(records[document_column].dropna().astype(str))
+                offsets = curation.report.get("activity_confidence", {}).get("document_offsets", [])
+                summary["document_offsets"] = [pair for pair in offsets
+                    if pair["document_a"] in documents and pair["document_b"] in documents]
+                for pair in summary["document_offsets"]:
+                    summary["warnings"].append(
+                        "Source documents disagree systematically: {} vs {} "
+                        "(median offset {:.3g} log units, {} shared entries).".format(
+                            pair["document_a"], pair["document_b"], pair["median_offset"], pair["shared_entries"]))
             row, col = int(selected.grid_row), int(selected.grid_col)
             neighbors = data[data.grid_row.sub(row).abs().le(1) & data.grid_col.sub(col).abs().le(1)]
             directory = Path(self.job["output_dir"])
@@ -266,14 +305,17 @@ def validate_options(options):
                 "upper_threshold": 7.0, "conflict_range_threshold": 1.0, "random_state": 42,
                 "grid_occupancy": .4, "render_detail": "auto", "structure_policy": "auto",
                 "grouping": "butina", "group_similarity": .6, "cluster_col": None, "cluster_source": None,
-                "molecule_identity": "auto", "output_formats": ["svg", "png", "pdf"]}
+                "molecule_identity": "auto", "output_formats": ["svg", "png", "pdf"],
+                "grid_refinement": "neighbors", "core_rule": "coverage", "core_min_coverage": .8,
+                "activity_confidence": True, "merge_identical_documents": True}
     if not isinstance(options, dict) or set(options) - set(defaults):
         raise ValueError("Unknown map option.")
     values = {**defaults, **options}
     choices = {"input_format": {"chembl", "molecule"}, "representation": {"morgan", "descriptors"},
                "projection": {"pca", "tsne", "umap"}, "render_detail": {"auto", "full", "overview"},
                "structure_policy": {"auto", "parent", "as-recorded"},
-               "molecule_identity": {"auto", "parent-id", "canonical-smiles"}}
+               "molecule_identity": {"auto", "parent-id", "canonical-smiles"},
+               "grid_refinement": {"none", "neighbors"}, "core_rule": {"most_frequent", "coverage"}}
     choices['grouping'] = {'butina', 'external', 'none'}
     for key, allowed in choices.items():
         if values[key] not in allowed:
@@ -290,6 +332,11 @@ def validate_options(options):
     values['group_similarity'] = float(values['group_similarity'])
     if not 0 < values['group_similarity'] <= 1:
         raise ValueError("Group similarity must be in (0, 1].")
+    values["core_min_coverage"] = float(values["core_min_coverage"])
+    if not 0.5 <= values["core_min_coverage"] <= 1:
+        raise ValueError("Core coverage target must be between 50% and 100%.")
+    values["activity_confidence"] = bool(values["activity_confidence"])
+    values["merge_identical_documents"] = bool(values["merge_identical_documents"])
     if values['grouping'] == 'external' and (values['input_format'] != 'molecule' or not values['cluster_col'] or not values['cluster_source']):
         raise ValueError("External groups require molecule-table input, a group column, and its source.")
     if not 0 <= values["random_state"] < 2**32:
@@ -363,7 +410,8 @@ class LocalHandler(BaseHTTPRequestHandler):
                 if session.result is None:
                     raise ValueError("Build a map first.")
                 columns = [name for name in ("projection_x", "projection_y", "grid_x", "grid_y", "grid_row", "grid_col",
-                           "activity_class", "molecule_id", "molecule_identity_key", "structure_group", "structure_group_color", "comparison_id") if name in session.result.data]
+                           "activity_class", "molecule_id", "molecule_identity_key", "structure_group", "structure_group_color", "comparison_id",
+                           "neighbor_recall", "class_confidence", "class_status", "n_evidence_units") if name in session.result.data]
                 self.send(json_rows(session.result.data[columns]))
             elif path == "/api/groups":
                 if session.result is None:

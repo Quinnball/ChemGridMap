@@ -25,9 +25,14 @@ def test_app_uses_the_same_curation_and_grid_as_library(tmp_path):
     app.start({"output_formats": ["svg"]}, background=False)
     assert app.job["state"] == "done", app.job
     curated = curate_chembl_activity_data(pd.read_csv(io.BytesIO(RAW)))
+    # This input has no document identifiers, so class support is skipped with a warning.
+    assert any("no document identifiers" in text for text in app.curation.report["warnings"])
     expected = build_grid_map(curated.molecules, smiles_col="canonical_smiles", value_col="activity_pchembl",
-                              label_col="activity_class", random_state=42)
+                              label_col="activity_class", random_state=42, grid_refinement="neighbors",
+                              core_rule="coverage", core_min_coverage=0.8)
     pd.testing.assert_frame_equal(app.result.data, expected.data)
+    for column in ("neighbor_recall", "neighbor_shared_count", "representation_neighbor_count"):
+        assert column in app.result.data
     detail, evidence = app.inspect(molecule_id="CHEMBL20")
     assert detail["summary"]["n_records"] == 3
     assert detail["summary"]["median_pchembl"] == 7.2
@@ -37,6 +42,12 @@ def test_app_uses_the_same_curation_and_grid_as_library(tmp_path):
         assert archive.read("input.csv") == RAW
         assert "map_retained_records.csv" in archive.namelist()
         assert json.loads(archive.read("app_options.json"))["projection"] == "pca"
+        params = json.loads(archive.read("map_run_manifest.json"))["parameters"]
+        assert params["map_color_modes"] == ["neighbor_recall", "structure_group"]
+        assert params["map_color_formats"] == ["svg"]
+        assert "map_neighbor_recall.svg" in archive.namelist()
+        assert "map_structure_group.svg" in archive.namelist()
+        assert not any(name.startswith(("map_activity.", "map_class_support.")) for name in archive.namelist())
 
 
 def test_changing_input_discards_stale_map_but_not_saved_files(tmp_path):
