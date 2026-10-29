@@ -23,13 +23,13 @@ The 0.3.0 validation ZIP in `validation_data/` supplies the three frozen raw
 exports and saved layouts. Restore it only when the local targets are absent:
 
 ```bash
-.venv/bin/python paper/restore_paper_data.py
+unzip -n validation_data/chemgridmap-0.3.0-validation.zip -d .
 ```
 
-The script checks SHA-256 values and refuses to replace differing local files.
-For a source checkout without that ZIP, obtain the same public ChEMBL 37
-activities from the ChEMBL API and select them with
-`paper/strengthening/SELECTION_RULES.md`.
+The `-n` option preserves existing files. The archive includes `SHA256.json`
+for checking the restored contents. For a source checkout without that ZIP,
+obtain the same public ChEMBL 37 activities from the ChEMBL API and select them
+with `paper/strengthening/SELECTION_RULES.md`.
 
 Regenerate the three-target layouts, record audit, figures and baseline tests:
 
@@ -61,6 +61,8 @@ The E1/E2 scripts use downloaded ChEMBL 37 activity files and do not commit
 those large CSVs. The selection criteria, seeds, endpoint counts and inclusion
 rule are recorded in
 [`strengthening/SELECTION_RULES.md`](strengthening/SELECTION_RULES.md).
+The original ChEMBL 37 API downloads will also be archived with the validation
+dataset on Zenodo because the live ChEMBL API will switch to a newer release.
 
 Download the selected targets and endpoints from the ChEMBL API:
 
