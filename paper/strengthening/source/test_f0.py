@@ -1,6 +1,7 @@
-"""Generate and verify the R1 F0 Prism-ready tables."""
+"""Generate and verify the R2 F0 Prism-ready tables."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -141,8 +142,9 @@ def test_f0() -> None:
     )
     assert len(actual_3a) == 52
 
-    # 3b: G comes from the forest table and D/B-range from E4 post hoc.
+    # 3b: G and B-range come from E2; D comes from E4.
     forest = data["e2_forest"]
+    hypothesis = data["e2_hypothesis_tests"]
     comparisons = data["e4_comparators"]
     for endpoint, expected_rows in (("IC50", 29), ("Ki", 23)):
         actual = read(f"3b_{endpoint}.csv")
@@ -162,28 +164,32 @@ def test_f0() -> None:
         np.testing.assert_allclose(
             actual.g_ci_high, source.loc[actual.target_id, "g_auc_ci_high"], atol=1e-15
         )
-        for comparator, columns in {
-            "D": ("d_auc", "d_auc_ci_low", "d_auc_ci_high"),
-            "B-sd": ("b_range_auc", "b_range_auc_ci_low", "b_range_auc_ci_high"),
-        }.items():
-            expected = source_e4.loc[
-                source_e4.comparator.eq(comparator), ["target", "auc", "auc_ci_low", "auc_ci_high"]
-            ].set_index("target")
+        expected_d = source_e4.loc[
+            source_e4.comparator.eq("D"),
+            ["target", "auc", "auc_ci_low", "auc_ci_high"],
+        ].set_index("target")
+        for output_column, source_column in (
+            ("d_auc", "auc"),
+            ("d_auc_ci_low", "auc_ci_low"),
+            ("d_auc_ci_high", "auc_ci_high"),
+        ):
             np.testing.assert_allclose(
-                actual.loc[:, columns[0]],
-                expected.loc[actual.target_id, "auc"],
+                actual.loc[:, output_column],
+                expected_d.loc[actual.target_id, source_column],
                 atol=1e-15,
             )
+        for output_column, source_column in (
+            ("b_range_auc", "b_range_auc"),
+            ("b_range_auc_ci_low", "b_range_auc_ci_low"),
+            ("b_range_auc_ci_high", "b_range_auc_ci_high"),
+        ):
             np.testing.assert_allclose(
-                actual.loc[:, columns[1]],
-                expected.loc[actual.target_id, "auc_ci_low"],
+                actual.loc[:, output_column],
+                source.loc[actual.target_id, source_column],
                 atol=1e-15,
             )
-            np.testing.assert_allclose(
-                actual.loc[:, columns[2]],
-                expected.loc[actual.target_id, "auc_ci_high"],
-                atol=1e-15,
-            )
+        expected_median = {"IC50": 0.508, "Ki": 0.486}[endpoint]
+        assert abs(float(actual.b_range_auc.median()) - expected_median) <= 0.0005
 
     # 3c: alternative minus G; X exists only for flagged datasets.
     census = data["e2_flagged_pairs_census"]
@@ -226,11 +232,28 @@ def test_f0() -> None:
                     targets.loc[expected.index, output_column], expected, atol=1e-15
                 )
         summary = actual.loc[actual.row_type.eq("summary")].iloc[0]
-        for output_column in alternatives:
-            values = targets[output_column].dropna()
-            assert np.isclose(summary[f"median_{output_column}"], values.median(), atol=1e-15)
-            assert summary[f"ci_low_{output_column}"] <= summary[f"median_{output_column}"]
-            assert summary[f"median_{output_column}"] <= summary[f"ci_high_{output_column}"]
+        summary_sources = {
+            "g_record_minus_g": ("H4", -1),
+            "g_global_minus_g": ("H5", -1),
+            "g_fixed_minus_g": ("H6", -1),
+            "x_minus_g": ("H7", 1),
+        }
+        for output_column, (hypothesis_id, sign) in summary_sources.items():
+            expected = hypothesis.loc[
+                hypothesis.population.eq("all")
+                & hypothesis.endpoint.eq(endpoint)
+                & hypothesis.hypothesis.eq(hypothesis_id)
+            ].iloc[0]
+            median = sign * float(expected.median_difference)
+            if sign < 0:
+                ci_low = -float(expected.median_ci_high)
+                ci_high = -float(expected.median_ci_low)
+            else:
+                ci_low = float(expected.median_ci_low)
+                ci_high = float(expected.median_ci_high)
+            assert abs(summary[f"median_{output_column}"] - median) <= 1e-12
+            assert abs(summary[f"ci_low_{output_column}"] - ci_low) <= 1e-12
+            assert abs(summary[f"ci_high_{output_column}"] - ci_high) <= 1e-12
 
     # 4a: eligible E4 bins are plotted directly; B0 is one point at probability 1.
     calibration = data["e4_calibration"]
@@ -248,6 +271,7 @@ def test_f0() -> None:
             actual.G_observed_agreement, g.observed_agreement, atol=1e-15
         )
         assert int(actual.G_n_predictions.notna().sum()) == len(g)
+        assert int(actual.loc[actual.B0_probability.notna(), "bin"].iloc[0]) == 5
         assert actual.loc[actual.B0_probability.notna(), "B0_probability"].iloc[0] == 1.0
         assert np.isclose(
             actual.loc[
@@ -311,6 +335,27 @@ def test_f0() -> None:
     )
     assert len(expected_4d) == 8 and len(table_4d) == 4
     assert {"m=1", "m>=2"} == set(table_4d.m_past)
+    for endpoint in ("IC50", "Ki"):
+        actual = read(f"4d_{endpoint}.csv")
+        source = expected_4d.loc[expected_4d.endpoint.eq(endpoint)]
+        for m_past in ("m=1", "m>=2"):
+            supported = source.loc[
+                source.m_past.eq(m_past) & source.display_status.eq("supported")
+            ].iloc[0]
+            uncertain = source.loc[
+                source.m_past.eq(m_past) & source.display_status.eq("uncertain")
+            ].iloc[0]
+            row = actual.loc[actual.m_past.eq(m_past)].iloc[0]
+            assert np.isclose(
+                row.supported_mean_predicted_probability,
+                supported.mean_p_displayed,
+                atol=1e-15,
+            )
+            assert np.isclose(
+                row.uncertain_mean_predicted_probability,
+                uncertain.mean_p_displayed,
+                atol=1e-15,
+            )
 
     # 5a remains ten seeds for each of three layouts and targets.
     recall_source = data["cgm_figure_3a"]
@@ -339,12 +384,15 @@ def test_f0() -> None:
     table_5b = read("5b_layout_contrasts.csv")
     assert len(table_5b) == 12
     for row in table_5b.itertuples(index=False):
+        source_comparison = row.comparison
+        if row.comparison == "minimum_displacement_minus_neighbor_refined":
+            source_comparison = "neighbor_refined_minus_minimum_displacement"
         source = expected_contrasts.loc[
             expected_contrasts.target.eq(row.target_id)
-            & expected_contrasts.comparison.eq(row.comparison)
+            & expected_contrasts.comparison.eq(source_comparison)
         ].iloc[0]
         expected = float(source.paired_difference_mean)
-        if row.comparison == "neighbor_refined_minus_minimum_displacement":
+        if row.comparison == "minimum_displacement_minus_neighbor_refined":
             expected = -expected
         assert np.isclose(row.other_minus_refined_e_grid, expected, atol=1e-15)
     herg_las = table_5b.loc[
@@ -355,7 +403,7 @@ def test_f0() -> None:
     assert round(float(herg_las), 3) == -0.024
     herg_minimum = table_5b.loc[
         table_5b.target_label.eq("hERG")
-        & table_5b.comparison.eq("neighbor_refined_minus_minimum_displacement"),
+        & table_5b.comparison.eq("minimum_displacement_minus_neighbor_refined"),
         "other_minus_refined_e_grid",
     ].iloc[0]
     assert round(float(herg_minimum), 3) == 0.005
@@ -393,6 +441,10 @@ def test_f0() -> None:
     core_overall = core.loc[core.target.eq("overall")]
     table_5e = read("5e_core_coverage_by_group_size.csv")
     assert len(table_5e) == 12
+    manifest = json.loads(MANIFEST_OUT.read_text(encoding="utf-8"))
+    panel_5e = next(panel for panel in manifest["panels"] if panel["panel"] == "5e")
+    assert any(series["name"] == "No ring scaffold" for series in panel_5e["series"])
+    assert "frozen 10 s" in panel_5e["note"]
     for rule in ("most_frequent", "coverage", "fmcs"):
         selected = table_5e.loc[table_5e.rule.eq(rule)]
         assert selected.groups.sum() == 480
@@ -447,14 +499,14 @@ def test_f0() -> None:
     assert {doc_pair.document_a, doc_pair.document_b} == set(pair)
     assert int(doc_pair.n_shared_entries) == int(shared)
 
-    print("F0 R1 PASS")
+    print("F0 R2 PASS")
     print("tables=18 panels=11 reused=1 posthoc=2")
     print("3a=52; 3b=29/23; 3c=29/23 with X=15/11")
     print("4a=G+1 eligible bins per endpoint; 4b=30; 4c=33 (31 supported>uncertain); 4d=4 rows (2 per endpoint)")
     print("5a=3x10; 5b=12; 5d=77+3; 5e=12")
     print(f"5b hERG LAS-random other-minus-refined={herg_las:.15g}")
     print(f"hERG patent median offset={table_4b.offset_b_minus_a.median():.15g}")
-    print("PASS: hashes, row/series counts, values, and R1 targets verified")
+    print("PASS: hashes, row/series counts, values, and R2 targets verified")
 
 
 if __name__ == "__main__":

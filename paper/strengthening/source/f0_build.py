@@ -79,6 +79,7 @@ def rel(path: Path) -> str:
 def source_paths() -> dict[str, Path]:
     return {
         "e2_forest": E2_OUT / "forest_plot_data.csv",
+        "e2_hypothesis_tests": E2_OUT / "hypothesis_tests.csv",
         "e2_metrics_by_target": E2_OUT / "metrics_by_target.csv",
         "e2_flagged_pairs_census": E2_OUT / "flagged_pairs_census.csv",
         "e2_sigma_doc": E2_OUT / "sigma_doc_by_target.csv",
@@ -156,8 +157,13 @@ def build_3b(data: dict) -> dict[str, pd.DataFrame]:
                 "g_auc",
                 "g_auc_ci_low",
                 "g_auc_ci_high",
+                "b_range_auc",
+                "b_range_auc_ci_low",
+                "b_range_auc_ci_high",
             ],
         ].rename(columns={"n_predictions": "g_n_predictions"}).copy()
+        if selected[["b_range_auc", "b_range_auc_ci_low", "b_range_auc_ci_high"]].isna().any().any():
+            raise AssertionError("E2 B-range AUC or CI is missing")
         posthoc = comparators.loc[
             comparators.endpoint.eq(endpoint)
             & comparators.population.eq("all")
@@ -195,9 +201,6 @@ def build_3b(data: dict) -> dict[str, pd.DataFrame]:
         b_range = b_range.rename(
             columns={
                 "n_predictions": "b_range_n_predictions",
-                "auc": "b_range_auc",
-                "auc_ci_low": "b_range_auc_ci_low",
-                "auc_ci_high": "b_range_auc_ci_high",
             }
         )
         selected = selected.merge(d, on="target_id", validate="one_to_one")
@@ -224,17 +227,9 @@ def build_3b(data: dict) -> dict[str, pd.DataFrame]:
     return out
 
 
-def bootstrap_median_ci(values: np.ndarray, seed: int = 20261028, repetitions: int = 2000):
-    rng = np.random.default_rng(seed)
-    draws = np.empty(repetitions)
-    for index in range(repetitions):
-        draws[index] = np.median(rng.choice(values, size=len(values), replace=True))
-    low, high = np.percentile(draws, [2.5, 97.5])
-    return float(np.median(values)), float(low), float(high)
-
-
 def build_3c(data: dict, b_tables: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
     metrics = data["e2_metrics_by_target"]
+    hypothesis = data["e2_hypothesis_tests"]
     alternatives = {
         "g_record_minus_g": "G-record",
         "g_global_minus_g": "G-global",
@@ -273,10 +268,23 @@ def build_3c(data: dict, b_tables: dict[str, pd.DataFrame]) -> dict[str, pd.Data
         values.insert(0, "row_type", "target")
 
         summary = {"row_type": "summary", "target_id": "median", "target_rank": np.nan}
-        for name in alternatives:
-            median, low, high = bootstrap_median_ci(
-                values[name].dropna().to_numpy(float)
-            )
+        summary_sources = {
+            "g_record_minus_g": ("H4", -1),
+            "g_global_minus_g": ("H5", -1),
+            "g_fixed_minus_g": ("H6", -1),
+            "x_minus_g": ("H7", 1),
+        }
+        for name, (hypothesis_id, sign) in summary_sources.items():
+            record = hypothesis.loc[
+                hypothesis.population.eq("all")
+                & hypothesis.endpoint.eq(endpoint)
+                & hypothesis.hypothesis.eq(hypothesis_id)
+            ].iloc[0]
+            median = sign * float(record.median_difference)
+            if sign < 0:
+                low, high = -float(record.median_ci_high), -float(record.median_ci_low)
+            else:
+                low, high = float(record.median_ci_low), float(record.median_ci_high)
             summary[f"median_{name}"] = median
             summary[f"ci_low_{name}"] = low
             summary[f"ci_high_{name}"] = high
@@ -311,6 +319,7 @@ def build_4a(data: dict) -> dict[str, pd.DataFrame]:
         table.loc[0, "B0_probability"] = float(b0.iloc[0].mean_probability)
         table.loc[0, "B0_observed_agreement"] = float(b0.iloc[0].observed_agreement)
         table.loc[0, "B0_n_predictions"] = int(b0.iloc[0].n_predictions)
+        table.loc[0, "bin"] = 5
         out[endpoint] = table
     return out
 
@@ -444,8 +453,11 @@ def build_4d(data: dict) -> dict[str, pd.DataFrame]:
                     "m_past": m_past,
                     "supported_agreement": float(supported.supported_agreement_rate),
                     "uncertain_agreement": float(uncertain.uncertain_agreement_rate),
-                    "mean_predicted_probability": float(
+                    "supported_mean_predicted_probability": float(
                         supported.mean_p_displayed
+                    ),
+                    "uncertain_mean_predicted_probability": float(
+                        uncertain.mean_p_displayed
                     ),
                     "supported_n_predictions": int(supported.supported_n),
                     "uncertain_n_predictions": int(uncertain.uncertain_n),
@@ -501,7 +513,7 @@ def build_5b(data: dict) -> pd.DataFrame:
         )
     ].copy()
     comparison_order = [
-        "neighbor_refined_minus_minimum_displacement",
+        "minimum_displacement_minus_neighbor_refined",
         "las_random_minus_neighbor_refined",
         "las_projection_minus_neighbor_refined",
         "flas_random_minus_neighbor_refined",
@@ -519,7 +531,7 @@ def build_5b(data: dict) -> pd.DataFrame:
         .rename(columns={"mean_e_grid": "refined_mean_e_grid"})
     )
     labels = {
-        "neighbor_refined_minus_minimum_displacement": (
+        "minimum_displacement_minus_neighbor_refined": (
             "minimum_displacement",
             "Minimum-displacement grid",
         ),
@@ -543,15 +555,18 @@ def build_5b(data: dict) -> pd.DataFrame:
         ("chembl240", "hERG"),
     ):
         for comparison in comparison_order:
+            source_comparison = comparison
+            if comparison == "minimum_displacement_minus_neighbor_refined":
+                source_comparison = "neighbor_refined_minus_minimum_displacement"
             record = comparisons.loc[
                 comparisons.target.eq(target)
-                & comparisons.comparison.eq(comparison)
+                & comparisons.comparison.eq(source_comparison)
             ].iloc[0]
             other_layout, other_label = labels[comparison]
             difference = float(record.paired_difference_mean)
             ci_low = float(record.t_ci_low)
             ci_high = float(record.t_ci_high)
-            if comparison == "neighbor_refined_minus_minimum_displacement":
+            if source_comparison != comparison:
                 # Minimum displacement stores refined - other; display other - refined.
                 difference = -difference
                 ci_low, ci_high = -ci_high, -ci_low
@@ -908,13 +923,14 @@ def gui_plan() -> str:
 - 表型：XY，每格 1 个值；每个端点单独导入，保持 `target_rank` 升序，即以 G AUC 从高到低排列。
 - 图型：horizontal forest plot。每端点页面 2.7 × 4.4 in。G 为端点色实心圆点；D 为 `#666666` 空心圆点；B-range 为 `#666666` 空心方形点。三者均带水平 95% CI，误差线 0.75 pt，无连接线；隐藏图例。
 - 轴：X「AUC」[0, 1]；Y 按 `target_rank` 排列 target ID。垂直参考线 x = 0.5，`#666666`，dashed，不显示标签和端点符号。
+- 数据：G 与 B-range 的 AUC/CI 均取 E2 `forest_plot_data.csv` 的 all 总体；D 取 E4 `comparators_posthoc.csv`。
 - IC50 系列：G `g_auc` + `g_ci_low/g_ci_high`，D `d_auc` + `d_auc_ci_low/d_auc_ci_high`，B-range `b_range_auc` + CI；各 {len(pd.read_csv(DATA_OUT / '3b_IC50.csv'))} 点。
 - Ki 系列：同上；各 {len(pd.read_csv(DATA_OUT / '3b_Ki.csv'))} 点。`*_n_predictions` 只作数据表信息，不画图。
 - 参考线：仅 x = 0.5。
 
 ## 图 3c — `3c_IC50.csv`、`3c_Ki.csv`
 
-- 表型：XY；`row_type=target` 的行画每个数据集，`row_type=summary` 行的 `median_*` 与 `ci_low_*`/`ci_high_*` 只画中位数及 bootstrap 95% CI。
+- 表型：XY；`row_type=target` 的行画每个数据集，`row_type=summary` 行的 `median_*` 与 `ci_low_*`/`ci_high_*` 直接取 E2 `hypothesis_tests.csv` 的 all 总体汇总。
 - 图型：horizontal forest。每端点页面 2.7 × 4.4 in；目标点和区间 3 pt/0.75 pt；无连接线、柱值、SD 或 SEM；隐藏图例。
 - 数值方向：`g_record_minus_g`、`g_global_minus_g`、`g_fixed_minus_g`、`x_minus_g` 均为“替代模型 − G”；正值表示 G 更好。
 - X「Alternative minus G log loss」[−0.30, 0.30]；Y 按 `target_rank` 排列。
@@ -925,7 +941,7 @@ def gui_plan() -> str:
 ## 图 4a — `4a_calibration_IC50.csv`、`4a_calibration_Ki.csv`
 
 - 表型：XY；`G_probability`/`G_observed_agreement` 与 `B0_probability`/`B0_observed_agreement` 各为一组 X/Y；每个端点单独成图。仅含 n ≥ 8 的显示类别概率区间。
-- 图型：G 用圆点加实线；B0 在概率 1 处用同色空心圆，仅一个点且不连线。页面 2.3 × 2.15 in；隐藏图例。
+- 图型：G 用圆点加实线；B0 在概率 1 处用同色空心圆，区间标号为 5，仅一个点且不连线。页面 2.3 × 2.15 in；隐藏图例。
 - IC50 颜色 `{ENDPOINT_COLORS['IC50']}`；Ki 颜色 `{ENDPOINT_COLORS['Ki']}`。
 - 轴：X「Predicted probability of the displayed class」[0, 1]；Y「Observed agreement」[0, 1]。
 - 参考线：y = x，`#666666`，dashed；不显示标签和端点符号。
@@ -949,7 +965,7 @@ def gui_plan() -> str:
 ## 图 4d — `4d_IC50.csv`、`4d_Ki.csv`
 
 - 表型：Grouped；`Row_title` 为 `m=1 | supported/uncertain` 和 `m>=2 | supported/uncertain`；每格 1 个值。
-- 图型：grouped bars + open points。supported/uncertain 一致率为两根柱；`mean_predicted_probability` 用 `#172536` 空心菱形点叠加。每端点页面 2.8 × 2.3 in；显示 2 位小数柱值；隐藏图例。
+- 图型：grouped bars + open points。supported/uncertain 一致率为两根柱；`supported_mean_predicted_probability` 与 `uncertain_mean_predicted_probability` 分别用 `#172536` 空心菱形点叠加在对应柱上。每端点页面 2.8 × 2.3 in；显示 2 位小数柱值；隐藏图例。
 - 轴：X 为空分类轴，按 CSV 行顺序；Y「Agreement / mean predicted probability」[0, 1]。
 - 颜色：supported `{DISPLAY_STATUS_COLORS['supported']}`；uncertain `{DISPLAY_STATUS_COLORS['uncertain']}`。
 - 参考线：无。
@@ -965,7 +981,7 @@ def gui_plan() -> str:
 
 - 表型：XY，12 行；`target_label` + `other_layout_label` 为行标签，X=`other_minus_refined_e_grid`，使用 `ci_low`/`ci_high` 的 95% t 区间，`n_seeds` 为 10。
 - 图型：horizontal forest。页面 3.3 × 2.9 in；点 3 pt、区间 0.75 pt、无连接线；隐藏图例。
-- 方向：所有值统一为“其他布局 − 精炼网格”；源文件中的“精炼 − 最小位移”已取反。正值表示精炼网格的活性邻居更相近。
+- 方向：所有值统一为“其他布局 − 精炼网格”；最小位移行的比较键为 `minimum_displacement_minus_neighbor_refined`，源文件中的“精炼 − 最小位移”已取反。正值表示精炼网格的活性邻居更相近。
 - 轴：X「Other layout minus refined e_grid」[−0.05, 0.05]；Y 按 CSV 顺序。
 - 颜色：minimum_displacement `{COMPARISON_COLORS['minimum_displacement']}`；LAS random `{COMPARISON_COLORS['las_random']}`；LAS projection `{COMPARISON_COLORS['las_projection']}`；FLAS `{COMPARISON_COLORS['flas_random']}`。
 - 参考线：x = 0，`#666666`，dashed；不显示标签和端点符号。
@@ -988,8 +1004,8 @@ def gui_plan() -> str:
 - 表型：Grouped；`Row_title` 为 rule | size stratum，共 12 行；四个覆盖率分类列为堆叠系列，`mean_core_heavy_atoms` 为另一组点。
 - 图型：stacked bars + open diamond points。页面 3.3 × 2.7 in；柱从 0 起、0.75 pt 边框；堆叠柱左轴，平均重原子数右轴。隐藏图例。
 - 轴：X 为空分类轴，顺序为 2、3–4、5–9、≥10，每档 most_frequent→coverage→fmcs；左 Y「Number of groups」[0, 220]；右 Y「Mean core heavy atoms」[0, 25]。
-- 堆叠颜色：≥0.8 `#006354`；0.5<c<0.8 `#1D5689`；≤0.5 `#666666`；No core `#D9D9D9`。平均重原子数点用 `#172536`。
-- 数据约束：每条规则四档组数之和必须为 480；No core 不并入 ≤0.5。无参考线。旧 FMCS 时间预算图已移出本主图。
+- 堆叠颜色：≥0.8 `#006354`；0.5<c<0.8 `#1D5689`；≤0.5 `#666666`；No ring scaffold `#D9D9D9`。平均重原子数点用 `#172536`。
+- 数据约束：每条规则四档组数之和必须为 480；No ring scaffold 不并入 ≤0.5。FMCS 为 E1-B 冻结的 10 s 结果。无参考线。旧 FMCS 时间预算图已移出本主图。
 """
 
 
@@ -1077,7 +1093,12 @@ def build_all() -> dict:
             "table_type": "XY",
             "rows": {endpoint: len(frame) for endpoint, frame in table_3c.items()},
             "source_files": source_refs(
-                paths, ["e2_metrics_by_target", "e2_flagged_pairs_census"]
+                paths,
+                [
+                    "e2_metrics_by_target",
+                    "e2_flagged_pairs_census",
+                    "e2_hypothesis_tests",
+                ],
             ),
             "series": {
                 endpoint: [
@@ -1167,8 +1188,13 @@ def build_all() -> dict:
                     series("Supported agreement", ["supported_agreement"], frame),
                     series("Uncertain agreement", ["uncertain_agreement"], frame),
                     series(
-                        "Mean predicted probability",
-                        ["mean_predicted_probability"],
+                        "Supported mean predicted probability",
+                        ["supported_mean_predicted_probability"],
+                        frame,
+                    ),
+                    series(
+                        "Uncertain mean predicted probability",
+                        ["uncertain_mean_predicted_probability"],
                         frame,
                     ),
                 ]
@@ -1198,7 +1224,10 @@ def build_all() -> dict:
                     {"column": "comparison", "value": comparison},
                 )
                 for comparison, name in (
-                    ("neighbor_refined_minus_minimum_displacement", "Minimum-displacement - refined"),
+                    (
+                        "minimum_displacement_minus_neighbor_refined",
+                        "Minimum-displacement - refined",
+                    ),
                     ("las_random_minus_neighbor_refined", "LAS random - refined"),
                     ("las_projection_minus_neighbor_refined", "LAS projection - refined"),
                     ("flas_random_minus_neighbor_refined", "FLAS - refined"),
@@ -1246,6 +1275,7 @@ def build_all() -> dict:
             "row_title_column": "Row_title",
             "rows": len(table_5e),
             "source_files": source_refs(paths, ["e1b_core_by_group_size"]),
+            "note": "FMCS is the frozen 10 s result from E1-B.",
             "series": [
                 series("Coverage >= 0.8", ["coverage_ge_0_8"], table_5e),
                 series(
@@ -1254,7 +1284,7 @@ def build_all() -> dict:
                     table_5e,
                 ),
                 series("Coverage <= 0.5", ["coverage_le_0_5"], table_5e),
-                series("No core", ["no_core"], table_5e),
+                series("No ring scaffold", ["no_core"], table_5e),
                 series(
                     "Mean core heavy atoms",
                     ["mean_core_heavy_atoms"],
