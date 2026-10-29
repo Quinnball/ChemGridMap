@@ -12,7 +12,7 @@ from typing import Optional, Sequence
 import pandas as pd
 
 from .chembl import curate_chembl_activity_data, save_chembl_curation
-from .evidence import annotate_activity_confidence
+from .evidence import annotate_activity_confidence, prepare_generic_activity_records
 from .pipeline import build_grid_map
 
 
@@ -46,16 +46,28 @@ def build_parser() -> argparse.ArgumentParser:
         "-o", "--output-dir", type=Path, default=Path("gridmap_output")
     )
     parser.add_argument("--name", default="grid_map", help="Output file prefix.")
-    parser.add_argument("--smiles-col", default="smiles")
-    parser.add_argument("--value-col")
+    parser.add_argument("--smiles-col", "--smiles-column", dest="smiles_col", default="smiles")
+    parser.add_argument("--value-col", "--value-column", dest="value_col")
     parser.add_argument("--label-col")
+    parser.add_argument(
+        "--compound-column",
+        help="Compound identifier column for a generic activity-record CSV.",
+    )
+    parser.add_argument(
+        "--document-column",
+        help="Source-document column for a generic activity-record CSV.",
+    )
+    parser.add_argument(
+        "--relation-column",
+        help="Optional relation column for a generic activity-record CSV; only '=' is retained.",
+    )
     parser.add_argument(
         "--representation",
         choices=["morgan", "descriptors", "embedding"],
         default="morgan",
     )
     parser.add_argument(
-        "--projection", choices=["pca", "tsne", "umap"], default="pca"
+        "--projection", choices=["pca", "tsne", "umap"], default="umap"
     )
     parser.add_argument(
         "--umap-metric",
@@ -187,15 +199,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Refine the minimum-displacement grid so representation neighbours sit closer "
              "('none' reproduces 0.4.0 layouts).")
     parser.add_argument(
-        "--core-rule", choices=["coverage", "most_frequent"], default="coverage",
+        "--core-rule", choices=["coverage", "most_frequent", "fmcs"], default="coverage",
         help="Group core: largest scaffold or ring fragment covering --core-min-coverage of members, "
-             "or the most frequent scaffold (0.4.0 rule).")
+             "the most frequent scaffold (0.4.0 rule), or FMCS.")
+    parser.add_argument(
+        "--fmcs-timeout", type=int, default=1,
+        help="FMCS search budget in seconds (default: 1). Timeout may make results machine-dependent.")
     parser.add_argument(
         "--core-min-coverage", type=_core_min_coverage, default=0.8,
-        help="Coverage target for --core-rule coverage; range: 0.5–1 (default: 0.8).")
+        help="Coverage target for coverage/FMCS rules; range: 0.5–1 (default: 0.8).")
     parser.add_argument(
         "--no-activity-confidence", action="store_true",
-        help="Skip document-level class-support estimation for ChEMBL input.")
+        help="Skip document-level class-support estimation.")
+    parser.add_argument(
+        "--evidence-model", choices=["gaussian", "exclude-flagged"], default="gaussian",
+        help="Activity evidence model (default: gaussian).")
     parser.add_argument(
         "--no-merge-identical-documents", action="store_true",
         help="Keep documents with identical entry medians as separate evidence units (default: merge).")
@@ -218,7 +236,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     data = pd.read_csv(args.input, sep=None, engine="python", encoding="utf-8-sig")
     source = {"input_file": args.input.name,
               "input_file_sha256": hashlib.sha256(args.input.read_bytes()).hexdigest(),
-              "reliability_parameters": {"activity_confidence": not args.no_activity_confidence,
+            "reliability_parameters": {"activity_confidence": not args.no_activity_confidence,
+                                         "evidence_model": args.evidence_model,
                                          "merge_identical_documents": not args.no_merge_identical_documents}}
     curation_files = {}
     if args.input_format == "chembl":
@@ -243,7 +262,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 curation.molecules, fit = annotate_activity_confidence(
                     curation.molecules, curation.retained_records, lower=args.lower_threshold,
                     upper=args.upper_threshold, value="activity_pchembl_raw", document=document_column,
-                    merge_identical=not args.no_merge_identical_documents)
+                    merge_identical=not args.no_merge_identical_documents,
+                    model=args.evidence_model)
                 curation.report["activity_confidence"] = fit
                 source["activity_confidence"] = fit
             except ValueError as exc:
@@ -269,6 +289,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         value_col = args.value_col
         label_col = args.label_col
         duplicate_policy = args.duplicate_policy
+        if args.compound_column:
+            if not value_col:
+                raise ValueError("--value-column is required with --compound-column.")
+            confidence = bool(args.document_column and not args.no_activity_confidence)
+            data, records, fit, generic_report = prepare_generic_activity_records(
+                data,
+                compound_column=args.compound_column,
+                value_column=value_col,
+                document_column=args.document_column,
+                smiles_column=smiles_col,
+                relation_column=args.relation_column,
+                lower=args.lower_threshold,
+                upper=args.upper_threshold,
+                conflict_range_threshold=args.conflict_range_threshold,
+                confidence=confidence,
+                merge_identical=not args.no_merge_identical_documents,
+                evidence_model=args.evidence_model,
+            )
+            source["generic_activity"] = generic_report
+            if fit is not None:
+                source["activity_confidence"] = fit
+            smiles_col = "canonical_smiles"
+            value_col = "activity_pchembl"
+            label_col = "activity_class"
+            duplicate_policy = "error"
 
     result = build_grid_map(
         data,
@@ -305,6 +350,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         provenance=source,
         grid_refinement=args.grid_refinement,
         core_rule=args.core_rule,
+        fmcs_timeout=args.fmcs_timeout,
         core_min_coverage=args.core_min_coverage,
         map_color_modes=args.map_color_modes,
     )

@@ -1,10 +1,13 @@
 import json
 import zipfile
 
+import numpy as np
 import pandas as pd
 import pytest
+from rdkit import Chem
 
 from chemgridmap.cli import build_parser, main
+from chemgridmap.cores import mcs_core
 
 
 @pytest.mark.parametrize("merge_identical", [True, False])
@@ -35,7 +38,7 @@ def test_cli_evidence_policy_offsets_layers_and_archive(tmp_path, merge_identica
     assert offsets.median_offset.eq(2).all()
     assert offsets.total_evaluated_pairs.eq(3).all()
     manifest = json.loads((tmp_path / "check_run_manifest.json").read_text())
-    assert manifest["software_version"] == "0.5.0.dev0"
+    assert manifest["software_version"] == "0.5.0"
     params = manifest["parameters"]
     assert params["merge_identical_documents"] is merge_identical
     assert params["activity_confidence"] is True
@@ -58,15 +61,108 @@ def test_cli_reliability_help_and_legacy_switches():
     parser = build_parser()
     help_text = parser.format_help()
     for option in ("--no-merge-identical-documents", "--map-color-modes", "--grid-refinement",
-                   "--core-rule", "--core-min-coverage", "--no-activity-confidence"):
+                   "--core-rule", "--core-min-coverage", "--fmcs-timeout",
+                   "--no-activity-confidence", "--evidence-model", "--compound-column",
+                   "--document-column", "--relation-column", "--smiles-column", "--value-column"):
         assert option in help_text
     normalized_help = " ".join(help_text.split())
-    assert "Coverage target for --core-rule coverage; range: 0.5–1 (default: 0.8)." in normalized_help
+    assert "Coverage target for coverage/FMCS rules; range: 0.5–1 (default: 0.8)." in normalized_help
+    defaults = parser.parse_args(["input.csv"])
+    assert defaults.projection == "umap"
+    assert defaults.grid_refinement == "neighbors"
+    assert defaults.core_rule == "coverage"
+    assert defaults.evidence_model == "gaussian"
+    assert defaults.fmcs_timeout == 1
     args = parser.parse_args(["input.csv", "--grid-refinement", "none", "--core-rule", "most_frequent",
                               "--no-activity-confidence"])
     assert args.grid_refinement == "none" and args.core_rule == "most_frequent"
     assert args.core_min_coverage == 0.8
     assert args.no_activity_confidence
+
+
+def test_generic_activity_records_match_chembl_annotation_numerically(tmp_path):
+    rows = []
+    for index, smiles in enumerate(
+        ["CCO", "c1ccccc1", "Cc1ccccc1", "Oc1ccccc1", "Nc1ccccc1", "n1ccccc1"]
+    ):
+        for document, offset in [("DOC_A", 0.0), ("DOC_B", 0.25), ("DOC_C", 1.5)]:
+            rows.append({
+                "molecule_chembl_id": f"CHEMBL{index + 1}",
+                "canonical_smiles": smiles,
+                "pchembl_value": 5.0 + index * 0.2 + offset,
+                "document_chembl_id": document,
+                "target_chembl_id": "CHEMBL205",
+                "standard_type": "IC50",
+                "standard_relation": "=",
+                "standard_units": "nM",
+                "potential_duplicate": 0,
+            })
+    source = tmp_path / "chembl.csv"
+    pd.DataFrame(rows).to_csv(source, index=False)
+    common = [
+        "--projection", "pca", "--grid-padding", "2", "--render-detail", "overview",
+        "--output-formats", "svg", "--output-dir", str(tmp_path),
+    ]
+    assert main([
+        str(source), "--input-format", "chembl", "--name", "chembl_path", *common
+    ]) == 0
+    retained = pd.read_csv(tmp_path / "chembl_path_retained_records.csv")
+    generic = retained[[
+        "molecule_identity_key", "canonical_smiles", "activity_pchembl_raw",
+        "document_chembl_id", "standard_relation",
+    ]].rename(columns={
+        "molecule_identity_key": "compound_id",
+        "canonical_smiles": "structure",
+        "activity_pchembl_raw": "p_activity",
+        "document_chembl_id": "document_id",
+        "standard_relation": "relation",
+    })
+    generic_path = tmp_path / "generic.csv"
+    generic.to_csv(generic_path, index=False)
+    assert main([
+        str(generic_path), "--input-format", "molecule", "--name", "generic_path",
+        "--compound-column", "compound_id", "--smiles-column", "structure",
+        "--value-column", "p_activity", "--document-column", "document_id",
+        "--relation-column", "relation", *common,
+    ]) == 0
+    chembl = pd.read_csv(tmp_path / "chembl_path_grid_coordinates.csv").set_index("molecule_identity_key")
+    generic_map = pd.read_csv(tmp_path / "generic_path_grid_coordinates.csv").set_index("molecule_identity_key")
+    columns = [
+        "activity_pchembl", "document_balanced_pchembl", "class_confidence",
+        "class_reproducibility", "n_evidence_units", "n_documents",
+    ]
+    assert list(generic_map.index) == list(chembl.index)
+    np.testing.assert_allclose(
+        generic_map[columns].to_numpy(float),
+        chembl[columns].to_numpy(float),
+        rtol=0.0,
+        atol=1e-12,
+    )
+
+
+def test_cli_fmcs_core_end_to_end_records_timeout(tmp_path):
+    source = tmp_path / "molecules.csv"
+    pd.DataFrame({
+        "smiles": ["c1ccccc1", "Cc1ccccc1", "Oc1ccccc1", "Nc1ccccc1", "n1ccccc1", "CC(=O)O"],
+        "value": [7.1, 7.0, 6.8, 6.7, 6.9, 5.0],
+    }).to_csv(source, index=False)
+    assert main([
+        str(source), "--projection", "pca", "--grid-padding", "2",
+        "--core-rule", "fmcs", "--fmcs-timeout", "1", "--output-dir", str(tmp_path),
+        "--name", "fmcs", "--output-formats", "svg", "--render-detail", "overview",
+    ]) == 0
+    groups = json.loads((tmp_path / "fmcs_structure_groups.json").read_text())["groups"]
+    assert all(group["core_rule"] == "fmcs" and isinstance(group["fmcs_timed_out"], bool) for group in groups)
+    members = pd.read_csv(tmp_path / "fmcs_structure_members.csv")
+    group = max(groups, key=lambda item: item["size"])
+    mols = [
+        Chem.MolFromSmiles(value)
+        for value in members.loc[members.structure_group.eq(group["structure_group"]), "canonical_smiles"]
+    ]
+    direct = mcs_core(mols, min_coverage=0.8, timeout=1)
+    assert group["core_smarts"] == direct["core_smarts"]
+    assert group["core_coverage_count"] == direct["coverage_count"]
+    assert group["fmcs_timed_out"] == direct["timed_out"]
 
 
 @pytest.mark.parametrize("coverage", ["0.3", "1.2"])

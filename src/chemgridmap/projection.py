@@ -50,8 +50,8 @@ def project_2d(
             import umap
         except ImportError as exc:
             raise ImportError(
-                "UMAP support is optional. Install it with "
-                "`pip install -e '.[umap]'` or `pip install umap-learn`."
+                "UMAP is a core dependency. Reinstall ChemGridMap with "
+                "`pip install chemgridmap` or `pip install umap-learn`."
             ) from exc
         metric = str(umap_metric).strip().lower()
         if metric not in {"euclidean", "jaccard", "cosine"}:

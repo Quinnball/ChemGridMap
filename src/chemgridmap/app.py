@@ -21,7 +21,7 @@ import pandas as pd
 
 from . import __version__
 from .chembl import curate_chembl_activity_data, detect_chembl_columns, save_chembl_curation
-from .evidence import annotate_activity_confidence
+from .evidence import annotate_activity_confidence, prepare_generic_activity_records
 from .inspection import inspect_entry, load_audit_context
 from .pipeline import build_grid_map
 from .plotting import render_svg
@@ -115,6 +115,7 @@ class AppSession:
                       "interface": "local-browser", "chemgridmap_version": __version__}
             source["reliability_parameters"] = {
                 "activity_confidence": options["activity_confidence"],
+                "evidence_model": options["evidence_model"],
                 "merge_identical_documents": options["merge_identical_documents"],
             }
             data = self.frame.copy()
@@ -136,7 +137,8 @@ class AppSession:
                         curation.molecules, fit = annotate_activity_confidence(
                             curation.molecules, curation.retained_records, lower=options["lower_threshold"],
                             upper=options["upper_threshold"], value="activity_pchembl_raw", document=document_column,
-                            merge_identical=options["merge_identical_documents"])
+                            merge_identical=options["merge_identical_documents"],
+                            model=options["evidence_model"])
                         curation.report["activity_confidence"] = fit
                         source["activity_confidence"] = fit
                     except ValueError as exc:
@@ -150,6 +152,30 @@ class AppSession:
                 smiles_col, value_col, label_col = "canonical_smiles", "activity_pchembl", "activity_class"
             else:
                 smiles_col, value_col, label_col = options["smiles_col"], options["value_col"], options["label_col"]
+                if options["compound_column"]:
+                    if not value_col:
+                        raise ValueError("A pActivity column is required for generic activity records.")
+                    confidence = bool(options["document_column"] and options["activity_confidence"])
+                    data, _, fit, report = prepare_generic_activity_records(
+                        data,
+                        compound_column=options["compound_column"],
+                        value_column=value_col,
+                        document_column=options["document_column"],
+                        smiles_column=smiles_col,
+                        relation_column=options["relation_column"],
+                        lower=options["lower_threshold"],
+                        upper=options["upper_threshold"],
+                        conflict_range_threshold=options["conflict_range_threshold"],
+                        confidence=confidence,
+                        merge_identical=options["merge_identical_documents"],
+                        evidence_model=options["evidence_model"],
+                    )
+                    source["generic_activity"] = report
+                    if fit is not None:
+                        source["activity_confidence"] = fit
+                    smiles_col, value_col, label_col = (
+                        "canonical_smiles", "activity_pchembl", "activity_class"
+                    )
             self.update(message="Calculating the projection, assigning grid cells and rendering. UMAP's first run may take longer.")
             color_modes = ["neighbor_recall"]
             if "class_status" in data:
@@ -166,7 +192,7 @@ class AppSession:
                 grouping=options["grouping"], group_similarity=options["group_similarity"],
                 cluster_col=options["cluster_col"], cluster_source=options["cluster_source"],
                 grid_refinement=options["grid_refinement"], core_rule=options["core_rule"],
-                core_min_coverage=options["core_min_coverage"],
+                core_min_coverage=options["core_min_coverage"], fmcs_timeout=options["fmcs_timeout"],
                 map_color_modes=color_modes, map_color_formats=["svg"],
             )
             result.output_files.update(curation_files)
@@ -307,13 +333,15 @@ class AppSession:
 def validate_options(options):
     defaults = {"input_format": "chembl", "target_id": None, "activity_type": "IC50",
                 "smiles_col": "smiles", "value_col": None, "label_col": None,
-                "representation": "morgan", "projection": "pca", "lower_threshold": 6.0,
+                "representation": "morgan", "projection": "umap", "lower_threshold": 6.0,
                 "upper_threshold": 7.0, "conflict_range_threshold": 1.0, "random_state": 42,
                 "grid_occupancy": .4, "render_detail": "auto", "structure_policy": "auto",
                 "grouping": "butina", "group_similarity": .6, "cluster_col": None, "cluster_source": None,
                 "molecule_identity": "auto", "output_formats": ["svg", "png", "pdf"],
                 "grid_refinement": "neighbors", "core_rule": "coverage", "core_min_coverage": .8,
-                "activity_confidence": True, "merge_identical_documents": True}
+                "fmcs_timeout": 1, "compound_column": None, "document_column": None,
+                "relation_column": None, "activity_confidence": True,
+                "evidence_model": "gaussian", "merge_identical_documents": True}
     if not isinstance(options, dict) or set(options) - set(defaults):
         raise ValueError("Unknown map option.")
     values = {**defaults, **options}
@@ -321,7 +349,9 @@ def validate_options(options):
                "projection": {"pca", "tsne", "umap"}, "render_detail": {"auto", "full", "overview"},
                "structure_policy": {"auto", "parent", "as-recorded"},
                "molecule_identity": {"auto", "parent-id", "canonical-smiles"},
-               "grid_refinement": {"none", "neighbors"}, "core_rule": {"most_frequent", "coverage"}}
+               "grid_refinement": {"none", "neighbors"},
+               "core_rule": {"most_frequent", "coverage", "fmcs"},
+               "evidence_model": {"gaussian", "exclude-flagged"}}
     choices['grouping'] = {'butina', 'external', 'none'}
     for key, allowed in choices.items():
         if values[key] not in allowed:
@@ -343,6 +373,11 @@ def validate_options(options):
         raise ValueError("Core coverage target must be between 50% and 100%.")
     values["activity_confidence"] = bool(values["activity_confidence"])
     values["merge_identical_documents"] = bool(values["merge_identical_documents"])
+    values["fmcs_timeout"] = int(values["fmcs_timeout"])
+    if values["fmcs_timeout"] < 1:
+        raise ValueError("FMCS timeout must be a positive integer.")
+    if values["compound_column"] and not values["value_col"]:
+        raise ValueError("Generic activity records require a pActivity value column.")
     if values['grouping'] == 'external' and (values['input_format'] != 'molecule' or not values['cluster_col'] or not values['cluster_source']):
         raise ValueError("External groups require molecule-table input, a group column, and its source.")
     if not 0 <= values["random_state"] < 2**32:
@@ -480,7 +515,7 @@ def main(argv=None):
     parser.add_argument("--port", type=int, default=0, help="Local port; default selects an available port.")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--smoke-test", action="store_true", help="Run the bundled ChEMBL example without a browser.")
-    parser.add_argument("--smoke-projection", choices=["pca", "umap"], default="pca")
+    parser.add_argument("--smoke-projection", choices=["pca", "umap"], default="umap")
     args = parser.parse_args(argv)
     session = AppSession(args.output_dir)
     if args.smoke_test:

@@ -113,3 +113,27 @@ def test_activity_confidence_report_is_strict_json():
     json.dumps(fit, allow_nan=False)
     again, _ = annotate_activity_confidence(molecules, records, fit=fit)  # a reported fit can be reused
     assert np.allclose(again.class_confidence, out.class_confidence)
+
+
+def test_exclude_flagged_evidence_model_reports_flagged_documents_and_fallback():
+    rows = []
+    for entry in ("A", "B", "C"):
+        rows.extend([
+            {"molecule_identity_key": entry, "document_chembl_id": "D1", "pchembl_value": 5.0},
+            {"molecule_identity_key": entry, "document_chembl_id": "D2", "pchembl_value": 6.5},
+        ])
+    rows.extend([
+        {"molecule_identity_key": "FALLBACK", "document_chembl_id": "D2", "pchembl_value": 7.0},
+        {"molecule_identity_key": "UNIQUE", "document_chembl_id": "D3", "pchembl_value": 6.0},
+    ])
+    records = pd.DataFrame(rows)
+    molecules = records.groupby("molecule_identity_key").pchembl_value.median().rename(
+        "activity_pchembl"
+    ).reset_index()
+    out, fit = annotate_activity_confidence(
+        molecules, records, model="exclude-flagged"
+    )
+    assert fit["model"] == "exclude_offset_documents"
+    assert fit["flagged_documents"] == ["D1", "D2"]
+    assert fit["excluded_entry_count"] == 4
+    assert out.set_index("molecule_identity_key").loc["FALLBACK", "n_evidence_units"] == 1

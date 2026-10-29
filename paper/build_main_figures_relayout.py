@@ -461,7 +461,8 @@ def main():
         pd.testing.assert_frame_equal(old,current[old.columns],check_dtype=False)
         unchanged_tables.append(path.name)
     checks['numeric_tables_equal_to_previous_delivery'] = unchanged_tables
-    checks['captions_sha256'] = sha(CAPTIONS)
+    checks['captions_sha256'] = sha(CAPTIONS) if CAPTIONS.is_file() else None
+    checks['captions_status'] = 'included' if CAPTIONS.is_file() else 'skipped: optional caption source not found'
     checks['exports'] = {}
     for path in out.glob('Figure_*.pdf'):
         with pymupdf.open(path) as pdf:
@@ -483,13 +484,17 @@ def main():
         with Image.open(path.with_suffix('.png')) as im:
             checks['exports'][path.stem].update(png_pixels=im.size,png_dpi=im.info.get('dpi'))
     (out/'figure_checks.json').write_text(json.dumps(checks,indent=2,default=lambda x:x.item()),encoding='utf-8')
-    (out/'Figure_captions_EN_ZH.md').write_bytes(CAPTIONS.read_bytes())
+    if CAPTIONS.is_file():
+        (out/'Figure_captions_EN_ZH.md').write_bytes(CAPTIONS.read_bytes())
+    else:
+        print(f'Warning: optional caption source not found; skipping {CAPTIONS.name}.')
     with zipfile.ZipFile(out/'ChemGridMap_three_main_figures.zip','w',zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(out.rglob('*')):
             if path.is_file() and path.suffix != '.zip':
                 archive.write(path, path.relative_to(out))
         archive.write(Path(__file__), 'source/chemgridmap/paper/'+Path(__file__).name)
-        archive.write(CAPTIONS, 'source/chemgridmap/paper/'+CAPTIONS.name)
+        if CAPTIONS.is_file():
+            archive.write(CAPTIONS, 'source/chemgridmap/paper/'+CAPTIONS.name)
     print(out)
     print(json.dumps(checks['exports'],indent=2))
 

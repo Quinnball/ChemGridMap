@@ -20,7 +20,7 @@ from .core import (
     prepare_molecules,
 )
 from .plotting import render_grid_map
-from .evidence import DOCUMENT_OFFSET_COLUMNS
+from .evidence import DOCUMENT_OFFSET_COLUMNS, prepare_generic_activity_records
 from .projection import project_2d
 from .refinement import refine_grid_layout
 from .reliability import grid_neighbor_sets, reliability_columns, representation_neighbor_sets
@@ -53,7 +53,7 @@ def build_grid_map(
     value_col: Optional[str] = None,
     label_col: Optional[str] = None,
     representation: str = "morgan",
-    projection: str = "pca",
+    projection: str = "umap",
     umap_metric: str = "auto",
     x_col: Optional[str] = None,
     y_col: Optional[str] = None,
@@ -82,9 +82,15 @@ def build_grid_map(
     group_similarity: float = 0.6,
     cluster_col: Optional[str] = None,
     cluster_source: Optional[str] = None,
-    grid_refinement: str = "none",
-    core_rule: str = "most_frequent",
+    grid_refinement: str = "neighbors",
+    core_rule: str = "coverage",
     core_min_coverage: float = 0.8,
+    fmcs_timeout: int = 1,
+    compound_col: Optional[str] = None,
+    document_col: Optional[str] = None,
+    relation_col: Optional[str] = None,
+    evidence_model: str = "gaussian",
+    merge_identical_documents: bool = True,
     map_color_modes: Optional[List[str]] = None,
     map_color_formats: Optional[Sequence[str]] = None,
 ) -> GridMapResult:
@@ -97,6 +103,30 @@ def build_grid_map(
     plus PNG when enabled by ``output_formats``. Main-map formats are unchanged.
     """
     started = time.perf_counter()
+    if compound_col:
+        if not value_col:
+            raise ValueError("value_col is required with compound_col.")
+        data, _, evidence_fit, generic_report = prepare_generic_activity_records(
+            data,
+            compound_column=compound_col,
+            value_column=value_col,
+            document_column=document_col,
+            smiles_column=smiles_col,
+            relation_column=relation_col,
+            lower=lower_threshold,
+            upper=upper_threshold,
+            conflict_range_threshold=1.0,
+            confidence=bool(document_col),
+            merge_identical=merge_identical_documents,
+            evidence_model=evidence_model,
+        )
+        smiles_col, value_col, label_col = (
+            "canonical_smiles", "activity_pchembl", "activity_class"
+        )
+        provenance = dict(provenance or {})
+        provenance["generic_activity"] = generic_report
+        if evidence_fit is not None:
+            provenance["activity_confidence"] = evidence_fit
     if bool(x_col) != bool(y_col):
         raise ValueError("x_col and y_col must be supplied together.")
     if grid_refinement not in {"none", "neighbors"}:
@@ -127,6 +157,7 @@ def build_grid_map(
     if len(prepared) < 2:
         raise ValueError("At least two valid molecule rows are required.")
 
+    projection_fallback = None
     if x_col and y_col:
         for column in [x_col, y_col]:
             if column not in prepared.columns:
@@ -155,14 +186,28 @@ def build_grid_map(
             selected_umap_metric = (
                 "jaccard" if representation.lower() == "morgan" else "euclidean"
             )
+        effective_projection = projection.lower()
+        if effective_projection == "umap" and len(representation_matrix) < 5:
+            # UMAP needs a neighborhood large enough for its spectral initialization.
+            effective_projection = "pca"
+            projection_fallback = "fewer_than_5_molecules"
         projected = project_2d(
             representation_matrix,
-            method=projection,
+            method=effective_projection,
             random_state=random_state,
             umap_metric=selected_umap_metric,
         )
+        if effective_projection == "umap" and not np.isfinite(projected).all():
+            effective_projection = "pca"
+            projection_fallback = "non_finite_umap_coordinates"
+            projected = project_2d(
+                representation_matrix,
+                method=effective_projection,
+                random_state=random_state,
+                umap_metric=selected_umap_metric,
+            )
         representation_name = representation.lower()
-        projection_name = projection.lower()
+        projection_name = effective_projection
         representation_distance_metric = (
             "jaccard" if representation_name == "morgan" else "euclidean"
         )
@@ -228,7 +273,8 @@ def build_grid_map(
             result_data, similarity=group_similarity, radius=radius, n_bits=n_bits,
             cluster_col=cluster_col if grouping == "external" else None,
             cluster_source=cluster_source if grouping == "external" else None,
-            core_rule=core_rule, core_min_coverage=core_min_coverage)
+            core_rule=core_rule, core_min_coverage=core_min_coverage,
+            fmcs_timeout=fmcs_timeout)
 
     values = None
     if value_col:
@@ -260,6 +306,7 @@ def build_grid_map(
     metrics["projection_distance_metric"] = (
         selected_umap_metric if projection_name == "umap" else "not_applicable"
     )
+    metrics["projection_fallback"] = projection_fallback
     metrics["representation_distance_metric"] = representation_distance_metric
     metrics["grid_assignment_method"] = selected_assignment_method
     metrics["grid_candidate_cells"] = int(grid_rows * grid_cols)
@@ -332,6 +379,7 @@ def build_grid_map(
             "environment": environment_versions(),
             "parameters": {
                 "representation": representation_name, "projection": projection_name,
+                "projection_fallback": projection_fallback,
                 "umap_metric": selected_umap_metric, "umap_n_neighbors": min(15, max(2, len(data) - 1)),
                 "umap_min_dist": 0.1, "random_state": random_state,
                 "morgan_radius": radius, "morgan_n_bits": n_bits,
@@ -344,7 +392,9 @@ def build_grid_map(
                 "lower_threshold": lower_threshold, "upper_threshold": upper_threshold,
                 "duplicate_policy": duplicate_policy, "render_detail": render_detail,
                 "grid_refinement": grid_refinement, "core_rule": core_rule,
-                "core_min_coverage": core_min_coverage,
+                "core_min_coverage": core_min_coverage, "fmcs_timeout": fmcs_timeout,
+                "evidence_model": evidence_model,
+                "merge_identical_documents": merge_identical_documents,
                 "map_color_modes": map_color_modes,
                 "map_color_formats": map_color_formats,
                 **reliability_parameters,

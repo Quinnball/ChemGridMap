@@ -6,7 +6,7 @@ VENV_PYTHON := .venv/bin/python
 setup:
 	$(PYTHON) -c "import sys; assert sys.version_info >= (3, 10), 'Use Python 3.10 or newer, not the legacy chemicalmap environment'"
 	$(PYTHON) -m venv .venv
-	$(VENV_PYTHON) -m pip install -e '.[dev,umap,paper]'
+	$(VENV_PYTHON) -m pip install -e '.[dev,paper]'
 
 check:
 	$(VENV_PYTHON) scripts/check_environment.py

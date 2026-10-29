@@ -28,7 +28,7 @@ def test_app_uses_the_same_curation_and_grid_as_library(tmp_path):
     # This input has no document identifiers, so class support is skipped with a warning.
     assert any("no document identifiers" in text for text in app.curation.report["warnings"])
     expected = build_grid_map(curated.molecules, smiles_col="canonical_smiles", value_col="activity_pchembl",
-                              label_col="activity_class", random_state=42, grid_refinement="neighbors",
+                              label_col="activity_class", projection="umap", random_state=42, grid_refinement="neighbors",
                               core_rule="coverage", core_min_coverage=0.8)
     pd.testing.assert_frame_equal(app.result.data, expected.data)
     for column in ("neighbor_recall", "neighbor_shared_count", "representation_neighbor_count"):
@@ -41,7 +41,7 @@ def test_app_uses_the_same_curation_and_grid_as_library(tmp_path):
     with zipfile.ZipFile(app.files["chemgridmap_results.zip"]) as archive:
         assert archive.read("input.csv") == RAW
         assert "map_retained_records.csv" in archive.namelist()
-        assert json.loads(archive.read("app_options.json"))["projection"] == "pca"
+        assert json.loads(archive.read("app_options.json"))["projection"] == "umap"
         params = json.loads(archive.read("map_run_manifest.json"))["parameters"]
         assert params["map_color_modes"] == ["neighbor_recall", "structure_group"]
         assert params["map_color_formats"] == ["svg"]
@@ -79,6 +79,30 @@ def test_curated_molecule_mode_has_no_invented_record_provenance(tmp_path):
     assert records.empty and not detail["summary"]["median_verified"]
 
 
+def test_generic_activity_records_use_shared_support_code(tmp_path):
+    app = AppSession(tmp_path)
+    app.load(
+        b'compound,smiles,p_activity,document\n'
+        b'C1,CCO,5.8,D1\nC1,OCC,6.2,D2\n'
+        b'C2,c1ccccc1,7.0,D1\nC2,c1ccccc1,7.4,D2\n'
+        b'C3,Cc1ccccc1,6.4,D1\nC3,Cc1ccccc1,6.8,D2\n'
+        b'C4,Oc1ccccc1,5.9,D1\nC4,Oc1ccccc1,6.1,D2\n',
+        "generic.csv",
+    )
+    app.start({
+        "input_format": "molecule",
+        "compound_column": "compound",
+        "smiles_col": "smiles",
+        "value_col": "p_activity",
+        "document_column": "document",
+        "grouping": "none",
+        "output_formats": ["svg"],
+    }, background=False)
+    assert app.job["state"] == "done", app.job
+    assert {"class_confidence", "document_balanced_pchembl", "n_evidence_units"} <= set(app.result.data)
+    assert app.job["options"]["evidence_model"] == "gaussian"
+
+
 def test_error_is_visible_and_does_not_leave_old_outputs(tmp_path):
     app = AppSession(tmp_path)
     app.load(b'smiles\nCCO\n', 'missing.csv')
@@ -110,7 +134,10 @@ def test_packaged_example_matches_archived_source():
 @pytest.fixture
 def local_server(tmp_path):
     app = AppSession(tmp_path)
-    server = LocalServer(app)
+    try:
+        server = LocalServer(app)
+    except PermissionError as exc:
+        pytest.skip(f"Local HTTP sockets are unavailable in this sandbox: {exc}")
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     yield server

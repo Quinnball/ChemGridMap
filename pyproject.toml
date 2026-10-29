@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chemgridmap"
-version = "0.5.0.dev0"
+version = "0.5.0"
 description = "Curate ChEMBL activity exports and build one-molecule-per-cell chemical maps."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -38,7 +38,8 @@ dependencies = [
   "rdkit>=2022.9.5",
   "chembl_structure_pipeline>=1.2.0",
   "scikit-learn>=1.2",
-  "scipy>=1.9"
+  "scipy>=1.9",
+  "umap-learn>=0.5.3"
 ]
 
 [project.urls]
@@ -63,3 +64,4 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+norecursedirs = [".*", "build", "dist", "node_modules", "paper/output"]

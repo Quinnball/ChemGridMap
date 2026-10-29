@@ -136,6 +136,9 @@ function showInput(input, demo = false) {
     input.targets.forEach(target => { const option = document.createElement('option'); option.value = target; $('target-list').append(option); });
     selectColumns('smiles-col', input.columns, input.detected.smiles || 'smiles');
     selectColumns('value-col', input.columns, input.detected.pchembl || 'activity_pchembl', true);
+    selectColumns('compound-column', input.columns, input.detected.molecule_id || '', true);
+    selectColumns('document-column', input.columns, input.detected.document_id || '', true);
+    selectColumns('relation-column', input.columns, input.detected.standard_relation || '', true);
     selectColumns('label-col', input.columns, 'activity_class', true);
     $('input-format').value = demo || (input.detected.pchembl && (input.detected.standard_type || input.detected.target_id)) ? 'chembl' : 'molecule';
     updateInputType();
@@ -152,11 +155,14 @@ function updateGrouping() {
   document.querySelectorAll('[data-butina-setting]').forEach(el => el.hidden = grouping !== 'butina');
   document.querySelectorAll('[data-external-setting]').forEach(el => el.hidden = grouping !== 'external');
   document.querySelectorAll('[data-core-setting]').forEach(el => el.hidden = grouping === 'none');
+  document.querySelectorAll('[data-fmcs-setting]').forEach(el => el.hidden = grouping === 'none' || $('core-rule').value !== 'fmcs');
 }
 function options() {
   return {input_format: $('input-format').value, target_id: $('target').value.trim() || null,
     activity_type: $('activity-type').value, smiles_col: $('smiles-col').value,
     value_col: $('value-col').value || null, label_col: $('label-col').value || null,
+    compound_column: $('compound-column').value || null, document_column: $('document-column').value || null,
+    relation_column: $('relation-column').value || null,
     representation: $('representation').value, projection: $('projection').value,
     lower_threshold: Number($('lower').value), upper_threshold: Number($('upper').value),
     conflict_range_threshold: Number($('conflict-range').value), random_state: Number($('seed').value),
@@ -165,7 +171,8 @@ function options() {
     grouping: $('grouping').value, group_similarity: Number($('group-similarity').value),
     cluster_col: $('cluster-col').value.trim() || null, cluster_source: $('cluster-source').value.trim() || null,
     grid_refinement: $('grid-refinement').value, core_rule: $('core-rule').value,
-    core_min_coverage: Number($('core-coverage-target').value), activity_confidence: $('activity-confidence').checked,
+    core_min_coverage: Number($('core-coverage-target').value), fmcs_timeout: Number($('fmcs-timeout').value),
+    activity_confidence: $('activity-confidence').checked, evidence_model: $('evidence-model').value,
     merge_identical_documents: $('merge-identical-documents').checked,
     output_formats: $('raster').checked ? ['svg','png','pdf'] : ['svg']};
 }
@@ -426,7 +433,9 @@ async function compareGroup(groupId) {
     $('representative-svg').innerHTML = result.drawings.representative_smiles;
     const rule = group.core_rule === 'coverage'
       ? `Core rule: largest scaffold or ring fragment matching at least ${Math.round(100 * group.core_coverage_target)}% of members (${group.core_target_met ? 'target met' : 'target not met; highest-coverage core shown'}). The most frequent scaffold matches ${group.most_frequent_scaffold_coverage_count}/${group.size}.`
-      : 'Core rule: most frequent ring scaffold.';
+      : group.core_rule === 'fmcs'
+        ? `Core rule: FMCS matching at least ${Math.round(100 * group.core_coverage_target)}% of members${group.fmcs_timed_out ? '; the search timed out, so this partial core may vary with machine speed and load' : ''}.`
+        : 'Core rule: most frequent ring scaffold.';
     $('core-coverage').textContent = `${group.core_status}. This core matches ${group.core_coverage_count}/${group.size} members; ${group.core_exact_scaffold_count} have exactly this scaffold. ${group.distinct_scaffolds} distinct ring scaffolds; ${group.acyclic_members} acyclic members. ${rule}`;
     $('comparison-rule').textContent = `${result.selected_count}/${group.size} members shown. ${result.selection_rule} A scaffold summary is not a complete explanation of fingerprint similarity.`;
     $('comparison-svg').innerHTML = result.svg;
@@ -501,14 +510,16 @@ function restoreOptions(config) {
   $('group-similarity').value = config.group_similarity ?? .6;
   $('cluster-col').value = config.cluster_col || ''; $('cluster-source').value = config.cluster_source || '';
   $('grid-refinement').value = config.grid_refinement || 'neighbors'; $('core-rule').value = config.core_rule || 'coverage';
-  $('core-coverage-target').value = config.core_min_coverage ?? .8; $('activity-confidence').checked = config.activity_confidence ?? true;
+  $('core-coverage-target').value = config.core_min_coverage ?? .8; $('fmcs-timeout').value = config.fmcs_timeout ?? 1;
+  $('activity-confidence').checked = config.activity_confidence ?? true; $('evidence-model').value = config.evidence_model || 'gaussian';
   $('merge-identical-documents').checked = config.merge_identical_documents ?? true;
-  const fields = {'input-format':'input_format',target:'target_id','activity-type':'activity_type',representation:'representation',projection:'projection',lower:'lower_threshold',upper:'upper_threshold',seed:'random_state',detail:'render_detail','conflict-range':'conflict_range_threshold',identity:'molecule_identity','structure-policy':'structure_policy','smiles-col':'smiles_col','value-col':'value_col','label-col':'label_col'};
+  const fields = {'input-format':'input_format',target:'target_id','activity-type':'activity_type',representation:'representation',projection:'projection',lower:'lower_threshold',upper:'upper_threshold',seed:'random_state',detail:'render_detail','conflict-range':'conflict_range_threshold',identity:'molecule_identity','structure-policy':'structure_policy','compound-column':'compound_column','smiles-col':'smiles_col','value-col':'value_col','document-column':'document_column','relation-column':'relation_column','label-col':'label_col'};
   for (const [id,key] of Object.entries(fields)) $(id).value = config[key] ?? '';
   $('occupancy').value = config.grid_occupancy*100; densityPreview();
   $('raster').checked = config.output_formats.includes('png'); updateInputType();
   updateGrouping();
 }
+$('core-rule').addEventListener('change', updateGrouping);
 getJSON('/api/session').then(async info => {
   $('version').textContent = 'v' + info.version;
   umapAvailable = info.umap; demoAvailable = info.demo_available;

@@ -13,21 +13,24 @@ where sigma is the pooled standard deviation between evidence units of the
 same entry in the loaded dataset. Each entry receives a document-balanced
 estimate (mean over units), the probability of each display class for its
 consensus value mu_e (flat prior), and the predictive probability that a new
-independent document falls in each class. Moderated-variance t models are
-kept for comparison (``model="moderated_t"``); leave-one-document-out
-validation on CA II, Thrombin and hERG favoured the Gaussian model for calibration.
+independent document falls in each class. The default Gaussian model uses
+pooled between-unit variance. An optional ``exclude-flagged`` model removes
+evidence units containing documents involved in systematic document-offset
+pairs; entries without remaining units fall back to the Gaussian model.
+Moderated-variance t models remain available to library callers for comparison.
 """
 from __future__ import annotations
 
 from collections import defaultdict
 from itertools import combinations
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from scipy import optimize, stats
 
-from .activity import activity_class
+from .activity import activity_annotations, activity_class
+from .core import canonicalize_smiles
 
 CLASSES = ("inactive", "medium", "active")
 VARIANCE_FLOOR = 1e-4  # pChEMBL values are reported to two decimals
@@ -260,18 +263,63 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
     """
     if not 0.5 < confidence_threshold < 1.0:
         raise ValueError("confidence_threshold must lie between 0.5 and 1.")
-    if model not in {"gaussian", "moderated_t"}:
-        raise ValueError("model must be 'gaussian' or 'moderated_t'.")
+    if model not in {"gaussian", "exclude-flagged", "moderated_t"}:
+        raise ValueError("model must be 'gaussian', 'exclude-flagged' or 'moderated_t'.")
     doc = document_values(records, entry=entry, value=value, document=document, merge_identical=merge_identical)
+    offsets = document_pair_offsets(records, entry=entry, value=value, document=document)
+    flagged = offsets[offsets.systematic_offset.astype(bool)].to_dict("records")
     if fit is None:
-        fit = fit_between_unit_sd(doc) if model == "gaussian" else fit_predictive_variance(doc)
+        fit = fit_predictive_variance(doc) if model == "moderated_t" else fit_between_unit_sd(doc)
     fit = dict(fit)
     if fit.get("prior_df") is None:  # JSON reports store the Gaussian model's infinite prior_df as null
         fit["prior_df"] = float("inf")
-    post = entry_posteriors(doc, fit["tau"], fit["prior_df"])
-    top = doc.sort_values(["entry", "n_records"], ascending=[True, False]).groupby("entry").first()
-    post["top_unit_record_fraction"] = top["n_records"] / doc.groupby("entry")["n_records"].sum()
-    post["top_unit_documents"] = top["documents"]
+
+    def selected_posteriors(selected):
+        posterior = entry_posteriors(selected, fit["tau"], fit["prior_df"])
+        top = selected.sort_values(
+            ["entry", "n_records"], ascending=[True, False]
+        ).groupby("entry").first()
+        posterior["top_unit_record_fraction"] = (
+            top["n_records"] / selected.groupby("entry")["n_records"].sum()
+        )
+        posterior["top_unit_documents"] = top["documents"]
+        return posterior
+
+    if model == "exclude-flagged":
+        flagged_documents = {
+            str(pair[name])
+            for pair in flagged
+            for name in ("document_a", "document_b")
+        }
+        keep = doc["documents"].map(
+            lambda text: not (set(str(text).split(";")) & flagged_documents)
+        )
+        remaining = doc.loc[keep]
+        excluded_entries = sorted(set(doc["entry"]) - set(remaining["entry"]))
+        fallback = doc[doc["entry"].isin(excluded_entries)]
+        fit = fit_between_unit_sd(remaining) if not remaining.empty else fit_between_unit_sd(doc)
+        if fit.get("prior_df") is None:
+            fit["prior_df"] = float("inf")
+        pieces = []
+        if not remaining.empty:
+            pieces.append(selected_posteriors(remaining))
+        if not fallback.empty:
+            fallback_fit = fit_between_unit_sd(fallback)
+            fallback_post = entry_posteriors(
+                fallback, fallback_fit["tau"], fallback_fit["prior_df"]
+            )
+            top = fallback.sort_values(
+                ["entry", "n_records"], ascending=[True, False]
+            ).groupby("entry").first()
+            fallback_post["top_unit_record_fraction"] = (
+                top["n_records"] / fallback.groupby("entry")["n_records"].sum()
+            )
+            fallback_post["top_unit_documents"] = top["documents"]
+            pieces.append(fallback_post)
+        post = pd.concat(pieces).sort_index()
+    else:
+        post = selected_posteriors(doc)
+
     out = molecules.copy()
     keyed = post.reindex(out[entry].to_numpy())
     if keyed["n_units"].isna().any():
@@ -295,8 +343,6 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
     out["class_confidence"] = consensus[rows, index]
     out["class_reproducibility"] = predictive[rows, index]
     out["class_status"] = np.where(out["class_confidence"] >= confidence_threshold, "supported", "uncertain")
-    offsets = document_pair_offsets(records, entry=entry, value=value, document=document)
-    flagged = offsets[offsets.systematic_offset.astype(bool)].to_dict("records")
     doc_entries = defaultdict(set)
     for item in doc.itertuples(index=False):
         for source_document in item.documents.split(";"):
@@ -310,7 +356,8 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
     out["discordant_document_pairs"] = [discordant_pairs[key] for key in out[entry]]
     out["discordant_documents"] = [";".join(sorted(discordant_documents[key])) for key in out[entry]]
     policy = "identical values merged" if merge_identical else "identical values kept separate"
-    fit.update({"confidence_threshold": confidence_threshold, "lower_threshold": lower,
+    fit.update({"model": "exclude_offset_documents" if model == "exclude-flagged" else model,
+                "confidence_threshold": confidence_threshold, "lower_threshold": lower,
                 "upper_threshold": upper, "evidence_unit": f"{document} ({policy})",
                 "evidence_unit_policy": f"document; {policy}", "merge_identical_documents": bool(merge_identical),
                 "document_pair_count": offsets.attrs["document_pair_count"],
@@ -320,6 +367,130 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
                 "document_offsets": flagged, "document_offset_min_shared": offsets.attrs["min_shared"],
                 "document_offset_threshold": offsets.attrs["offset_threshold"],
                 "document_offset_sign_agreement": offsets.attrs["sign_agreement"]})
+    if model == "exclude-flagged":
+        fit["flagged_documents"] = sorted(flagged_documents)
+        fit["excluded_entry_count"] = len(excluded_entries)
     fit = {key: None if isinstance(val, float) and not np.isfinite(val) else val for key, val in fit.items()}
     out.attrs["activity_confidence_fit"] = fit
     return out, fit
+
+
+def prepare_generic_activity_records(
+    data: pd.DataFrame,
+    *,
+    compound_column: str,
+    value_column: str,
+    document_column: Optional[str],
+    smiles_column: str,
+    relation_column: Optional[str] = None,
+    lower: float = 6.0,
+    upper: float = 7.0,
+    conflict_range_threshold: float = 1.0,
+    confidence: bool = True,
+    merge_identical: bool = True,
+    evidence_model: str = "gaussian",
+) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[Dict[str, object]], Dict[str, object]]:
+    """Curate a generic activity-record CSV into the molecule-level map schema.
+
+    Each compound ID is one entry. Values must already be pActivity values
+    (-log10 M). If a document column is supplied, class support is calculated
+    by default with the same evidence functions used by the ChEMBL path.
+    """
+    required = [compound_column, value_column, smiles_column]
+    if confidence:
+        if not document_column:
+            raise ValueError("document_column is required when activity confidence is enabled.")
+        required.append(document_column)
+    missing = [name for name in required if name not in data.columns]
+    if missing:
+        raise ValueError(f"Generic activity input lacks required columns: {missing}.")
+    if relation_column and relation_column not in data.columns:
+        raise ValueError(f"Relation column {relation_column!r} was not found.")
+    if lower >= upper:
+        raise ValueError("lower must be smaller than upper.")
+
+    records = data.copy()
+    records.insert(0, "source_row", np.arange(len(records), dtype=int))
+    numeric = pd.to_numeric(records[value_column], errors="coerce")
+    canonical = records[smiles_column].map(canonicalize_smiles)
+    compounds = records[compound_column].fillna("").astype(str).str.strip()
+    keep = np.isfinite(numeric).to_numpy() & canonical.notna().to_numpy() & compounds.ne("").to_numpy()
+    excluded_non_exact = 0
+    if relation_column:
+        relation = records[relation_column].fillna("").astype(str).str.strip()
+        relation = relation.str.replace(r"^'([=<>~]+)'$", r"\1", regex=True)
+        exact = relation.eq("=").to_numpy()
+        excluded_non_exact = int((keep & ~exact).sum())
+        keep &= exact
+    records = records.loc[keep].copy()
+    if records.empty:
+        raise ValueError("No finite non-exact relation, SMILES and compound records remained.")
+    records["molecule_identity_key"] = compounds.loc[keep].to_numpy()
+    records["pchembl_value"] = numeric.loc[keep].to_numpy(float)
+    records["canonical_smiles"] = canonical.loc[keep].to_numpy()
+    if confidence:
+        records["document_chembl_id"] = (
+            records[document_column].fillna("unknown_document").astype(str).str.strip()
+        )
+
+    structures = records.groupby("molecule_identity_key", sort=True)["canonical_smiles"].nunique()
+    conflicting = structures[structures > 1]
+    if not conflicting.empty:
+        raise ValueError(
+            "Each generic compound ID must map to one canonical structure; "
+            f"conflicts: {conflicting.index.tolist()}."
+        )
+
+    rows = []
+    for identity, group in records.groupby("molecule_identity_key", sort=True):
+        annotations = activity_annotations(
+            group["pchembl_value"].to_numpy(float),
+            lower_threshold=lower,
+            upper_threshold=upper,
+            conflict_range_threshold=conflict_range_threshold,
+        )
+        smiles = str(group["canonical_smiles"].iloc[0])
+        rows.append({
+            "molecule_id": identity,
+            "molecule_identity_key": identity,
+            "molecule_identity_source": "generic_compound_id",
+            "canonical_smiles": smiles,
+            "smiles": smiles,
+            "record_canonical_smiles": smiles,
+            "n_record_structures": 1,
+            "source_rows": ";".join(str(value) for value in group["source_row"].unique()),
+            **annotations,
+        })
+    molecules = pd.DataFrame(rows).sort_values("molecule_identity_key").reset_index(drop=True)
+    duplicate_structures = int(molecules["canonical_smiles"].duplicated(keep=False).sum())
+    if duplicate_structures:
+        raise ValueError(
+            "Different generic compound IDs resolve to the same canonical structure. "
+            "Merge them before mapping."
+        )
+
+    fit = None
+    if confidence:
+        molecules, fit = annotate_activity_confidence(
+            molecules,
+            records,
+            lower=lower,
+            upper=upper,
+            model=evidence_model,
+            merge_identical=merge_identical,
+        )
+    report = {
+        "input_rows": int(len(data)),
+        "retained_activity_records": int(len(records)),
+        "excluded_activity_records": int(len(data) - len(records)),
+        "excluded_non_exact_relation_records": excluded_non_exact,
+        "unique_molecules": int(len(molecules)),
+        "compound_column": compound_column,
+        "value_column": value_column,
+        "document_column": document_column,
+        "smiles_column": smiles_column,
+        "relation_column": relation_column,
+        "aggregation": "median pActivity",
+        "activity_confidence": fit,
+    }
+    return molecules, records, fit, report

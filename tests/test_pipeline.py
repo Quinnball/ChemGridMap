@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from inspect import signature
 from pathlib import Path
 
 import pandas as pd
@@ -34,6 +35,38 @@ MOLECULES = pd.DataFrame(
 
 
 class PipelineTests(unittest.TestCase):
+    def test_library_defaults_match_the_0_5_public_defaults(self):
+        parameters = signature(build_grid_map).parameters
+        self.assertEqual(parameters["projection"].default, "umap")
+        self.assertEqual(parameters["grid_refinement"].default, "neighbors")
+        self.assertEqual(parameters["core_rule"].default, "coverage")
+        self.assertEqual(parameters["fmcs_timeout"].default, 1)
+        self.assertEqual(parameters["evidence_model"].default, "gaussian")
+
+    def test_library_generic_records_compute_support_by_default(self):
+        rows = []
+        for index, smiles in enumerate(["CCO", "c1ccccc1", "Cc1ccccc1", "Oc1ccccc1"]):
+            for document, offset in [("D1", 0.0), ("D2", 0.4)]:
+                rows.append({
+                    "compound": f"C{index}",
+                    "smiles": smiles,
+                    "p_activity": 5.5 + index * 0.3 + offset,
+                    "document": document,
+                })
+        result = build_grid_map(
+            pd.DataFrame(rows),
+            projection="pca",
+            grouping="none",
+            compound_col="compound",
+            value_col="p_activity",
+            document_col="document",
+            grid_padding=2,
+            output_formats=["svg"],
+            render_detail="overview",
+        )
+        self.assertIn("class_confidence", result.data)
+        self.assertIn("document_balanced_pchembl", result.data)
+
     def test_existing_coordinates_route_and_exports(self):
         with tempfile.TemporaryDirectory() as directory:
             result = build_grid_map(

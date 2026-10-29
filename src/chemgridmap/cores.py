@@ -87,12 +87,18 @@ def select_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8) -> Dict:
 def mcs_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8, timeout: int = 10) -> Dict:
     """Maximum common substructure present in at least ``min_coverage`` of members (comparison method)."""
     started = time.perf_counter()
+    if len(mols) < 2:
+        return {"core_smiles": "", "core_smarts": "", "core_rule": "fmcs_threshold",
+                "coverage_target": min_coverage, "coverage_count": 0, "coverage_fraction": 0.0,
+                "core_heavy_atoms": 0, "timed_out": False,
+                "seconds": time.perf_counter() - started}
     result = rdFMCS.FindMCS(list(mols), threshold=min_coverage, ringMatchesRingOnly=True, completeRingsOnly=True,
                             atomCompare=rdFMCS.AtomCompare.CompareElements,
                             bondCompare=rdFMCS.BondCompare.CompareOrder, timeout=int(timeout))
     pattern = Chem.MolFromSmarts(result.smartsString) if result.numAtoms else None
     matched = [bool(pattern is not None and m.HasSubstructMatch(pattern)) for m in mols]
-    return {"core_smarts": result.smartsString, "core_rule": "fmcs_threshold", "coverage_target": min_coverage,
+    return {"core_smiles": Chem.MolToSmiles(pattern) if pattern is not None else "",
+            "core_smarts": result.smartsString, "core_rule": "fmcs_threshold", "coverage_target": min_coverage,
             "coverage_count": int(sum(matched)), "coverage_fraction": sum(matched) / len(mols),
             "core_heavy_atoms": int(result.numAtoms), "timed_out": bool(result.canceled),
             "seconds": time.perf_counter() - started}

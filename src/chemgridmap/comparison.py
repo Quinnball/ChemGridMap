@@ -19,7 +19,7 @@ from rdkit.Chem.Scaffolds import MurckoScaffold
 from rdkit.ML.Cluster import Butina
 from scipy.spatial.distance import cdist
 
-from .cores import select_core
+from .cores import mcs_core, select_core
 from .plotting import DEFAULT_COLORS, render_svg
 
 GROUP_COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#8B6914", "#56B4E9",
@@ -50,7 +50,8 @@ def fingerprint_distances(smiles, radius=2, n_bits=2048):
 
 
 def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=None,
-                      radius=2, n_bits=2048, core_rule="most_frequent", core_min_coverage=0.8):
+                      radius=2, n_bits=2048, core_rule="most_frequent", core_min_coverage=0.8,
+                      fmcs_timeout=1):
     """Butina groups use a center threshold, not an all-pairs similarity bound.
 
     ``core_rule="coverage"`` selects the largest member scaffold or scaffold-network
@@ -58,8 +59,10 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
     """
     if not 0 < similarity <= 1:
         raise ValueError("Group similarity must be in (0, 1].")
-    if core_rule not in {"most_frequent", "coverage"}:
-        raise ValueError("core_rule must be 'most_frequent' or 'coverage'.")
+    if core_rule not in {"most_frequent", "coverage", "fmcs"}:
+        raise ValueError("core_rule must be 'most_frequent', 'coverage' or 'fmcs'.")
+    if int(fmcs_timeout) < 1:
+        raise ValueError("fmcs_timeout must be a positive integer.")
     if not 0 < core_min_coverage <= 1:
         raise ValueError("core_min_coverage must be in (0, 1].")
     if len(data) > 10000:
@@ -100,6 +103,12 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
         if core_rule == "coverage" and most_frequent:
             choice = select_core(selected, min_coverage=core_min_coverage)
             core, matched = choice["core_smiles"], choice["matched"]
+        elif core_rule == "fmcs":
+            choice = mcs_core(selected, min_coverage=core_min_coverage, timeout=int(fmcs_timeout))
+            core, matched = choice["core_smiles"], [
+                bool(pattern is not None and mol.HasSubstructMatch(pattern))
+                for mol in selected
+            ] if (pattern := Chem.MolFromSmarts(choice["core_smarts"])) is not None else [False] * len(selected)
         else:
             choice, core, matched = None, most_frequent, frequent_matched
         covered = sum(matched)
@@ -117,8 +126,14 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
             "core_coverage_count": covered, "core_coverage_fraction": covered / len(indices),
             "core_member_ids": [keys[order[i]] for i, yes in zip(indices, matched) if yes],
             "core_rule": core_rule, "core_heavy_atoms": Chem.MolFromSmiles(core).GetNumHeavyAtoms() if core else 0,
-            "core_coverage_target": core_min_coverage if core_rule == "coverage" else None,
-            "core_target_met": None if choice is None else bool(choice["target_met"]),
+            "core_smarts": choice.get("core_smarts") if choice else None,
+            "core_coverage_target": core_min_coverage if core_rule in {"coverage", "fmcs"} else None,
+            "core_target_met": (
+                bool(choice["target_met"]) if core_rule == "coverage" and choice
+                else bool(choice["coverage_fraction"] >= core_min_coverage) if core_rule == "fmcs" and choice
+                else None
+            ),
+            "fmcs_timed_out": bool(choice.get("timed_out", False)) if core_rule == "fmcs" and choice else False,
             "most_frequent_scaffold": most_frequent,
             "most_frequent_scaffold_coverage_count": sum(frequent_matched),
             "distinct_scaffolds": len(counts), "acyclic_members": scaffolds.count(""),
@@ -132,11 +147,15 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
                 "use_chirality_in_fingerprint": False, "reordering": True,
                 "input_order": "canonical isomeric SMILES, then molecular identifier",
                 "rdkit_version": rdBase.rdkitVersion, "scaffold": "typed Bemis-Murcko, chirality retained",
-                "core_rule": ("largest member scaffold or scaffold-network ring fragment matching at least "
+                "core_rule": ("FMCS matching at least "
+                              f"{core_min_coverage:.0%} of members; timeout {int(fmcs_timeout)} s"
+                              if core_rule == "fmcs" else
+                              "largest member scaffold or scaffold-network ring fragment matching at least "
                               f"{core_min_coverage:.0%} of members; otherwise the highest-coverage candidate"
                               if core_rule == "coverage" else
                               "most frequent nonempty exact scaffold; ties: heavy atoms descending, then SMILES"),
-                "core_min_coverage": core_min_coverage if core_rule == "coverage" else None,
+                "core_min_coverage": core_min_coverage if core_rule in {"coverage", "fmcs"} else None,
+                "fmcs_timeout": int(fmcs_timeout) if core_rule == "fmcs" else None,
                 "coverage_rule": "explicit substructure matches with chirality; not inferred from cluster membership",
                 "interpretation": "Groups are representation- and threshold-dependent, not chemical ground truth. Scaffold summaries do not explain every fingerprint bit. Colors may repeat; use group IDs.",
                 "structure_sha256": hashlib.sha256(
@@ -180,7 +199,7 @@ def aligned_comparison(data, core_smiles, *, columns=3, cell_width=300, cell_hei
     if len(data) == 0:
         raise ValueError("Select at least one molecule for comparison.")
     keys = molecule_keys(data)
-    core = Chem.MolFromSmiles(core_smiles) if core_smiles else None
+    core = (Chem.MolFromSmarts(core_smiles) or Chem.MolFromSmiles(core_smiles)) if core_smiles else None
     if core is not None:
         rdDepictor.Compute2DCoords(core)
     mols, audits = [], []
@@ -263,7 +282,7 @@ def group_comparison(data, summary, limit=12):
     representative = group[group.comparison_id.eq(summary["representative_id"])]
     group = pd.concat([representative, group[~group.comparison_id.eq(summary["representative_id"])]])
     selected = group.head(limit)
-    svg, audit = aligned_comparison(selected, summary["core_smiles"])
+    svg, audit = aligned_comparison(selected, summary.get("core_smarts") or summary["core_smiles"])
     return selected, svg, audit
 
 
