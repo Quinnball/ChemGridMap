@@ -139,7 +139,9 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
                 "core_min_coverage": core_min_coverage if core_rule == "coverage" else None,
                 "coverage_rule": "explicit substructure matches with chirality; not inferred from cluster membership",
                 "interpretation": "Groups are representation- and threshold-dependent, not chemical ground truth. Scaffold summaries do not explain every fingerprint bit. Colors may repeat; use group IDs.",
-                "structure_sha256": hashlib.sha256(ordered.canonical_smiles.to_csv(index=False).encode()).hexdigest()}
+                "structure_sha256": hashlib.sha256(
+                    ordered.canonical_smiles.to_csv(index=False, lineterminator="\n").encode("utf-8")
+                ).hexdigest()}
     return frame, summaries, protocol
 
 
@@ -271,10 +273,11 @@ def save_group_outputs(data, summaries, protocol, output_dir, name="map"):
     files = {}
     for suffix, contents in [("structure_groups", {"protocol": protocol, "groups": summaries})]:
         path = directory / f"{name}_{suffix}.json"
-        path.write_text(json.dumps(contents, indent=2, allow_nan=False), encoding="utf-8")
+        path.write_text(json.dumps(contents, indent=2, allow_nan=False),
+                        encoding="utf-8", newline="\n")
         files[suffix] = str(path)
     path = directory / f"{name}_structure_members.csv"
-    data.to_csv(path, index=False)
+    data.to_csv(path, index=False, encoding="utf-8", lineterminator="\n")
     files["structure_members"] = str(path)
     if {"grid_row", "grid_col"} <= set(data):
         palette = {s["structure_group"].lower(): s["color"] for s in summaries}
@@ -294,7 +297,8 @@ def main(argv=None):
     parser.add_argument("--cluster-source")
     parser.add_argument("--group", help="Group ID to export; otherwise the largest group.")
     args = parser.parse_args(argv)
-    data, groups, protocol = structural_groups(pd.read_csv(args.input), similarity=args.similarity,
+    data, groups, protocol = structural_groups(pd.read_csv(args.input, encoding="utf-8-sig"),
+                                                similarity=args.similarity,
                                                 cluster_col=args.cluster_col, cluster_source=args.cluster_source)
     protocol["input_file_sha256"] = hashlib.sha256(args.input.read_bytes()).hexdigest()
     files = save_group_outputs(data, groups, protocol, args.output_dir)
@@ -302,8 +306,10 @@ def main(argv=None):
     if chosen is None:
         parser.error("Unknown structure group.")
     selected, svg, audit = group_comparison(data, chosen)
-    (args.output_dir / "comparison.svg").write_text(svg, encoding="utf-8")
-    (args.output_dir / "atom_matches.json").write_text(json.dumps(audit, indent=2), encoding="utf-8")
-    selected.to_csv(args.output_dir / "comparison_members.csv", index=False)
+    (args.output_dir / "comparison.svg").write_text(svg, encoding="utf-8", newline="\n")
+    (args.output_dir / "atom_matches.json").write_text(
+        json.dumps(audit, indent=2), encoding="utf-8", newline="\n")
+    selected.to_csv(args.output_dir / "comparison_members.csv", index=False,
+                    encoding="utf-8", lineterminator="\n")
     print(json.dumps({"groups": len(groups), "selected_group": chosen["structure_group"], "outputs": files}, indent=2))
     return 0

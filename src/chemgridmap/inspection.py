@@ -148,7 +148,7 @@ def load_audit_context(coordinates_path, records_path, *, manifest_path=None, re
         coordinates_path.name.replace("_grid_coordinates.csv", "_run_manifest.json"))
     parameters, verified, warnings = None, False, []
     if manifest_path != coordinates_path and manifest_path.exists():
-        manifest = json.loads(manifest_path.read_text())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         parameters = manifest.get("source", {}).get("curation_parameters")
         expected = {"coordinates": manifest.get("output_digests", {}).get("coordinates"),
                     "retained_records": manifest.get("source", {}).get("curation_outputs", {}).get("retained_records")}
@@ -160,7 +160,7 @@ def load_audit_context(coordinates_path, records_path, *, manifest_path=None, re
     elif explicit_manifest:
         raise ValueError("The supplied run manifest does not exist.")
     if report_path is not None:
-        report = json.loads(Path(report_path).read_text())
+        report = json.loads(Path(report_path).read_text(encoding="utf-8"))
         supplied = report["parameters"]
         if parameters is not None and any(parameters.get(key) != supplied.get(key) for key in RULE_KEYS):
             raise ValueError("Curation report and run manifest use different annotation rules.")
@@ -184,18 +184,22 @@ def main(argv=None):
     parameters, run_verified, warnings = load_audit_context(
         args.coordinates, args.records, manifest_path=args.manifest, report_path=args.curation_report)
     selected, records, summary = inspect_entry(
-        pd.read_csv(args.coordinates), pd.read_csv(args.records),
+        pd.read_csv(args.coordinates, encoding="utf-8-sig"),
+        pd.read_csv(args.records, encoding="utf-8-sig"),
         molecule_id=args.molecule_id, cell=args.cell, parameters=parameters,
     )
     summary["run_binding_verified"] = run_verified
     summary["warnings"].extend(warnings)
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    selected.to_csv(args.output_dir / "selected_molecule.csv", index=False)
-    records.to_csv(args.output_dir / "source_records.csv", index=False)
+    selected.to_csv(args.output_dir / "selected_molecule.csv", index=False,
+                    encoding="utf-8", lineterminator="\n")
+    records.to_csv(args.output_dir / "source_records.csv", index=False,
+                   encoding="utf-8", lineterminator="\n")
     render_svg(selected, args.output_dir / "selected_molecule.svg", tile_size=320, molecule_margin=12)
     summary["inputs"] = {name: {"file": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
                          for name, path in (("coordinates", args.coordinates), ("retained_records", args.records))}
-    (args.output_dir / "audit_summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    (args.output_dir / "audit_summary.json").write_text(
+        json.dumps(summary, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps(summary, indent=2))
     print(f"Evidence written to {args.output_dir}")
     return 0

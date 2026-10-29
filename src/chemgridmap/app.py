@@ -109,7 +109,8 @@ class AppSession:
         try:
             directory.mkdir(parents=True)
             (directory / "input.csv").write_bytes(self.raw)
-            (directory / "app_options.json").write_text(json.dumps(options, indent=2), encoding="utf-8")
+            (directory / "app_options.json").write_text(
+                json.dumps(options, indent=2), encoding="utf-8", newline="\n")
             source = {"input_file": self.filename, "input_file_sha256": hashlib.sha256(self.raw).hexdigest(),
                       "interface": "local-browser", "chemgridmap_version": __version__}
             source["reliability_parameters"] = {
@@ -209,8 +210,10 @@ class AppSession:
                        'members': json_rows(members), 'selected_count': len(selected),
                        'selection_rule': 'Representative first; then scaffold, canonical SMILES and identifier. At most 12 cards; all members are exported.',
                        'atom_matches': atom_audit}
-            files = {'comparison.svg': svg.encode(), 'members.csv': members.to_csv(index=False).encode(),
-                     'selected_members.csv': selected.to_csv(index=False).encode(),
+            files = {'comparison.svg': svg.encode(), 'members.csv': members.to_csv(
+                         index=False, lineterminator="\n").encode(),
+                     'selected_members.csv': selected.to_csv(
+                         index=False, lineterminator="\n").encode(),
                      'atom_matches.json': json.dumps(atom_audit, indent=2).encode(),
                      'group_summary.json': json.dumps({'summary': summary, 'protocol': self.result.grouping_protocol}, indent=2).encode()}
             digests = {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}
@@ -280,9 +283,12 @@ class AppSession:
             summary['neighborhood'] = neighbor_summary
             files = {
                 'selected_molecule.svg': image.read_bytes(),
-                'source_records.csv': records.to_csv(index=False).encode('utf-8'),
-                'selected_molecule.csv': chosen.to_csv(index=False).encode('utf-8'),
-                'neighbors.csv': neighbor_table.to_csv(index=False).encode('utf-8'),
+                'source_records.csv': records.to_csv(
+                    index=False, lineterminator="\n").encode('utf-8'),
+                'selected_molecule.csv': chosen.to_csv(
+                    index=False, lineterminator="\n").encode('utf-8'),
+                'neighbors.csv': neighbor_table.to_csv(
+                    index=False, lineterminator="\n").encode('utf-8'),
             }
             summary['evidence_digests'] = {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}
             files['audit_summary.json'] = json.dumps(summary, indent=2, allow_nan=False).encode('utf-8')
@@ -431,7 +437,8 @@ class LocalHandler(BaseHTTPRequestHandler):
                     "row": int(query["row"][0]), "col": int(query["col"][0])}
                 detail, records = session.inspect(**selection)
                 if path == "/api/evidence.csv":
-                    self.send(records.to_csv(index=False).encode("utf-8-sig"), "text/csv", filename="source_records.csv")
+                    self.send(records.to_csv(index=False, lineterminator="\n").encode("utf-8-sig"),
+                              "text/csv", filename="source_records.csv")
                 else:
                     self.send(detail)
             else:

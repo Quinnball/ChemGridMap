@@ -205,11 +205,11 @@ def test_t2b_generated_section_preserves_frozen_prefix_and_is_rerunnable(tmp_pat
     from reliability_t2b import append_section
     path = tmp_path / "RESULTS.md"
     original = "# Accepted T2a\n\noriginal table 1.234\n\n"
-    path.write_text(original)
+    path.write_bytes(original.encode("utf-8"))
     append_section(path, "<!-- T2b -->", "new results")
     first = path.read_bytes()
     assert first.startswith(original.encode())
     append_section(path, "<!-- T2b -->", "new results")
     assert path.read_bytes() == first
     append_section(path, "<!-- T2b -->", "revised results")
-    assert path.read_text() == original + "<!-- T2b -->\n\nrevised results\n"
+    assert path.read_text(encoding="utf-8") == original + "<!-- T2b -->\n\nrevised results\n"

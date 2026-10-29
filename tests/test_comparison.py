@@ -23,7 +23,7 @@ def test_browser_default_group_threshold_is_a_valid_number_input():
             attrs = dict(attrs)
             if tag == 'input' and attrs.get('id') == 'group-similarity':
                 found.append(attrs)
-    Inputs().feed((Path(chemgridmap.__file__).parent/'web/index.html').read_text())
+    Inputs().feed((Path(chemgridmap.__file__).parent/'web/index.html').read_text(encoding="utf-8"))
     item = found[0]
     assert (Decimal(item['value'])-Decimal(item['min'])) % Decimal(item['step']) == 0
 

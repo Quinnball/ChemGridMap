@@ -286,8 +286,8 @@ def build_grid_map(
         output_dir.mkdir(parents=True, exist_ok=True)
         coordinates_path = output_dir / "{}_grid_coordinates.csv".format(name)
         metrics_path = output_dir / "{}_metrics.csv".format(name)
-        result_data.to_csv(coordinates_path, index=False)
-        metrics.to_csv(metrics_path, index=False)
+        result_data.to_csv(coordinates_path, index=False, encoding="utf-8", lineterminator="\n")
+        metrics.to_csv(metrics_path, index=False, encoding="utf-8", lineterminator="\n")
         output_files.update(
             {
                 "coordinates": str(coordinates_path),
@@ -302,7 +302,7 @@ def build_grid_map(
             offsets["total_observed_pairs"] = confidence_fit["observed_document_pair_count"]
             offsets["total_possible_pairs"] = confidence_fit["document_pair_possible_count"]
             offset_path = output_dir / (name + "_document_offsets.csv")
-            offsets.to_csv(offset_path, index=False)
+            offsets.to_csv(offset_path, index=False, encoding="utf-8", lineterminator="\n")
             output_files["document_offsets"] = str(offset_path)
         render_started = time.perf_counter()
         output_files.update(
@@ -325,7 +325,9 @@ def build_grid_map(
         manifest = {
             "software_version": __version__,
             "map_name": name,
-            "input_table_sha256": hashlib.sha256(data.to_csv(index=False).encode()).hexdigest(),
+            "input_table_sha256": hashlib.sha256(
+                data.to_csv(index=False, lineterminator="\n").encode("utf-8")
+            ).hexdigest(),
             "source": provenance or {},
             "environment": environment_versions(),
             "parameters": {
@@ -361,7 +363,7 @@ def build_grid_map(
             "output_digests": file_digests(output_files),
         }
         path = output_dir / (name + "_run_manifest.json")
-        path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        path.write_text(json.dumps(manifest, indent=2), encoding="utf-8", newline="\n")
         output_files["run_manifest"] = str(path)
 
     return GridMapResult(

@@ -34,7 +34,8 @@ def append_section(path, marker, text):
     path = Path(path)
     original = path.read_text(encoding="utf-8") if path.exists() else ""
     prefix = original.split(marker, 1)[0]
-    path.write_text(prefix + marker + "\n\n" + text.rstrip() + "\n", encoding="utf-8")
+    path.write_text(prefix + marker + "\n\n" + text.rstrip() + "\n",
+                    encoding="utf-8", newline="\n")
 
 
 def run_activity_case(output_root=OUTPUT):

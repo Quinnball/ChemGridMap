@@ -493,9 +493,12 @@ def save_chembl_curation(
         "excluded_records": output_dir / f"{name}_excluded_records.csv",
         "curation_report": output_dir / f"{name}_curation_report.json",
     }
-    result.molecules.to_csv(paths["molecule_level"], index=False)
-    result.retained_records.to_csv(paths["retained_records"], index=False)
-    result.excluded_records.to_csv(paths["excluded_records"], index=False)
-    with paths["curation_report"].open("w", encoding="utf-8") as handle:
+    result.molecules.to_csv(paths["molecule_level"], index=False,
+                            encoding="utf-8", lineterminator="\n")
+    result.retained_records.to_csv(paths["retained_records"], index=False,
+                                   encoding="utf-8", lineterminator="\n")
+    result.excluded_records.to_csv(paths["excluded_records"], index=False,
+                                   encoding="utf-8", lineterminator="\n")
+    with paths["curation_report"].open("w", encoding="utf-8", newline="\n") as handle:
         json.dump(result.report, handle, indent=2, ensure_ascii=True)
     return {key: str(path) for key, path in paths.items()}

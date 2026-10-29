@@ -234,7 +234,7 @@ def render_svg(
             parts.append(f'<text x="{x + 20}" y="{y + 12}">{html.escape(text)}</text>')
         parts.append("</g>")
     parts.append("</svg>")
-    output_path.write_text("\n".join(parts), encoding="utf-8")
+    output_path.write_text("\n".join(parts), encoding="utf-8", newline="\n")
     return output_path
 
 

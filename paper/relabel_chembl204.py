@@ -31,7 +31,10 @@ def digest(data):
 
 def file_hash(path):
     with Path(path).open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        digest = hashlib.sha256()
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+        return digest.hexdigest()
 
 
 def latest_source_record(manifest):
@@ -186,7 +189,7 @@ def allowed(path, root):
 def residual_rows(root):
     result = []
     for path in output_files(root):
-        relative = str(path.relative_to(root))
+        relative = path.relative_to(root).as_posix()
         if relative.startswith("label_correction/") or path.suffix not in {".csv", ".json", ".md", ".log", ".txt", ".py", ".xml", ".cjs", ".js"}:
             continue
         for i, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
@@ -238,7 +241,7 @@ def verify(root, *, check_sources=True):
         root_fields = {"outputs_sha256", "label_correction"} | LATER_ROOT_SECTIONS
         assert {k: v for k, v in current.items() if k not in root_fields} == {
             k: v for k, v in old.items() if k != "outputs_sha256"}
-    paths = {str(p.relative_to(root)) for p in output_files(root) if p != root / "manifest.json"}
+    paths = {p.relative_to(root).as_posix() for p in output_files(root) if p != root / "manifest.json"}
     assert paths == set(current["outputs_sha256"]), "Root output inventory mismatch"
     for relative, expected in current["outputs_sha256"].items():
         assert file_hash(root / relative) == expected, f"Output hash mismatch: {relative}"
@@ -270,7 +273,7 @@ def run(root=OUTPUT):
     for path in files:
         if path in manifests:
             continue
-        relative = str(path.relative_to(root))
+        relative = path.relative_to(root).as_posix()
         before = path.read_bytes()
         after, detail, kind = before, {}, "unchanged"
         if path.suffix == ".csv":
@@ -295,7 +298,7 @@ def run(root=OUTPUT):
                         "after_sha256": digest(after), **detail})
     # Save recoverable originals before the first mutation, including all manifests.
     for path in manifests:
-        backups[str(path.relative_to(root))] = path.read_bytes()
+        backups[path.relative_to(root).as_posix()] = path.read_bytes()
         for name in json.loads(path.read_text()).get("outputs_sha256", {}):
             assert Path(name).is_file(), f"Missing manifest output: {name}"
     with zipfile.ZipFile(correction / "originals.zip", "x", zipfile.ZIP_DEFLATED) as archive:
@@ -328,7 +331,7 @@ def run(root=OUTPUT):
                                            "previous_manifest_sha256": digest(before),
                                            "historical_fields_retained": True}
             after = json_bytes(manifest)
-            relative = str(path.relative_to(root))
+            relative = path.relative_to(root).as_posix()
             backups[relative] = before
             path.write_bytes(after)
             records.append({"path": relative, "kind": "manifest", "before_sha256": digest(before),
@@ -352,7 +355,7 @@ def run(root=OUTPUT):
     provenance["reports_sha256"] = previous["reports_sha256"].copy()
     provenance["previous_collection_sha256"] = digest(backups["manifest.json"])
     root_manifest["label_correction"] = provenance
-    root_manifest["outputs_sha256"] = {str(p.relative_to(root)): file_hash(p) for p in output_files(root)
+    root_manifest["outputs_sha256"] = {p.relative_to(root).as_posix(): file_hash(p) for p in output_files(root)
                                        if p != root / "manifest.json"}
     (root / "manifest.json").write_bytes(json_bytes(root_manifest))
     return verify(root)
