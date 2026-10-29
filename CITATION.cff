@@ -2,9 +2,13 @@ cff-version: 1.2.0
 message: "If you use ChemGridMap, please cite the accompanying paper and this software."
 title: "ChemGridMap"
 type: software
-version: 0.3.0
+version: 0.5.0
+date-released: "TO_BE_SET"
 repository-code: "https://github.com/Quinnball/ChemGridMap"
 authors:
   - family-names: "Qiu"
     given-names: "Zhenming"
 license: BSD-3-Clause
+preferred-citation:
+  type: generic
+  title: "Paper citation to be completed after publication"

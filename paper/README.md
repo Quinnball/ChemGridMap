@@ -1,199 +1,170 @@
-# Manuscript analyses
+# Paper analyses
 
-## Current candidate: one entry
+ChemGridMap 0.5.0 includes the software, fixed validation data and the analysis
+sources used for the reliability revision. Scripts write results under
+`paper/`; they do not modify the installed package or the original data.
 
-From a development checkout installed with `.[dev,umap,paper]`, run:
+## Environment
 
-```bash
-make paper
-```
-
-This is an alias for `make paper-current`. It restores the public v0.3.0
-validation ZIP after SHA-256 checks, refusing to replace differing local files;
-recurates all three raw exports; checks both ID and cell queries for all 3,289
-mapped molecules and ten altered-input cases; runs the untouched web CSV through
-the CLI with UMAP; reconciles 25 linked CA II records with the transcription of
-Innocenti et al.'s Tables 2-5; and runs pytest. New evidence lives only in
-`paper/output/current`. The source check matches additive and concentration
-before comparing endpoints, units and IC50 values. It records pChEMBL arithmetic
-differences without overwriting database annotations. The publisher PDF is not
-redistributed; source locators and its digest are in `paper/data/`.
-
-The saved v6 projections and negative geometry findings are not optimized or
-silently replaced. `claim_checks.json` records the current source reconciliation
-alongside the computational checks. Author approval remains a separate step.
-The manuscript evaluates record traceability and layout behavior; it makes no
-participant-level usability claim and requires no participant data to reproduce.
-
-## Optional task prototype (outside the manuscript)
-
-The earlier exploratory task code is retained but is not run by `make paper`.
-Generate its preview explicitly with `.venv/bin/python paper/prepare_tasks.py`.
-
-Open `paper/output/current/task_materials/task_preview.html` to preview the
-controlled tasks. Before collecting data, a human must review the answer key,
-consent/institutional requirements, participant count and stopping rule, and
-provide equal practice. The two modes have identical evidence access. The test
-is of display mode within this interface, not superiority to complete external
-applications. Responses are downloaded locally, not sent to a server.
-
-After real observations have been collected:
-
-```bash
-.venv/bin/python paper/analyze_tasks.py /path/to/responses_*.json \
-  --answer-key paper/output/current/task_materials/answer_key.json \
-  --output /path/to/private-study-analysis
-```
-
-The scorer refuses empty observations and reports participant-level descriptive
-results without inferential or general superiority claims. Keep participant
-responses out of the public repository unless separately reviewed and authorized.
-
-## Archived evidence and legacy commands
-
-The `0.3.0` application uses archived ChEMBL 37 IC50 records for CHEMBL205,
-CHEMBL204 and CHEMBL240. The local reproduction source archive includes all
-three raw CSV files. Analysis outputs are written to `paper/output/revision_v4`.
-The original rc2 layout manifests remain unchanged; v5 adds record-retrieval
-validation, fixed-molecule seed checks and full fingerprint-to-grid metrics.
-The v6 follow-up adds a full metadata-preserving pandas task baseline and
-an assay-condition audit. Earlier numerical layout results are not replaced.
-
-Download the validation archive from the v0.3.0 release and extract it at the
-repository root. It supplies the public source CSVs and saved layouts:
-
-```bash
-python paper/run_record_tasks.py --source paper/output/revision_v6
-python paper/build_revision_figures.py --source paper/output/revision_v6 --output paper/output/revision_v6/figures
-```
-
-Both retrieval routes receive the same coordinate and retained-record tables.
-The pandas baseline explicitly joins by molecular identity and verifies the
-record links and median. It is not a deliberately information-poor control.
-All 3,289 mapped entries are queried by ID and cell; three altered-input
-controls test error handling. This evaluates correctness, not user speed.
-The acetazolamide follow-up uses archived assay descriptions and the metadata
-and abstract for DOI 10.1016/j.bmcl.2008.02.008. It does not claim a new
-experimental finding or independently transcribed full-text tables.
-
-Use a Python 3.12 environment and the supplied dependency snapshot:
+From the repository root:
 
 ```bash
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements-paper.lock.txt
-.venv/bin/python -m pip install -e '.[dev,umap,paper]'
-make test
+.venv/bin/python -m pip install -e ".[dev,paper]"
+```
+
+Python 3.12 and the locked environment are recommended. Public ChEMBL data
+remain subject to CC BY-SA 3.0.
+
+## Restore fixed inputs
+
+The 0.3.0 validation ZIP in `validation_data/` supplies the three frozen raw
+exports and saved layouts. Restore it only when the local targets are absent:
+
+```bash
+.venv/bin/python paper/restore_paper_data.py
+```
+
+The script checks SHA-256 values and refuses to replace differing local files.
+For a source checkout without that ZIP, obtain the same public ChEMBL 37
+activities from the ChEMBL API and select them with
+`paper/strengthening/SELECTION_RULES.md`.
+
+Regenerate the three-target layouts, record audit, figures and baseline tests:
+
+```bash
 make paper
 ```
 
-`run_revision_validation.py` performs record auditing, parent normalization,
-multi-seed projection, assignment controls, occupancy sensitivity and the
-as-recorded ablation. `validate_adaptive_assignment.py` calibrates adaptive
-sparse matching against the same dense layouts. `build_revision_figures.py`
-uses the saved results and native RDKit structures, without generated data.
-`audit_revision_outputs.py` checks saved counts, medians, grid cells and SVG
-identifiers. A real public-CLI check, when present, is compared with the
-manuscript seed-42 layout as well.
+This is equivalent to `make paper-current`. Outputs go to
+`paper/output/current`; the frozen v6 inputs and earlier figures remain intact.
 
-The optional full hERG scale check is separate:
+The remaining manuscript checks and figure builds are:
 
 ```bash
-.venv/bin/python paper/validate_adaptive_assignment.py --large
-.venv/bin/python paper/extend_large_candidate_check.py
-.venv/bin/python paper/build_revision_figures.py
+make paper-structure
+make paper-legacy
+make paper-application
+make paper-record-tasks
+.venv/bin/python paper/run_reliability_analysis.py \
+  --steps layouts neighborhoods stability baselines scale cases figure-data
 ```
 
-The 1,024-candidate cap does not converge for the saved 9,581-molecule case;
-the separate 2,048-cap check is retained rather than silently replacing it.
-Timing excludes representation, UMAP, curation and rendering unless a field
-explicitly states otherwise. These are software runs, not biological replicates.
+The revision validators, figure scripts and output auditors are listed in the
+`Makefile`. Each writes a separate output directory and does not replace the
+frozen baseline.
 
-After reproducing the baseline and generating its figures, run `make paper-application`
-to create `paper/output/revision_v5` without replacing the baseline. The new
-`run_application_validation.py` tracks molecular identities across saved seeds
-and verifies the same acetazolamide source records through ID and cell selection.
-The real website download is supplied separately in the review archive. After
-placing it at `paper/output/revision_v5/web_export_map/chembl205_web_raw.csv`, run
-the documented ChEMBL-to-map command with name `chembl205_web` in that directory.
-`scripts/check_clean_install.py --python PATH_TO_NEW_ENV_PYTHON` then validates
-an independently installed wheel, runs pytest, maps that CSV and retrieves its
-records. It records missing web-export identifiers rather than filling them in.
+## Multi-target ChEMBL 37 data
 
-## Historical analyses
+The E1/E2 scripts use downloaded ChEMBL 37 activity files and do not commit
+those large CSVs. The selection criteria, seeds, endpoint counts and inclusion
+rule are recorded in
+[`strengthening/SELECTION_RULES.md`](strengthening/SELECTION_RULES.md).
 
-`run_comparisons.py`, `run_large_scale_validation.py`,
-`benchmark_sparse_neighbors.py` and `profile_large_scale_stages.py` are retained
-for previous versions. The 770-molecule external-vector demo and the earlier
-9,628-entry hERG results are not the current manuscript experiments. No MPNN
-model is trained or evaluated in this software note.
-
-## Reliability analysis (0.5)
-
-T2a analyzes grid layouts and scale using frozen `output/revision_v6` inputs.
-Outputs are written to `output/reliability_v1/{layouts,neighborhoods,stability,baselines,scale,cases,figure_data}`
-and `RESULTS.md`. From the repository root, use the existing environment:
+Download the selected targets and endpoints from the ChEMBL API:
 
 ```bash
-.venv/bin/python paper/run_reliability_analysis.py --steps layouts neighborhoods stability baselines scale cases figure-data
-.venv/bin/python -m pytest -q tests paper/test_source_context.py paper/test_task_analysis.py \
-  paper/test_reliability_analysis.py paper/test_grid_baselines.py
+.venv/bin/python paper/strengthening/source/download_chembl37_sample.py
 ```
 
-`--steps` selects individual stages; downstream stages read existing upstream outputs.
-The analysis scripts respect an existing `MPLCONFIGDIR`; otherwise they use
-`chemgridmap-t2a-mpl` or `chemgridmap-t2b-mpl` under Python's temporary directory.
-This controls Matplotlib's cache location only.
-
-For the optional UI acceptance check, Node must be able to resolve `playwright`.
-Set `CHEMGRIDMAP_NODE_PATH` to its containing `node_modules` directory when needed:
+For a parallel download:
 
 ```bash
-CHEMGRIDMAP_NODE_PATH=/path/to/node_modules \
-  .venv/bin/python paper/check_reliability_merge.py --sections ui
+.venv/bin/python paper/strengthening/source/download_chembl37_sample_parallel.py
 ```
 
-When set, `CHEMGRIDMAP_NODE_PATH` supplies `NODE_PATH` for the UI subprocess.
-Otherwise the existing `NODE_PATH` and Node's normal module lookup are preserved.
+The downloader writes to `paper/strengthening/data/chembl37_api/` and records
+the ChEMBL release, source URLs, counts and download outcomes. A validation
+package may be used instead only if its files follow the same column schema and
+selection rules; verify its manifest before analysis.
 
-Each target uses ten seeds. Neighbor sets retain distance ties, and refinement uses
-the map seed. Seed 42 baseline methods run sequentially in fresh processes; other
-seeds use two workers by default. Avoid concurrent timing tasks.
-`--baseline-phase timing` / `remaining` separates these stages;
-`--resume-baselines` reuses checkpoints only when input, source, and output hashes
-match. Without resume, selected construction stages recompute their outputs.
+## E1-A: activity evidence
 
-To supplement the existing 360 baseline rows without rerunning layouts or timings:
+Generate the three-target held-out predictions, document-unit diagnostics,
+support strata, calibration metrics and bootstrap intervals:
 
 ```bash
-.venv/bin/python paper/run_reliability_analysis.py --steps baselines --baseline-phase metrics-only
-.venv/bin/python paper/run_reliability_analysis.py --steps figure-data
+.venv/bin/python paper/strengthening/source/e1a_evidence_audit.py
 ```
 
-`metrics-only` checks input hashes, checkpoint CSV/NPZ hashes, molecule identity
-order, old metric rows, and recomputed optimistic Tanimoto DPQ16 (absolute tolerance
-1e-12). It reads `baselines/checkpoints/` directly, independently of construction
-cache keys, and preserves the original metric columns and `runtime_seed42.csv`.
-It appends `dpq16_minus_tanimoto`, `dpq2_minus_tanimoto`,
-`dpq16_minus_euclidean`, `spearman_vs_projection`, and
-`mean_displacement_vs_projection_cells`; summaries include mean/min/max.
-The last two metrics use all unique pairwise distances and normalized saved UMAP
-coordinates multiplied by `(grid_side - 1)`, respectively. No alignment is fitted.
-`checkpoint_dpq_verification.csv` and `metrics_only_verification.json` record checks.
-The updated manifest retains the original layout-generation provenance.
+`--regression-only` checks the API-derived records against the frozen v6
+curation without rebuilding outputs.
 
-`dpq_scores(..., ties="sorted")` is the optimistic DPQ default; `ties="mean"`
-computes pessimistic DPQ by replacing high-dimensional distances within each exact
-2D-distance tie group by their mean. For the 20×20 color gradient, both DPQ16
-variants equal 1 in place. With seed 42 random placement, optimistic DPQ16 is
-0.4249241333 and pessimistic DPQ⁻16 is 0.0114411272; the corrected tests require
-<0.6 and <0.1, respectively.
+Main outputs are under `paper/strengthening/output/E1A/`. Detail tables and
+fold fits are under `paper/strengthening/qa/E1A/`.
 
-Figure outputs are CSV tables with column descriptions for Prism. Figure 1 currently
-contains CA II layouts, groups, recall, and case markers; T2b adds activity evidence.
-Each stage manifest records source version, import path, installed distribution
-version, and input/source/output hashes. LAS/FLAS use independent implementations,
-floating-point LAP costs, and vacancy-mask filtering.
+## E1-B: neighbors and cores
 
-If the sandbox blocks `time -l` memory statistics, preserve the original error and
-record `resource.getrusage` peak RSS separately. This does not count as a successful
-native `time -l` memory measurement.
+Run the neighbor-preservation analysis after E1-A and the frozen reliability
+layouts exist:
+
+```bash
+.venv/bin/python paper/strengthening/source/e1b_neighbors.py
+```
+
+Run the scaffold, coverage-aware and FMCS core comparison, including the 1, 2,
+5 and frozen 10 second budgets:
+
+```bash
+.venv/bin/python paper/strengthening/source/e1b_cores.py
+```
+
+Outputs are under `paper/strengthening/output/E1B/`. The FMCS timeout is part of
+each group record; timed-out searches are not treated as deterministic.
+
+## E2: multi-target evidence evaluation
+
+Build the target-level curation, ten-fold entry predictions, comparators and
+bootstrap summaries:
+
+```bash
+.venv/bin/python paper/strengthening/source/e2_analysis.py
+```
+
+Build hypothesis tests, time splits, negative controls, pseudo-consensus
+calibration, sigma-document summaries and forest-plot data:
+
+```bash
+.venv/bin/python paper/strengthening/source/e2b_analysis.py
+```
+
+E2b follows the pre-declared H7 rule: Gaussian (`G`) remains the default when
+the difference from `exclude-flagged` (`X`) is not significant at both
+endpoints; X remains an explicit software option.
+
+Outputs are under `paper/strengthening/output/E2/`.
+
+## E2c: sampled-target layout evaluation
+
+Run the pre-declared 80-target-endpoint evaluation of projection,
+minimum-displacement and neighbor-refined layouts:
+
+```bash
+.venv/bin/python paper/strengthening/source/e2c_analysis.py
+```
+
+Outputs are under `paper/strengthening/output/E2c/`.
+
+## Tests and figure checks
+
+```bash
+.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q \
+  paper/strengthening/source/test_e1a.py \
+  paper/strengthening/source/test_e1b.py \
+  paper/strengthening/source/test_e2.py \
+  paper/strengthening/source/test_e2c.py
+```
+
+The main figure builder uses frozen outputs and native RDKit drawings. If the
+optional caption source is absent from a public checkout, the relayout script
+prints a warning, omits that Markdown file, and still builds the figures.
+
+## Interpretation boundaries
+
+The grid map is a representation-dependent visualization. Grid proximity is
+not inferred as chemical or biological similarity. Group membership is defined
+before projection. Document merging and offsets are diagnostics, not assay
+harmonization. Timing and FMCS results may vary with machine load; seed
+variation is reported rather than treated as biological replication.
