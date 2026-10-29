@@ -137,3 +137,42 @@ def test_exclude_flagged_evidence_model_reports_flagged_documents_and_fallback()
     assert fit["flagged_documents"] == ["D1", "D2"]
     assert fit["excluded_entry_count"] == 4
     assert out.set_index("molecule_identity_key").loc["FALLBACK", "n_evidence_units"] == 1
+
+
+def test_exclude_flagged_empty_entry_reuses_global_gaussian_support():
+    rows = []
+    for index in range(5):
+        rows.extend([
+            {"molecule_identity_key": f"EXCLUDED{index}", "document_chembl_id": "D1",
+             "pchembl_value": 5.0},
+            {"molecule_identity_key": f"EXCLUDED{index}", "document_chembl_id": "D2",
+             "pchembl_value": 6.5},
+        ])
+    rows.extend([
+        {"molecule_identity_key": "FALLBACK", "document_chembl_id": "D1", "pchembl_value": 5.0},
+        {"molecule_identity_key": "FALLBACK", "document_chembl_id": "D2", "pchembl_value": 7.5},
+    ])
+    for index in range(5):
+        rows.extend([
+            {"molecule_identity_key": f"KEPT{index}", "document_chembl_id": "D3",
+             "pchembl_value": 6.0},
+            {"molecule_identity_key": f"KEPT{index}", "document_chembl_id": "D4",
+             "pchembl_value": 6.2},
+        ])
+    records = pd.DataFrame(rows)
+    molecules = (
+        records.groupby("molecule_identity_key").pchembl_value.median()
+        .rename("activity_pchembl").reset_index()
+    )
+    gaussian, _ = annotate_activity_confidence(molecules, records)
+    excluded, fit = annotate_activity_confidence(molecules, records, model="exclude-flagged")
+    support = [
+        "class_confidence", "class_reproducibility",
+        "p_consensus_inactive", "p_consensus_medium", "p_consensus_active",
+        "p_new_document_inactive", "p_new_document_medium", "p_new_document_active",
+    ]
+    fallback = "FALLBACK"
+    actual = excluded.set_index("molecule_identity_key").loc[fallback, support]
+    expected = gaussian.set_index("molecule_identity_key").loc[fallback, support]
+    assert fit["excluded_entry_count"] == 6
+    pd.testing.assert_series_equal(actual, expected, check_names=False)

@@ -273,6 +273,7 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
     fit = dict(fit)
     if fit.get("prior_df") is None:  # JSON reports store the Gaussian model's infinite prior_df as null
         fit["prior_df"] = float("inf")
+    gaussian_fit = dict(fit)
 
     def selected_posteriors(selected):
         posterior = entry_posteriors(selected, fit["tau"], fit["prior_df"])
@@ -304,9 +305,8 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
         if not remaining.empty:
             pieces.append(selected_posteriors(remaining))
         if not fallback.empty:
-            fallback_fit = fit_between_unit_sd(fallback)
             fallback_post = entry_posteriors(
-                fallback, fallback_fit["tau"], fallback_fit["prior_df"]
+                fallback, gaussian_fit["tau"], gaussian_fit["prior_df"]
             )
             top = fallback.sort_values(
                 ["entry", "n_records"], ascending=[True, False]
