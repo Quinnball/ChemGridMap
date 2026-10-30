@@ -7,7 +7,28 @@ import pytest
 from rdkit import Chem
 
 from chemgridmap.cli import build_parser, main
+from chemgridmap.comparison import structural_groups
 from chemgridmap.cores import mcs_core
+
+INDOLE_SULFONAMIDES = [
+    "CC(=O)Oc1ccc2cc(S(N)(=O)=O)[nH]c2c1",
+    "COc1ccc2cc(S(N)(=O)=O)[nH]c2c1",
+    "COc1ccc2[nH]c(S(N)(=O)=O)cc2c1",
+]
+
+KEKULE_FALLBACK_CASES = [
+    (
+        [
+            "Cc1nc(N(C)C(=O)Cc2ccc(-c3cc(F)ccc3F)cc2)sc1S(N)(=O)=O",
+            "Cc1nc(N(C)C(=O)Cc2ccc(-c3ccccn3)cc2)sc1S(N)(=O)=O",
+        ],
+        22,
+    ),
+    (
+        ["N#Cc1ccc(=O)c2ccccc2c1", "N#Cc1ccc2ccccc2c(=O)c1"],
+        13,
+    ),
+]
 
 
 @pytest.mark.parametrize("merge_identical", [True, False])
@@ -163,6 +184,67 @@ def test_cli_fmcs_core_end_to_end_records_timeout(tmp_path):
     assert group["core_smarts"] == direct["core_smarts"]
     assert group["core_coverage_count"] == direct["coverage_count"]
     assert group["fmcs_timed_out"] == direct["timed_out"]
+
+
+def test_mcs_core_writes_valid_smiles_from_matched_aromatic_member():
+    mols = [Chem.MolFromSmiles(smiles) for smiles in INDOLE_SULFONAMIDES]
+    result = mcs_core(mols, min_coverage=0.8, timeout=10)
+    core = Chem.MolFromSmiles(result["core_smiles"])
+    pattern = Chem.MolFromSmarts(result["core_smarts"])
+    assert core is not None
+    assert core.GetNumHeavyAtoms() == 13
+    assert result["core_heavy_atoms"] == 13
+    assert result["coverage_count"] == 3
+    assert result["core_smiles_source"] == "matched_member"
+    assert all(mol.HasSubstructMatch(pattern) for mol in mols)
+
+
+@pytest.mark.parametrize(("smiles", "expected_heavy_atoms"), KEKULE_FALLBACK_CASES)
+def test_mcs_core_uses_kekule_fallback_for_invalid_aromatic_fragments(
+    smiles, expected_heavy_atoms
+):
+    mols = [Chem.MolFromSmiles(value) for value in smiles]
+    result = mcs_core(mols, min_coverage=0.8, timeout=10)
+    core = Chem.MolFromSmiles(result["core_smiles"])
+    pattern = Chem.MolFromSmarts(result["core_smarts"])
+    assert core is not None
+    assert core.GetNumHeavyAtoms() == expected_heavy_atoms
+    assert result["core_heavy_atoms"] == expected_heavy_atoms
+    assert result["core_smiles_source"] == "matched_member_kekule"
+    assert all(mol.HasSubstructMatch(pattern) for mol in mols)
+
+
+def test_structural_groups_uses_fmcs_heavy_atom_count():
+    data = pd.DataFrame({
+        "molecule_identity_key": [f"MOL{i + 1}" for i in range(3)],
+        "canonical_smiles": INDOLE_SULFONAMIDES,
+    })
+    _, groups, _ = structural_groups(
+        data, similarity=0.5, core_rule="fmcs", fmcs_timeout=10
+    )
+    assert len(groups) == 1
+    assert groups[0]["size"] == 3
+    assert groups[0]["core_heavy_atoms"] == 13
+    assert Chem.MolFromSmiles(groups[0]["core_smiles"]) is not None
+
+
+def test_cli_fmcs_core_accepts_aromatic_heterocycles(tmp_path):
+    source = tmp_path / "indoles.csv"
+    pd.DataFrame({
+        "smiles": INDOLE_SULFONAMIDES,
+        "value": [7.1, 7.0, 6.8],
+    }).to_csv(source, index=False)
+    assert main([
+        str(source), "--projection", "pca", "--grid-padding", "2",
+        "--group-similarity", "0.5", "--core-rule", "fmcs",
+        "--fmcs-timeout", "10", "--output-dir", str(tmp_path),
+        "--name", "fmcs_indoles", "--output-formats", "svg",
+        "--render-detail", "overview",
+    ]) == 0
+    groups = json.loads((tmp_path / "fmcs_indoles_structure_groups.json").read_text())["groups"]
+    assert len(groups) == 1
+    assert groups[0]["core_heavy_atoms"] == 13
+    assert Chem.MolFromSmiles(groups[0]["core_smiles"]) is not None
 
 
 @pytest.mark.parametrize("coverage", ["0.3", "1.2"])

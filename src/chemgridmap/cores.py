@@ -90,15 +90,49 @@ def mcs_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8, timeout: in
     if len(mols) < 2:
         return {"core_smiles": "", "core_smarts": "", "core_rule": "fmcs_threshold",
                 "coverage_target": min_coverage, "coverage_count": 0, "coverage_fraction": 0.0,
-                "core_heavy_atoms": 0, "timed_out": False,
+                "core_heavy_atoms": 0, "timed_out": False, "core_smiles_source": "",
                 "seconds": time.perf_counter() - started}
     result = rdFMCS.FindMCS(list(mols), threshold=min_coverage, ringMatchesRingOnly=True, completeRingsOnly=True,
                             atomCompare=rdFMCS.AtomCompare.CompareElements,
                             bondCompare=rdFMCS.BondCompare.CompareOrder, timeout=int(timeout))
     pattern = Chem.MolFromSmarts(result.smartsString) if result.numAtoms else None
     matched = [bool(pattern is not None and m.HasSubstructMatch(pattern)) for m in mols]
-    return {"core_smiles": Chem.MolToSmiles(pattern) if pattern is not None else "",
+    core_smiles = ""
+    core_smiles_source = ""
+    for mol, is_match in zip(mols, matched):
+        if not is_match:
+            continue
+        atom_indices = list(mol.GetSubstructMatch(pattern))
+        atom_set = set(atom_indices)
+        bond_indices = [
+            bond.GetIdx() for bond in mol.GetBonds()
+            if bond.GetBeginAtomIdx() in atom_set and bond.GetEndAtomIdx() in atom_set
+        ]
+        candidate = Chem.MolFragmentToSmiles(
+            mol, atomsToUse=atom_indices, bondsToUse=bond_indices, canonical=True
+        )
+        parsed = Chem.MolFromSmiles(candidate)
+        if parsed is not None and parsed.GetNumHeavyAtoms() == result.numAtoms:
+            core_smiles = candidate
+            core_smiles_source = "matched_member"
+            break
+        try:
+            kekule_mol = Chem.Mol(mol)
+            Chem.Kekulize(kekule_mol, clearAromaticFlags=True)
+        except Exception:
+            break
+        candidate = Chem.MolFragmentToSmiles(
+            kekule_mol, atomsToUse=atom_indices, bondsToUse=bond_indices,
+            canonical=True, kekuleSmiles=True,
+        )
+        parsed = Chem.MolFromSmiles(candidate)
+        if parsed is not None and parsed.GetNumHeavyAtoms() == result.numAtoms:
+            core_smiles = candidate
+            core_smiles_source = "matched_member_kekule"
+        break
+    return {"core_smiles": core_smiles,
             "core_smarts": result.smartsString, "core_rule": "fmcs_threshold", "coverage_target": min_coverage,
             "coverage_count": int(sum(matched)), "coverage_fraction": sum(matched) / len(mols),
             "core_heavy_atoms": int(result.numAtoms), "timed_out": bool(result.canceled),
+            "core_smiles_source": core_smiles_source,
             "seconds": time.perf_counter() - started}

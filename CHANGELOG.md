@@ -14,6 +14,8 @@
   and class-support implementation.
 - Add optional FMCS group cores with a configurable timeout and explicit
   machine-dependent timeout diagnostics.
+- Write FMCS cores as valid SMILES extracted from matched members, so aromatic
+  heterocycle cores no longer cause crashes.
 - Expose `gaussian` and `exclude-flagged` activity evidence models. Gaussian
   remains the default after the multi-target model comparison.
 - Add deterministic neighbor-guided grid refinement and per-entry tie-aware

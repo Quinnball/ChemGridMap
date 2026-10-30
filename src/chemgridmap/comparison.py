@@ -125,7 +125,11 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
             "core_smiles": core, "core_exact_scaffold_count": counts.get(core, 0),
             "core_coverage_count": covered, "core_coverage_fraction": covered / len(indices),
             "core_member_ids": [keys[order[i]] for i, yes in zip(indices, matched) if yes],
-            "core_rule": core_rule, "core_heavy_atoms": Chem.MolFromSmiles(core).GetNumHeavyAtoms() if core else 0,
+            "core_rule": core_rule,
+            "core_heavy_atoms": (
+                int(choice["core_heavy_atoms"]) if core_rule == "fmcs"
+                else Chem.MolFromSmiles(core).GetNumHeavyAtoms() if core else 0
+            ),
             "core_smarts": choice.get("core_smarts") if choice else None,
             "core_coverage_target": core_min_coverage if core_rule in {"coverage", "fmcs"} else None,
             "core_target_met": (
