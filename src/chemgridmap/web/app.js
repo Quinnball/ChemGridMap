@@ -437,7 +437,7 @@ async function inspect(query) {
       ['Neighbor recall (fixed k)', percentage(row.neighbor_recall_fixed_k)]);
     for (const [label,value] of fields) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = format(value); stats.append(dt,dd); }
     $('evidence-summary').append(stats);
-    const marker = document.createElement('p'); marker.className = summary.is_conflicted ? 'flag' : 'micro';
+    const marker = document.createElement('p'); marker.className = !summary.quality_annotations_verified && summary.median_verified ? 'flag' : summary.wide_record_range ? 'note' : 'micro';
     marker.textContent = !summary.quality_annotations_verified && summary.median_verified ? 'Quality flags not verified: original annotation rules are unavailable.' : summary.wide_record_range ? 'Records span more than one log unit or lie on both sides of the class thresholds. Class support already accounts for agreement among documents.' : summary.median_verified ? 'No wide record range rule triggered. This does not establish assay equivalence.' : summary.interpretation;
     $('evidence-summary').append(marker);
     for (const text of summary.warnings || []) {

@@ -11,7 +11,8 @@
   manifests, show document-pair details and a distinct bottom-left map marker.
 - Rename the user-facing "conflict" flag to "wide record range", retain
   `is_conflicted` for compatibility, and add the equal-valued
-  `wide_record_range` alias.
+  `wide_record_range` alias. Present this note in the inspector with a neutral
+  style rather than a warning style.
 - Add `neighbor_recall_fixed_k` for expected recall under random tie-breaking.
   Keep the existing tie-inclusive `neighbor_recall` unchanged.
 - Make UMAP layouts repeatable for a given seed when the kNN graph is

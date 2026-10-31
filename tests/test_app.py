@@ -222,6 +222,20 @@ def test_map_outlines_stay_fixed_in_screen_space_and_offset_legend_is_conditiona
         assert color in stylesheet
 
 
+def test_inspector_uses_neutral_note_for_wide_record_range():
+    script = (ASSETS / 'app.js').read_text(encoding='utf-8')
+    stylesheet = (ASSETS / 'app.css').read_text(encoding='utf-8')
+
+    assert "marker.className = !summary.quality_annotations_verified && summary.median_verified ? 'flag' : summary.wide_record_range ? 'note' : 'micro'" in script
+    assert "warning.className = 'flag'" in script
+    note_rule = re.search(r'\.note\s*\{([^}]*)\}', stylesheet)
+    assert note_rule is not None
+    declarations = note_rule.group(1)
+    for declaration in ('color: var(--ink)', 'background: var(--pale)', 'padding: 9px', 'font-size: 11px', 'border-radius: 4px'):
+        assert declaration in declarations
+    assert '--red' not in declarations
+
+
 @pytest.mark.parametrize('filename', ['app.js', 'app.css', 'example-map.svg', 'example-molecule.svg'])
 def test_workspace_assets_are_served_locally(local_server, filename):
     with request(local_server, '/' + filename, token=False) as response:
