@@ -11,7 +11,7 @@ let structureGroups = [], neighborRelations = new Map();
 const colors = {active: '#2a9d8f', medium: '#e6a23c', inactive: '#c44e52', unlabelled: '#b8c2cc'};
 // Uncertain classes keep their hue at reduced saturation; reliability uses one sequential blue scale.
 const fadedColors = {active: '#b8e0db', medium: '#f6dfb8', inactive: '#ebc0c1', unlabelled: '#dfe4e9'};
-const reliabilityBins = [[0, '#e8eef7'], [.2, '#bcd0ea'], [.4, '#86acd8'], [.6, '#4f82bf'], [.8, '#1d5689']];
+const reliabilityBins = [[0, '#cde1f5'], [.2, '#a0bdda'], [.4, '#7599bf'], [.6, '#4a77a4'], [.8, '#1d5689']];
 function reliabilityColor(value) {
   if (value == null || Number.isNaN(value)) return colors.unlabelled;
   return reliabilityBins.filter(([low]) => value >= low - 1e-9).pop()[1];
@@ -174,6 +174,11 @@ function options() {
     core_min_coverage: Number($('core-coverage-target').value), fmcs_timeout: Number($('fmcs-timeout').value),
     activity_confidence: $('activity-confidence').checked, evidence_model: $('evidence-model').value,
     merge_identical_documents: $('merge-identical-documents').checked,
+    support_level: Number($('support-level').value), offset_display: $('offset-display').value,
+    offset_min_shared: Number($('offset-min-shared').value),
+    offset_min_difference: Number($('offset-min-difference').value),
+    offset_sign_agreement: Number($('offset-sign-agreement').value),
+    identity_conflicts: $('identity-conflicts').value,
     output_formats: $('raster').checked ? ['svg','png','pdf'] : ['svg']};
 }
 async function build(event) {
@@ -237,6 +242,8 @@ async function showResult() {
     $('group-select').append(option);
   }
   $('group-method').textContent = `${grouping.protocol.method} groups are defined before projection. Colors may repeat; group IDs are authoritative.`;
+  $('neighbor-key').querySelector('.representation-only').textContent =
+    job.options.representation === 'morgan' ? 'Fingerprint only' : 'Representation only';
   updateNavigation(); showPage('explore');
   $('run-caption').textContent = [job.options.target_id || inputInfo.filename, job.options.representation === 'morgan' ? 'Morgan fingerprint' : 'Molecular descriptors', job.options.projection.toUpperCase(), `${Math.round(job.options.grid_occupancy * 100)}% occupancy`].join(' · ');
   view = 'grid'; setView('grid');
@@ -308,14 +315,27 @@ function colorMap() {
       if (!offsetMarker) {
         const x = Number(mark.getAttribute('x') || 0), y = Number(mark.getAttribute('y') || 0);
         const width = Number(mark.getAttribute('width') || 100), height = Number(mark.getAttribute('height') || 100);
-        const corner = width * 0.12;
+        const corner = width * 0.3;
         offsetMarker = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         offsetMarker.dataset.offsetPairMarker = 'true';
-        offsetMarker.setAttribute('d', `M${x + 1},${y + height - corner} L${x + 1},${y + height - 1} L${x + corner},${y + height - 1} Z`);
+        offsetMarker.setAttribute('d', `M${x},${y + height - corner} L${x},${y + height} L${x + corner},${y + height} Z`);
         offsetMarker.setAttribute('fill', '#172536');
         el.append(offsetMarker);
       }
     } else if (offsetMarker) offsetMarker.remove();
+    let conflictMarker = el.querySelector(':scope > [data-conflict-marker]');
+    if ((point.wide_record_range ?? point.is_conflicted) && ['activity', 'support'].includes(mode)) {
+      if (!conflictMarker) {
+        const x = Number(mark.getAttribute('x') || 0), y = Number(mark.getAttribute('y') || 0);
+        const width = Number(mark.getAttribute('width') || 100);
+        const corner = width * 0.3;
+        conflictMarker = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        conflictMarker.dataset.conflictMarker = 'true';
+        conflictMarker.setAttribute('d', `M${x + width - corner},${y} L${x + width},${y} L${x + width},${y + corner} Z`);
+        conflictMarker.setAttribute('fill', '#172536');
+        el.append(conflictMarker);
+      }
+    } else if (conflictMarker) conflictMarker.remove();
   });
   renderLegend(mode);
 }
@@ -335,7 +355,8 @@ function renderLegend(mode) {
   if (mode === 'reliability') {
     reliabilityBins.forEach(([low, color], i) => $('legend').append(legendItem(color,
       `${Math.round(low * 100)}–${Math.round((reliabilityBins[i + 1]?.[0] ?? 1) * 100)}%`)));
-    $('legend').prepend(document.createTextNode('Share of representation neighbors that are also grid neighbors:'));
+    const term = job.options.representation === 'morgan' ? 'fingerprint' : 'representation';
+    $('legend').prepend(document.createTextNode(`Share of ${term} neighbors that are also grid neighbors:`));
     return;
   }
   for (const [label, text] of [['inactive', `Inactive ≤${lower}`], ['medium', `Medium (${lower}, ${upper})`], ['active', `Active ≥${upper}`]]) {
@@ -343,9 +364,13 @@ function renderLegend(mode) {
     if (mode === 'support') $('legend').append(legendItem(fadedColors[label], 'uncertain'));
   }
   if (mode === 'support') {
-    $('legend').append(document.createTextNode('Pale: uncertain (class support below 0.8, or an offset document pair).'));
+    const offsetDisplay = job.options.offset_display || 'uncertain';
+    const suffix = offsetDisplay === 'uncertain' ? ', or an offset document pair' : '';
+    $('legend').append(document.createTextNode(`Pale: uncertain (class support below ${job.options.support_level ?? .8}${suffix}).`));
     if (points.some(point => point.offset_pair_touched)) {
-      const offset = document.createElement('span'); offset.textContent = '◣ offset document pair'; $('legend').append(offset);
+      const offset = document.createElement('span');
+      offset.textContent = `◣ offset document pair${offsetDisplay === 'uncertain' ? '' : ' (display unchanged)'}`;
+      $('legend').append(offset);
     }
   } else { const flag = document.createElement('span'); flag.textContent = '◥ Wide record range'; $('legend').append(flag); }
 }
@@ -420,7 +445,7 @@ async function inspect(query) {
       ['Document-balanced pChEMBL', row.document_balanced_pchembl],
       ['Class support', `${percentage(row.class_confidence)} ${row.activity_class} · ${row.class_status}`]);
       if (summary.status_reason != null) {
-        const threshold = summary.confidence_threshold == null ? 0.8 : summary.confidence_threshold;
+        const threshold = summary.confidence_threshold == null ? (job.options.support_level ?? 0.8) : summary.confidence_threshold;
         const supportText = summary.status_reason === 'supported' ? 'supported' :
           summary.status_reason === 'low_support' ? `low support (below ${threshold})` :
           summary.status_reason === 'offset_pair' ? 'offset document pair' : summary.status_reason;
@@ -435,6 +460,7 @@ async function inspect(query) {
       ['Neighbor recall (tie-inclusive)', `${row.neighbor_shared_count}/${row.representation_neighbor_count} (${percentage(row.neighbor_recall)})`]);
     if (row.neighbor_recall_fixed_k != null) fields.push(
       ['Neighbor recall (fixed k)', percentage(row.neighbor_recall_fixed_k)]);
+    if (summary.neighbor_kth_label) fields.push(['Kth-neighbor similarity', summary.neighbor_kth_label]);
     for (const [label,value] of fields) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = format(value); stats.append(dt,dd); }
     $('evidence-summary').append(stats);
     const marker = document.createElement('p'); marker.className = !summary.quality_annotations_verified && summary.median_verified ? 'flag' : summary.wide_record_range ? 'note' : 'micro';
@@ -553,6 +579,12 @@ function restoreOptions(config) {
   $('core-coverage-target').value = config.core_min_coverage ?? .8; $('fmcs-timeout').value = config.fmcs_timeout ?? 1;
   $('activity-confidence').checked = config.activity_confidence ?? true; $('evidence-model').value = config.evidence_model || 'gaussian';
   $('merge-identical-documents').checked = config.merge_identical_documents ?? true;
+  $('support-level').value = config.support_level ?? .8;
+  $('offset-display').value = config.offset_display || 'uncertain';
+  $('offset-min-shared').value = config.offset_min_shared ?? 3;
+  $('offset-min-difference').value = config.offset_min_difference ?? 1;
+  $('offset-sign-agreement').value = config.offset_sign_agreement ?? .8;
+  $('identity-conflicts').value = config.identity_conflicts || 'error';
   const fields = {'input-format':'input_format',target:'target_id','activity-type':'activity_type',representation:'representation',projection:'projection',lower:'lower_threshold',upper:'upper_threshold',seed:'random_state',detail:'render_detail','conflict-range':'conflict_range_threshold',identity:'molecule_identity','structure-policy':'structure_policy','compound-column':'compound_column','smiles-col':'smiles_col','value-col':'value_col','document-column':'document_column','relation-column':'relation_column','label-col':'label_col'};
   for (const [id,key] of Object.entries(fields)) $(id).value = config[key] ?? '';
   $('occupancy').value = config.grid_occupancy*100; densityPreview();

@@ -45,7 +45,7 @@ def _weights(row: np.ndarray, shell: np.ndarray, k: int, *, index_space=None) ->
 
 
 def representation_neighbor_weights(matrix: np.ndarray, k: int = 10, metric: str = "jaccard",
-                                    batch_size: int = 1024):
+                                    batch_size: int = 1024, return_kth: bool = False):
     """Tie-inclusive neighbour sets and random tie-breaking weights.
 
     Jaccard (Tanimoto) distances on binary fingerprints are computed exactly
@@ -55,9 +55,10 @@ def representation_neighbor_weights(matrix: np.ndarray, k: int = 10, metric: str
     matrix = np.asarray(matrix)
     n = len(matrix)
     if n < 2:
-        return [np.empty(0, dtype=int) for _ in range(n)], [{} for _ in range(n)]
+        result = ([np.empty(0, dtype=int) for _ in range(n)], [{} for _ in range(n)])
+        return result + (np.full(n, np.nan),) if return_kth else result
     k = min(max(1, int(k)), n - 1)
-    neighbors, weights = [], []
+    neighbors, weights, kth_values = [], [], []
     if metric == "jaccard":
         bits = (matrix != 0).astype(np.float32)
         counts = bits.sum(axis=1).astype(np.float64)
@@ -71,7 +72,9 @@ def representation_neighbor_weights(matrix: np.ndarray, k: int = 10, metric: str
                 shell = _shell(row, k)
                 neighbors.append(shell)
                 weights.append(_weights(row, shell, k))
-        return neighbors, weights
+                kth_values.append(float(np.partition(row, k - 1)[k - 1]))
+        result = (neighbors, weights)
+        return result + (np.asarray(kth_values),) if return_kth else result
     if metric != "euclidean":
         raise ValueError("metric must be 'jaccard' or 'euclidean'.")
     points = np.asarray(matrix, dtype=np.float64)
@@ -87,7 +90,8 @@ def representation_neighbor_weights(matrix: np.ndarray, k: int = 10, metric: str
         weights.append(_weights(
             shell_distances, np.arange(len(shell)), k, index_space=shell
         ))
-    return neighbors, weights
+    result = (neighbors, weights)
+    return result + (kth,) if return_kth else result
 
 
 def representation_neighbor_sets(matrix: np.ndarray, k: int = 10, metric: str = "jaccard",
@@ -134,7 +138,8 @@ def neighbor_recall_fixed_k(reference_weights: Sequence[Mapping[int, float]],
 
 
 def reliability_columns(reference: List[np.ndarray], displayed: List[np.ndarray],
-                        *, reference_weights=None, displayed_weights=None, k: int = 10) -> dict:
+                        *, reference_weights=None, displayed_weights=None, k: int = 10,
+                        kth_values=None, kth_column: str = "neighbor_kth_similarity") -> dict:
     """Counts, tie-inclusive recall and fixed-k expected recall."""
     shared = [len(np.intersect1d(r, d, assume_unique=True)) for r, d in zip(reference, displayed)]
     columns = {"neighbor_recall": neighbor_recall(reference, displayed),
@@ -145,4 +150,6 @@ def reliability_columns(reference: List[np.ndarray], displayed: List[np.ndarray]
         columns["neighbor_recall_fixed_k"] = neighbor_recall_fixed_k(
             reference_weights, displayed_weights, k=k
         )
+    if kth_values is not None:
+        columns[kth_column] = np.asarray(kth_values, dtype=float)
     return columns

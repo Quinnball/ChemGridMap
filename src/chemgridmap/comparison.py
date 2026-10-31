@@ -106,7 +106,7 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
         elif core_rule == "fmcs":
             choice = mcs_core(selected, min_coverage=core_min_coverage, timeout=int(fmcs_timeout))
             core, matched = choice["core_smiles"], [
-                bool(pattern is not None and mol.HasSubstructMatch(pattern))
+                bool(pattern is not None and mol.HasSubstructMatch(pattern, useChirality=True))
                 for mol in selected
             ] if (pattern := Chem.MolFromSmarts(choice["core_smarts"])) is not None else [False] * len(selected)
         else:
@@ -304,7 +304,45 @@ def save_group_outputs(data, summaries, protocol, output_dir, name="map"):
                         encoding="utf-8", newline="\n")
         files[suffix] = str(path)
     path = directory / f"{name}_structure_members.csv"
-    data.to_csv(path, index=False, encoding="utf-8", lineterminator="\n")
+    identity_columns = [
+        "molecule_identity_key", "molecule_id", "parent_molecule_id", "name",
+        "comparison_id", "canonical_smiles", "smiles", "representation_smiles",
+    ]
+    grid_columns = ["grid_x", "grid_y", "grid_row", "grid_col"]
+    grouping_columns = [
+        "structure_group", "structure_group_color", "scaffold_smiles"
+    ]
+    member_columns = [
+        column
+        for column in identity_columns + grid_columns + grouping_columns
+        if column in data
+    ]
+    members = data[member_columns].copy()
+    if "molecule_identity_key" not in members and "comparison_id" in members:
+        members.insert(0, "molecule_identity_key", members["comparison_id"])
+    if "comparison_id" in members:
+        summary_frame = pd.DataFrame([
+            {
+                "structure_group": summary["structure_group"],
+                "core_rule": summary.get("core_rule"),
+                "core_smiles": summary.get("core_smiles"),
+                "core_smarts": summary.get("core_smarts"),
+                "core_coverage_target": summary.get("core_coverage_target"),
+                "core_member_ids": summary.get("core_member_ids", []),
+            }
+            for summary in summaries
+        ])
+        members = members.merge(
+            summary_frame, left_on="structure_group", right_on="structure_group", how="left"
+        )
+        members["core_member"] = [
+            comparison_id in set(member_ids)
+            for comparison_id, member_ids in zip(
+                members["comparison_id"], members["core_member_ids"]
+            )
+        ]
+        members = members.drop(columns="core_member_ids")
+    members.to_csv(path, index=False, encoding="utf-8", lineterminator="\n")
     files["structure_members"] = str(path)
     if {"grid_row", "grid_col"} <= set(data):
         palette = {s["structure_group"].lower(): s["color"] for s in summaries}

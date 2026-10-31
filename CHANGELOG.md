@@ -2,6 +2,36 @@
 
 ## 0.5.0 — 2026-10-29
 
+- Make the support level and offset display rule configurable in the Python
+  API, CLI and browser. Add configurable minimum shared entries, median
+  log-unit difference and sign agreement; validate each value and record all
+  five settings in fits, `app_options.json` and run manifests. Record the union
+  of entries touched by each flagged document pair and show it in the
+  inspector.
+- Allow offset display to be disabled without discarding offset diagnostics:
+  touched entries remain marked while `class_status` follows support alone.
+  Inspector and CLI output distinguish attached markers from display effect.
+- Render reliable layers with opaque cells. Full-detail structure cells now use
+  an 8% colored frame, a white inset and existing molecule margin; overview
+  cells use the full color. Use the same five-step OKLab-checked recall palette,
+  corner-marker geometry and Morgan-fingerprint terminology in static and
+  browser exports.
+- Add rendered-color tests using sRGB-to-OKLab distance and the Machado et al.
+  (2009) severity-1.0 deuteranopia simulation.
+- Trim `structure_members.csv` to identifiers, grid positions, groups,
+  scaffolds and core membership; add a generated complete column dictionary
+  and public API reference.
+- Check the 10,000-entry exact-grouping limit before projection and assignment.
+  Add `identity_conflicts="exclude"` and the matching CLI/browser option to
+  remove conflicting parent identities, export the conflicts and report the
+  counts.
+- Keep FMCS core search non-chiral, use the same chirality-aware containment
+  check as the other core rules, and record numba, pynndescent and llvmlite
+  versions in run manifests.
+- Add `neighbor_kth_similarity` for the kth Morgan fingerprint neighbor and
+  `neighbor_kth_distance` for other representations, without changing recall.
+- Add bundled CA II UMAP and exact PCA regression tests and document the tested
+  dependency/platform matrix and Figure 2 renderer command.
 - Keep selected-cell and neighbor outlines at a fixed on-screen width while
   zooming in the browser, and list the offset marker in the legend only when an
   offset document pair touches a displayed entry.

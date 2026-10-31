@@ -23,6 +23,34 @@ def _core_min_coverage(value: str) -> float:
     return coverage
 
 
+def _support_level(value: str) -> float:
+    level = float(value)
+    if not 0.5 < level < 1:
+        raise argparse.ArgumentTypeError("Support level must be between 0.5 and 1 (exclusive).")
+    return level
+
+
+def _offset_min_shared(value: str) -> int:
+    count = int(value)
+    if count < 2:
+        raise argparse.ArgumentTypeError("Offset minimum shared entries must be at least 2.")
+    return count
+
+
+def _positive_float(value: str) -> float:
+    number = float(value)
+    if not number > 0:
+        raise argparse.ArgumentTypeError("Value must be greater than 0.")
+    return number
+
+
+def _offset_sign_agreement(value: str) -> float:
+    agreement = float(value)
+    if not 0.5 < agreement <= 1:
+        raise argparse.ArgumentTypeError("Offset sign agreement must lie in (0.5, 1].")
+    return agreement
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="chemgridmap",
@@ -215,8 +243,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--evidence-model", choices=["gaussian", "exclude-flagged"], default="gaussian",
         help="Activity evidence model (default: gaussian).")
     parser.add_argument(
+        "--support-level", type=_support_level, default=0.8,
+        help="Minimum class support for a supported display (default: 0.8).")
+    parser.add_argument(
+        "--offset-display", choices=["uncertain", "none"], default="uncertain",
+        help="Show entries touched by systematic document offsets as uncertain, or leave display unchanged.")
+    parser.add_argument(
+        "--offset-min-shared", type=_offset_min_shared, default=3,
+        help="Minimum shared entries for a document-offset comparison (default: 3).")
+    parser.add_argument(
+        "--offset-min-difference", type=_positive_float, default=1.0,
+        help="Minimum absolute median offset in log units (default: 1.0).")
+    parser.add_argument(
+        "--offset-sign-agreement", type=_offset_sign_agreement, default=0.8,
+        help="Minimum fraction of differences sharing the median sign (default: 0.8).")
+    parser.add_argument(
         "--no-merge-identical-documents", action="store_true",
         help="Keep documents with identical entry medians as separate evidence units (default: merge).")
+    parser.add_argument(
+        "--identity-conflicts", choices=["error", "exclude"], default="error",
+        help="Stop on parent identities with multiple structures, or exclude and report them.")
     parser.add_argument(
         "--map-color-modes", nargs="+", default=[],
         choices=["activity", "class_support", "neighbor_recall", "structure_group"],
@@ -238,7 +284,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               "input_file_sha256": hashlib.sha256(args.input.read_bytes()).hexdigest(),
             "reliability_parameters": {"activity_confidence": not args.no_activity_confidence,
                                          "evidence_model": args.evidence_model,
-                                         "merge_identical_documents": not args.no_merge_identical_documents}}
+                                         "merge_identical_documents": not args.no_merge_identical_documents,
+                                         "confidence_threshold": args.support_level,
+                                         "offset_display": args.offset_display,
+                                         "offset_min_shared": args.offset_min_shared,
+                                         "offset_threshold": args.offset_min_difference,
+                                         "offset_sign_agreement": args.offset_sign_agreement}}
     curation_files = {}
     if args.input_format == "chembl":
         curation = curate_chembl_activity_data(
@@ -252,6 +303,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             molecule_identity=args.molecule_identity,
             structure_policy=args.structure_policy,
             assay_types=args.assay_types,
+            identity_conflicts=args.identity_conflicts,
         )
         curation.report["input_file"] = str(args.input.resolve())
         curation.report["input_file_sha256"] = source["input_file_sha256"]
@@ -263,7 +315,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     curation.molecules, curation.retained_records, lower=args.lower_threshold,
                     upper=args.upper_threshold, value="activity_pchembl_raw", document=document_column,
                     merge_identical=not args.no_merge_identical_documents,
-                    model=args.evidence_model)
+                    model=args.evidence_model,
+                    confidence_threshold=args.support_level,
+                    offset_display=args.offset_display,
+                    offset_min_shared=args.offset_min_shared,
+                    offset_threshold=args.offset_min_difference,
+                    offset_sign_agreement=args.offset_sign_agreement)
                 curation.report["activity_confidence"] = fit
                 source["activity_confidence"] = fit
             except ValueError as exc:
@@ -304,8 +361,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 upper=args.upper_threshold,
                 conflict_range_threshold=args.conflict_range_threshold,
                 confidence=confidence,
+                confidence_threshold=args.support_level,
                 merge_identical=not args.no_merge_identical_documents,
                 evidence_model=args.evidence_model,
+                offset_display=args.offset_display,
+                offset_min_shared=args.offset_min_shared,
+                offset_threshold=args.offset_min_difference,
+                offset_sign_agreement=args.offset_sign_agreement,
             )
             source["generic_activity"] = generic_report
             if fit is not None:
@@ -352,6 +414,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         core_rule=args.core_rule,
         fmcs_timeout=args.fmcs_timeout,
         core_min_coverage=args.core_min_coverage,
+        confidence_threshold=args.support_level,
+        offset_display=args.offset_display,
+        offset_min_shared=args.offset_min_shared,
+        offset_threshold=args.offset_min_difference,
+        offset_sign_agreement=args.offset_sign_agreement,
         map_color_modes=args.map_color_modes,
     )
     result.output_files.update(curation_files)

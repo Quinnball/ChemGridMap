@@ -42,11 +42,13 @@ python -m pip install -e ".[dev]"
 On Windows PowerShell, activate the environment with
 `.venv\Scripts\Activate.ps1`.
 
-The CI suite runs with Python 3.10 and 3.12 on Linux, macOS and Windows. It
-installs the newest dependency versions that satisfy the declared lower bounds
-when the workflow runs, so those resolved versions are the ones tested; each
-run manifest records the versions actually used. The declared minimum versions
-have not been tested separately.
+The CI suite is configured for Python 3.10 and 3.12 on Linux, macOS and
+Windows. CI resolves current compatible dependency versions; each run manifest
+records the versions actually used. The exact dependency set used to prepare
+the revision environment is pinned in
+[`requirements-paper.lock.txt`](requirements-paper.lock.txt), including
+numba, pynndescent, llvmlite and UMAP. The versions in `pyproject.toml` are
+minimum bounds and have not been tested separately.
 
 ## Quick start
 
@@ -85,17 +87,23 @@ source records and median pChEMBL value.
 
 **Activity evidence.** The main activity layer keeps the observed
 molecule-level median and class. In the separate class-support layer, a pale
-(`uncertain`) cell means that the document-balanced evidence does not reach the
-default 0.8 support threshold, that the entry has records from a document in a
-flagged offset pair, or both. A document pair is flagged when the two documents
-share at least three entries, their median difference is at least one log unit
-and at least 80% of the shared entries differ in the direction of the median. A
-pale cell is not a missing measurement, and its class is not changed.
-`status_reason` is `offset_pair` for every touched entry, whatever its support,
-and otherwise `supported` or `low_support`. Touched cells carry a bottom-left
-marker in the class-support layer; their model probabilities are unchanged.
-Inspect the cell to compare document counts, evidence units, σ_doc and its
-degrees of freedom, class probabilities and the offset document pairs.
+(`uncertain`) cell means that document-balanced evidence does not reach the
+configured support level. With the default `--offset-display uncertain`, it
+also means that the entry occurs in a document from a flagged offset pair. A
+document pair is flagged when it meets the configured minimum shared-entry,
+median-difference and sign-agreement criteria (defaults: 3, 1 log unit and
+80%). A pale cell is not a missing measurement, and its class is not changed.
+With `--offset-display none`, touched entries remain visible with a bottom-left
+marker but `class_status` depends only on support. Their model probabilities
+are unchanged in either mode.
+
+All five settings are available in `annotate_activity_confidence`,
+`prepare_generic_activity_records`, the CLI and the browser:
+`--support-level`, `--offset-display`, `--offset-min-shared`,
+`--offset-min-difference` and `--offset-sign-agreement`. Fits and run manifests
+record the settings. Inspect a cell to compare document counts, evidence units,
+σ_doc and its degrees of freedom, class probabilities, all touching offset
+pairs and the number of entries each pair touches.
 
 **Neighbor recall.** The neighbor-recall layer reports how many
 fingerprint-space neighbors also appear among the selected cell's tie-aware
@@ -105,7 +113,16 @@ reports the expected recall after independently breaking each row's ties at
 random, with total weight k. A dark cell has better local neighborhood
 agreement; a pale cell is a warning that the 2D layout does not preserve that
 local fingerprint neighborhood. Grid adjacency by itself is not evidence of
-chemical or biological similarity.
+chemical or biological similarity. `neighbor_kth_similarity` gives the kth
+Morgan neighbor's Tanimoto similarity; descriptor/embedding maps instead write
+`neighbor_kth_distance`.
+
+Exported reliability layers use opaque cell colors. Full-detail structure cells
+have a colored frame occupying 8% of each side, a white inset, and the structure
+inside that inset. At overview scale the white inset, structure and frame
+decoration hide together, leaving the full cell color visible. The five
+neighbor-recall colors and corner markers are identical in SVG, PNG/PDF and the
+browser.
 
 **Core coverage.** For each representation-defined structure group, the default
 core is the largest member scaffold or scaffold-network ring fragment that
@@ -116,7 +133,8 @@ machine speed and load. `core_smiles_attached` is a valid SMILES drawing of the
 core with `[*]` at bonds cut from its matched parent molecule; the browser uses
 it when drawing the selected core. `core_smiles_attached_source` is
 `matched_member`, `matched_member_kekule`, or empty when no attached core could
-be built.
+be built. FMCS cores contain no stereochemical information; their containment
+checks use the same chirality-aware matching rule as the other core methods.
 
 `is_conflicted` remains in exported tables for compatibility. Its alias
 `wide_record_range` has the same value and names the rule directly: records
@@ -159,7 +177,8 @@ gaussian` is the default; `exclude-flagged` is the explicit alternative that
 removes evidence units containing documents in systematic offset pairs and
 falls back to Gaussian support where no unit remains. Use
 `--no-merge-identical-documents` to keep re-reported identical values as
-separate evidence units.
+separate evidence units. The support and offset criteria described above apply
+to generic records as well.
 
 A curated one-row-per-molecule table remains supported through `--smiles-col`,
 `--value-col` and `--label-col`.
@@ -215,7 +234,8 @@ def run(input_path, output_dir, *, target_id="CHEMBL205",
     columns = [
         "molecule_identity_key", "activity_pchembl", "class_confidence",
         "class_status", "status_reason", "offset_pair_touched",
-        "neighbor_recall", "neighbor_recall_fixed_k", "structure_group",
+        "neighbor_recall", "neighbor_recall_fixed_k",
+        "neighbor_kth_similarity", "structure_group",
     ]
     result.data[columns].to_csv(
         Path(output_dir) / "entry_reliability.csv", index=False
@@ -244,7 +264,8 @@ A run writes:
 - `<name>.svg`, `.png` and `.pdf`: the main activity-colored map;
 - optional `<name>_class_support`, `_neighbor_recall` and
   `_structure_group` layers;
-- structure-group summaries and member tables;
+- structure-group summaries and a trimmed member table containing identifiers,
+  grid positions and group/scaffold/core fields;
 - an inspector-compatible source-record table for ChEMBL input;
 - `<name>_run_manifest.json`: parameters, software versions, diagnostics and
   SHA-256 digests;
@@ -265,7 +286,8 @@ Main exported columns:
   `pchembl_max`, `is_conflicted`, `wide_record_range`, `class_confidence`,
   `class_reproducibility`, `class_status`, `status_reason`,
   `offset_pair_touched`, `n_documents`, `n_evidence_units`, `neighbor_recall`,
-  `neighbor_recall_fixed_k`, `neighbor_shared_count`, `grid_neighbor_count`,
+  `neighbor_recall_fixed_k`, `neighbor_kth_similarity`,
+  `neighbor_shared_count`, `grid_neighbor_count`,
   `projection_x`, `projection_y`, `grid_row`, `grid_col`, `structure_group`.
 - `metrics.csv`: representation and projection names, projection/grid
   diagnostics, assignment method, tie-aware mean recall and fixed-k mean
@@ -273,14 +295,33 @@ Main exported columns:
 - `structure_groups.json`: group size and members, `core_smiles`,
   `core_smiles_attached`, core rule and coverage, scaffold counts, and FMCS
   timeout status.
-- `structure_members.csv`: molecule-level group, scaffold and activity fields.
+- `structure_members.csv`: identifier, grid, group, scaffold and core fields;
+  activity columns and the full map annotation set are not duplicated here.
 - `document_offsets.csv`: evaluated document pairs, shared entries, median,
-  mean and SD offsets, sign agreement and systematic-offset status.
+  mean and SD offsets, sign agreement, systematic-offset status and the number
+  of entries touched by the union of both documents.
 - `run_manifest.json`: software version and source-tree SHA-256, Git commit and
   dirty state when available, parameters, dependency versions, σ_doc fit,
   assignment/refinement diagnostics, timings and output SHA-256 digests. Git
   dirty state covers only the package directory; commit is empty when the
   software is not in a tracked repository.
+
+Every emitted column is defined in
+[`docs/OUTPUT_COLUMNS.md`](docs/OUTPUT_COLUMNS.md); public signatures and
+docstring summaries are in [`docs/API.md`](docs/API.md). Regenerate them with:
+
+```bash
+python -m chemgridmap.columns \
+  --write docs/OUTPUT_COLUMNS.md \
+  --write-api docs/API.md
+```
+
+Exact grouping is checked against the 10,000-entry limit before projection or
+assignment. Larger maps must use `--grouping none` in the CLI or **No grouping**
+in the browser. For ChEMBL parent identities that map to multiple normalized
+structures, `--identity-conflicts exclude` removes all associated records,
+writes `identity_conflicts.csv`, and records the count and warning in the
+curation report.
 
 ## Paper reproduction
 
@@ -289,6 +330,17 @@ E2 multi-target evidence evaluation and E2c layout evaluation are in
 [`paper/README.md`](paper/README.md). The analysis sources are included under
 [`paper/strengthening/`](paper/strengthening/), with target selection rules in
 [`paper/strengthening/SELECTION_RULES.md`](paper/strengthening/SELECTION_RULES.md).
+
+To reproduce the manuscript Figure 2 reliability layers with the software's
+own overview renderer:
+
+```bash
+chemgridmap chembl205_ic50.csv --input-format chembl \
+  --target-id CHEMBL205 \
+  --render-detail overview \
+  --map-color-modes activity class_support neighbor_recall \
+  --output-dir caii_fig2
+```
 
 ## Citation
 

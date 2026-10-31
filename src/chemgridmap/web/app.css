@@ -75,7 +75,7 @@ details { margin-top: 18px; }summary { font-size: 12px; font-weight: bold; paddi
 #map-stage g.selected-cell>rect, #map-stage circle.selected-cell { stroke: #193e91 !important; stroke-width: calc(3.5 * var(--zoom-inverse, 1)) !important; stroke-opacity: 1 !important; }
 #map-stage g:hover>rect, #map-stage circle:hover { stroke: #193e91; stroke-width: calc(2 * var(--zoom-inverse, 1)); }
 #map-viewport.color-overview g[data-grid-row]>g { display: none; }
-#map-viewport.color-overview g[data-grid-row]>rect { fill-opacity: .58; }
+#map-viewport.color-overview g[data-grid-row]>rect { fill-opacity: 1; }
 .map-bottom { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 11px 16px; border-top: 1px solid var(--line); flex-wrap: wrap; }.legend { display: flex; flex-wrap: wrap; gap: 15px; font-size: 10px; }.legend span { display: flex; align-items: center; gap: 5px; }.legend i { width: 8px; height: 8px; border-radius: 1px; }.map-hint { font-size: 10px; color: var(--muted); }
 #empty-map { height: 100%; display: flex; justify-content: center; align-items: center; flex-direction: column; text-align: center; padding: 25px; }#empty-map h2 { font-size: 25px; margin-top: 23px; }#empty-map p { font-size: 12px; color: var(--muted); max-width: 460px; }#empty-map small { font-size: 10px; color: var(--muted); }
 .loading-mark { display: grid; grid-template-columns: repeat(2,1fr); gap: 4px; transform: rotate(-5deg); }.loading-mark i { width: 20px; height: 20px; background: #a4c2a1; animation: pulse 1.5s ease infinite; }.loading-mark i:nth-child(2) { animation-delay: .2s; }.loading-mark i:nth-child(3) { animation-delay: .4s; }.loading-mark i:nth-child(4) { animation-delay: .6s; }@keyframes pulse { 50% { opacity: .3; } }

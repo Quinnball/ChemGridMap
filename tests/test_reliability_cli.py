@@ -7,6 +7,7 @@ import pytest
 from rdkit import Chem
 
 from chemgridmap.cli import build_parser, main
+from chemgridmap import cores as core_module
 from chemgridmap.comparison import structural_groups
 from chemgridmap.cores import _attached_candidate, _core_smiles_with_attachments, mcs_core
 
@@ -69,6 +70,11 @@ def test_cli_evidence_policy_offsets_layers_and_archive(tmp_path, merge_identica
     assert manifest["git_dirty"] is None or isinstance(manifest["git_dirty"], bool)
     params = manifest["parameters"]
     assert params["merge_identical_documents"] is merge_identical
+    assert params["confidence_threshold"] == 0.8
+    assert params["offset_display"] == "uncertain"
+    assert params["offset_min_shared"] == 3
+    assert params["offset_threshold"] == 1.0
+    assert params["offset_sign_agreement"] == 0.8
     assert params["activity_confidence"] is True
     assert params["grid_refinement"] == "neighbors"
     assert params["core_rule"] == "coverage"
@@ -93,7 +99,10 @@ def test_cli_reliability_help_and_legacy_switches():
     for option in ("--no-merge-identical-documents", "--map-color-modes", "--grid-refinement",
                    "--core-rule", "--core-min-coverage", "--fmcs-timeout",
                    "--no-activity-confidence", "--evidence-model", "--compound-column",
-                   "--document-column", "--relation-column", "--smiles-column", "--value-column"):
+                   "--document-column", "--relation-column", "--smiles-column", "--value-column",
+                   "--support-level", "--offset-display", "--offset-min-shared",
+                   "--offset-min-difference", "--offset-sign-agreement",
+                   "--identity-conflicts"):
         assert option in help_text
     normalized_help = " ".join(help_text.split())
     assert "Coverage target for coverage/FMCS rules; range: 0.5–1 (default: 0.8)." in normalized_help
@@ -108,6 +117,44 @@ def test_cli_reliability_help_and_legacy_switches():
     assert args.grid_refinement == "none" and args.core_rule == "most_frequent"
     assert args.core_min_coverage == 0.8
     assert args.no_activity_confidence
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--support-level", "0.5"],
+    ["--offset-min-shared", "1"],
+    ["--offset-min-difference", "0"],
+    ["--offset-sign-agreement", "0.5"],
+])
+def test_cli_rejects_invalid_reliability_parameters(arguments):
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["input.csv", *arguments])
+
+
+def test_cli_excludes_and_exports_identity_conflicts(tmp_path):
+    data = pd.DataFrame([
+        {"Molecule ChEMBL ID": "CHEMBL1", "Parent Molecule ChEMBL ID": "CHEMBL9",
+         "Smiles": "CCO", "pChEMBL Value": 6.0},
+        {"Molecule ChEMBL ID": "CHEMBL2", "Parent Molecule ChEMBL ID": "CHEMBL9",
+         "Smiles": "c1ccccc1", "pChEMBL Value": 6.5},
+        {"Molecule ChEMBL ID": "CHEMBL3", "Parent Molecule ChEMBL ID": "CHEMBL10",
+         "Smiles": "CCC", "pChEMBL Value": 7.0},
+        {"Molecule ChEMBL ID": "CHEMBL4", "Parent Molecule ChEMBL ID": "CHEMBL11",
+         "Smiles": "CCN", "pChEMBL Value": 5.5},
+    ])
+    source = tmp_path / "conflicts.csv"
+    data.to_csv(source, index=False)
+    assert main([
+        str(source), "--input-format", "chembl", "--identity-conflicts", "exclude",
+        "--grouping", "none", "--projection", "pca", "--grid-padding", "2",
+        "--render-detail", "overview", "--output-formats", "svg",
+        "--output-dir", str(tmp_path), "--name", "conflicts",
+    ]) == 0
+    conflicts = pd.read_csv(tmp_path / "conflicts_identity_conflicts.csv")
+    assert conflicts.to_dict("records") == [{
+        "molecule_identity_key": "CHEMBL9",
+        "structures": "CCO;c1ccccc1",
+        "record_count": 2,
+    }]
 
 
 def test_generic_activity_records_match_chembl_annotation_numerically(tmp_path):
@@ -184,6 +231,9 @@ def test_cli_fmcs_core_end_to_end_records_timeout(tmp_path):
     groups = json.loads((tmp_path / "fmcs_structure_groups.json").read_text())["groups"]
     assert all(group["core_rule"] == "fmcs" and isinstance(group["fmcs_timed_out"], bool) for group in groups)
     members = pd.read_csv(tmp_path / "fmcs_structure_members.csv")
+    assert "activity_pchembl" not in members
+    assert {"molecule_identity_key", "grid_row", "grid_col", "structure_group",
+            "scaffold_smiles", "core_member", "core_smiles", "core_smarts"} <= set(members)
     group = max(groups, key=lambda item: item["size"])
     mols = [
         Chem.MolFromSmiles(value)
@@ -207,6 +257,20 @@ def test_mcs_core_writes_valid_smiles_from_matched_aromatic_member():
     assert result["core_smiles_source"] == "matched_member"
     assert result["core_smiles_attached_source"] == "matched_member"
     assert all(mol.HasSubstructMatch(pattern) for mol in mols)
+
+
+def test_mcs_search_remains_non_chiral(monkeypatch):
+    calls = []
+    original = core_module.rdFMCS.FindMCS
+
+    def record_call(*args, **kwargs):
+        calls.append(kwargs)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(core_module.rdFMCS, "FindMCS", record_call)
+    mols = [Chem.MolFromSmiles(smiles) for smiles in INDOLE_SULFONAMIDES]
+    mcs_core(mols, min_coverage=0.8, timeout=1)
+    assert calls and all("matchChiralTag" not in call for call in calls)
 
 
 @pytest.mark.parametrize(("smiles", "expected_heavy_atoms"), KEKULE_FALLBACK_CASES)

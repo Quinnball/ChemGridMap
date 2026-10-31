@@ -4,8 +4,9 @@ from inspect import signature
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
-from chemgridmap import build_grid_map
+from chemgridmap import build_grid_map, pipeline
 
 
 MOLECULES = pd.DataFrame(
@@ -114,6 +115,8 @@ class PipelineTests(unittest.TestCase):
             "projection_grid_tie_aware_precision", result.metrics.columns
         )
         self.assertIn("grid_knn_value_abs_diff", result.metrics.columns)
+        self.assertIn("neighbor_kth_similarity", result.data)
+        self.assertTrue(result.data["neighbor_kth_similarity"].between(0, 1).all())
         self.assertEqual(
             result.metrics.loc[0, "coordinate_scaling"],
             "isotropic",
@@ -122,6 +125,15 @@ class PipelineTests(unittest.TestCase):
             result.metrics.loc[0, "grid_sizing_strategy"],
             "explicit_padding",
         )
+
+
+def test_grouping_limit_is_checked_before_projection(monkeypatch):
+    projected = []
+    monkeypatch.setattr(pipeline, "project_2d", lambda *args, **kwargs: projected.append(True))
+    large = pd.DataFrame({"smiles": ["CCO"] * 10_001, "value": [6.0] * 10_001})
+    with pytest.raises(ValueError, match=r"10,001.*--grouping none"):
+        build_grid_map(large, value_col="value", grouping="butina", duplicate_policy="keep")
+    assert projected == []
 
 
 if __name__ == "__main__":

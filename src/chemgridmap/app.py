@@ -39,6 +39,21 @@ def json_rows(frame):
     return json.loads(frame.to_json(orient="records"))
 
 
+POINT_COLUMNS = (
+    "projection_x", "projection_y", "grid_x", "grid_y", "grid_row", "grid_col",
+    "activity_class", "molecule_id", "molecule_identity_key", "structure_group",
+    "structure_group_color", "comparison_id", "neighbor_recall",
+    "neighbor_recall_fixed_k", "class_confidence", "class_status", "status_reason",
+    "offset_pair_touched", "wide_record_range", "is_conflicted",
+    "neighbor_kth_similarity", "neighbor_kth_distance", "n_evidence_units",
+)
+
+
+def point_rows(data):
+    columns = [name for name in POINT_COLUMNS if name in data]
+    return json_rows(data[columns])
+
+
 class AppSession:
     """One local workspace; a single worker avoids concurrent chemistry/render jobs."""
 
@@ -120,6 +135,11 @@ class AppSession:
                 "activity_confidence": options["activity_confidence"],
                 "evidence_model": options["evidence_model"],
                 "merge_identical_documents": options["merge_identical_documents"],
+                "confidence_threshold": options["support_level"],
+                "offset_display": options["offset_display"],
+                "offset_min_shared": options["offset_min_shared"],
+                "offset_threshold": options["offset_min_difference"],
+                "offset_sign_agreement": options["offset_sign_agreement"],
             }
             data = self.frame.copy()
             curation, curation_files = None, {}
@@ -130,6 +150,7 @@ class AppSession:
                     lower_threshold=options["lower_threshold"], upper_threshold=options["upper_threshold"],
                     conflict_range_threshold=options["conflict_range_threshold"],
                     structure_policy=options["structure_policy"], molecule_identity=options["molecule_identity"],
+                    identity_conflicts=options["identity_conflicts"],
                 )
                 curation.report.update(source)
                 source["curation_parameters"] = curation.report["parameters"]
@@ -141,7 +162,12 @@ class AppSession:
                             curation.molecules, curation.retained_records, lower=options["lower_threshold"],
                             upper=options["upper_threshold"], value="activity_pchembl_raw", document=document_column,
                             merge_identical=options["merge_identical_documents"],
-                            model=options["evidence_model"])
+                            model=options["evidence_model"],
+                            confidence_threshold=options["support_level"],
+                            offset_display=options["offset_display"],
+                            offset_min_shared=options["offset_min_shared"],
+                            offset_threshold=options["offset_min_difference"],
+                            offset_sign_agreement=options["offset_sign_agreement"])
                         curation.report["activity_confidence"] = fit
                         source["activity_confidence"] = fit
                         self.activity_confidence = fit
@@ -171,8 +197,13 @@ class AppSession:
                         upper=options["upper_threshold"],
                         conflict_range_threshold=options["conflict_range_threshold"],
                         confidence=confidence,
+                        confidence_threshold=options["support_level"],
                         merge_identical=options["merge_identical_documents"],
                         evidence_model=options["evidence_model"],
+                        offset_display=options["offset_display"],
+                        offset_min_shared=options["offset_min_shared"],
+                        offset_threshold=options["offset_min_difference"],
+                        offset_sign_agreement=options["offset_sign_agreement"],
                     )
                     source["generic_activity"] = report
                     if fit is not None:
@@ -198,6 +229,11 @@ class AppSession:
                 cluster_col=options["cluster_col"], cluster_source=options["cluster_source"],
                 grid_refinement=options["grid_refinement"], core_rule=options["core_rule"],
                 core_min_coverage=options["core_min_coverage"], fmcs_timeout=options["fmcs_timeout"],
+                confidence_threshold=options["support_level"],
+                offset_display=options["offset_display"],
+                offset_min_shared=options["offset_min_shared"],
+                offset_threshold=options["offset_min_difference"],
+                offset_sign_agreement=options["offset_sign_agreement"],
                 map_color_modes=color_modes, map_color_formats=["svg"],
             )
             result.output_files.update(curation_files)
@@ -279,7 +315,8 @@ class AppSession:
                     data, curation.retained_records, molecule_id=molecule_id,
                     cell=(row, col) if molecule_id is None else None,
                     parameters=curation.report["parameters"],
-                    activity_confidence=manifest.get("activity_confidence"))
+                    activity_confidence=manifest.get("activity_confidence"),
+                    k=int(self.result.metrics.iloc[0].get("k", 10)))
                 summary['run_binding_verified'] = run_bound
                 summary['warnings'].extend(binding_warnings)
             else:
@@ -347,7 +384,10 @@ def validate_options(options):
                 "grid_refinement": "neighbors", "core_rule": "coverage", "core_min_coverage": .8,
                 "fmcs_timeout": 1, "compound_column": None, "document_column": None,
                 "relation_column": None, "activity_confidence": True,
-                "evidence_model": "gaussian", "merge_identical_documents": True}
+                "evidence_model": "gaussian", "merge_identical_documents": True,
+                "support_level": .8, "offset_display": "uncertain",
+                "offset_min_shared": 3, "offset_min_difference": 1.0,
+                "offset_sign_agreement": .8, "identity_conflicts": "error"}
     if not isinstance(options, dict) or set(options) - set(defaults):
         raise ValueError("Unknown map option.")
     values = {**defaults, **options}
@@ -357,7 +397,9 @@ def validate_options(options):
                "molecule_identity": {"auto", "parent-id", "canonical-smiles"},
                "grid_refinement": {"none", "neighbors"},
                "core_rule": {"most_frequent", "coverage", "fmcs"},
-               "evidence_model": {"gaussian", "exclude-flagged"}}
+               "evidence_model": {"gaussian", "exclude-flagged"},
+               "offset_display": {"uncertain", "none"},
+               "identity_conflicts": {"error", "exclude"}}
     choices['grouping'] = {'butina', 'external', 'none'}
     for key, allowed in choices.items():
         if values[key] not in allowed:
@@ -370,6 +412,19 @@ def validate_options(options):
         raise ValueError("Activity thresholds must be finite, with the lower threshold below the upper.")
     if not 0 <= values["conflict_range_threshold"] < 100:
         raise ValueError("Wide record range threshold must be finite and non-negative.")
+    values["support_level"] = float(values["support_level"])
+    if not 0.5 < values["support_level"] < 1:
+        raise ValueError("Support level must be between 0.5 and 1 (exclusive).")
+    min_shared = values["offset_min_shared"]
+    if isinstance(min_shared, bool) or int(min_shared) != min_shared or int(min_shared) < 2:
+        raise ValueError("Offset minimum shared entries must be an integer of at least 2.")
+    values["offset_min_shared"] = int(min_shared)
+    values["offset_min_difference"] = float(values["offset_min_difference"])
+    if not values["offset_min_difference"] > 0:
+        raise ValueError("Offset minimum difference must be greater than 0.")
+    values["offset_sign_agreement"] = float(values["offset_sign_agreement"])
+    if not 0.5 < values["offset_sign_agreement"] <= 1:
+        raise ValueError("Offset sign agreement must lie in (0.5, 1].")
     values["random_state"] = int(values["random_state"])
     values['group_similarity'] = float(values['group_similarity'])
     if not 0 < values['group_similarity'] <= 1:
@@ -456,11 +511,7 @@ class LocalHandler(BaseHTTPRequestHandler):
             elif path == "/api/points":
                 if session.result is None:
                     raise ValueError("Build a map first.")
-                columns = [name for name in ("projection_x", "projection_y", "grid_x", "grid_y", "grid_row", "grid_col",
-                           "activity_class", "molecule_id", "molecule_identity_key", "structure_group", "structure_group_color", "comparison_id",
-                           "neighbor_recall", "neighbor_recall_fixed_k", "class_confidence", "class_status",
-                           "status_reason", "offset_pair_touched", "n_evidence_units") if name in session.result.data]
-                self.send(json_rows(session.result.data[columns]))
+                self.send(point_rows(session.result.data))
             elif path == "/api/groups":
                 if session.result is None:
                     raise ValueError("Build a map first.")

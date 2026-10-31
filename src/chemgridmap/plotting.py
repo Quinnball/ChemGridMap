@@ -30,15 +30,17 @@ DEFAULT_COLORS = {
     "unlabelled": "#B8C2CC",
 }
 
-MOLECULE_TILE_OPACITY = 0.12
-OVERVIEW_TILE_OPACITY = 0.58
+MOLECULE_TILE_OPACITY = 1.0
+OVERVIEW_TILE_OPACITY = 1.0
+STRUCTURE_FRAME_FRACTION = 0.08
+CORNER_MARKER_FRACTION = 0.3
 
 # Keep these colors in sync with web/app.js.
 MAP_COLOR_MODES = ("activity", "class_support", "neighbor_recall", "structure_group")
 FADED_COLORS = {"active": "#b8e0db", "medium": "#f6dfb8",
                 "inactive": "#ebc0c1", "unlabelled": "#dfe4e9"}
-RELIABILITY_BINS = ((0, "#e8eef7"), (.2, "#bcd0ea"), (.4, "#86acd8"),
-                    (.6, "#4f82bf"), (.8, "#1d5689"))
+RELIABILITY_BINS = ((0, "#cde1f5"), (.2, "#a0bdda"), (.4, "#7599bf"),
+                    (.6, "#4a77a4"), (.8, "#1d5689"))
 
 
 def _tile_color(row, colors, label_col, color_by):
@@ -56,20 +58,33 @@ def _tile_color(row, colors, label_col, color_by):
     return colors[label]
 
 
+def _neighbor_term(data):
+    representation = str(data.attrs.get("representation_type", "morgan")).lower()
+    return "fingerprint" if representation == "morgan" else "representation"
+
+
 def _color_legend(data, color_by):
+    neighbor_term = _neighbor_term(data)
     if color_by == "neighbor_recall":
-        return "Representation neighbors retained in the grid", [
+        return f"{neighbor_term.capitalize()} neighbors retained in the grid", [
             (color, f"{round(low * 100)}–{round((RELIABILITY_BINS[i + 1][0] if i < 4 else 1) * 100)}%")
             for i, (low, color) in enumerate(RELIABILITY_BINS)]
     if color_by == "class_support":
         entries = []
         for label in ("inactive", "medium", "active"):
             entries.extend([(DEFAULT_COLORS[label], label), (FADED_COLORS[label], f"{label}: uncertain")])
-        threshold = data.attrs.get("activity_confidence_fit", {}).get("confidence_threshold")
+        fit = data.attrs.get("activity_confidence_fit", {})
+        threshold = fit.get("confidence_threshold")
         threshold_text = f"{threshold:g}" if threshold is not None else "configured threshold"
+        offset_display = fit.get("offset_display", "uncertain")
         if data.get("offset_pair_touched", pd.Series(dtype=bool)).fillna(False).astype(bool).any():
-            entries.append(("#172536", "offset document pair (bottom-left marker)"))
-        return f"Activity class support (pale: probability below {threshold_text} or offset document pair)", entries
+            suffix = "" if offset_display == "uncertain" else " (display unchanged)"
+            entries.append(("#172536", "◣ offset document pair" + suffix))
+        offset_text = ", or an offset document pair" if offset_display == "uncertain" else ""
+        return (
+            f"Pale: uncertain (class support below {threshold_text}{offset_text}).",
+            entries,
+        )
     if color_by == "structure_group":
         if "structure_group_color" not in data:
             return "Structure groups", [(DEFAULT_COLORS["unlabelled"], "No grouping")]
@@ -201,36 +216,43 @@ def render_svg(
         parts.append("<title>{}</title>".format(html.escape(str(title))))
         parts.append(
             '<rect x="{x}" y="{y}" width="{size}" height="{size}" '
-            'fill="{color}" fill-opacity="{opacity}" stroke="#FFFFFF" '
+            'fill="{color}" fill-opacity="1" stroke="#FFFFFF" '
             'stroke-opacity="0.95" stroke-width="1" shape-rendering="crispEdges"/>'.format(
                 x=x,
                 y=y,
                 size=tile_size,
                 color=color,
-                opacity=(MOLECULE_TILE_OPACITY if draw_molecules else OVERVIEW_TILE_OPACITY),
             )
         )
         if draw_molecules:
+            frame = tile_size * STRUCTURE_FRAME_FRACTION
+            inner = tile_size - 2 * frame
             molecule = _svg_molecule_content(
-                str(row[smiles_col]), tile_size - 2 * molecule_margin
+                str(row[smiles_col]), int(inner - 2 * molecule_margin)
             )
-            if molecule:
-                parts.append(
-                    '<g transform="translate({},{})">{}</g>'.format(
-                        x + molecule_margin, y + molecule_margin, molecule
-                    )
+            molecule_group = (
+                '<g transform="translate({},{})">{}</g>'.format(
+                    molecule_margin, molecule_margin, molecule
                 )
-        if pd.notna(row.get("is_conflicted")) and row.get("is_conflicted") == 1:
-            corner = tile_size * 0.12
-            parts.append(
-                f'<path data-conflict-marker="true" d="M{x+tile_size-corner},{y+1} '
-                f'L{x+tile_size-1},{y+1} L{x+tile_size-1},{y+corner} Z" fill="#172536"/>'
+                if molecule else ""
             )
-        if color_by == "class_support" and bool(row.get("offset_pair_touched", False)):
-            corner = tile_size * 0.12
             parts.append(
-                f'<path data-offset-pair-marker="true" d="M{x+1},{y+tile_size-corner} '
-                f'L{x+1},{y+tile_size-1} L{x+corner},{y+tile_size-1} Z" fill="#172536"/>'
+                f'<g transform="translate({x + frame},{y + frame})">'
+                f'<rect width="{inner}" height="{inner}" fill="#FFFFFF"/>'
+                f'{molecule_group}</g>'
+            )
+        if pd.notna(row.get("is_conflicted")) and row.get("is_conflicted") == 1:
+            if color_by in {"activity", "class_support"}:
+                corner = tile_size * CORNER_MARKER_FRACTION
+                parts.append(
+                    f'<path data-conflict-marker="true" d="M{x+tile_size-corner},{y} '
+                    f'L{x+tile_size},{y} L{x+tile_size},{y+corner} Z" fill="#172536"/>'
+                )
+        if color_by == "class_support" and bool(row.get("offset_pair_touched", False)):
+            corner = tile_size * CORNER_MARKER_FRACTION
+            parts.append(
+                f'<path data-offset-pair-marker="true" d="M{x},{y+tile_size-corner} '
+                f'L{x},{y+tile_size} L{x+corner},{y+tile_size} Z" fill="#172536"/>'
             )
         parts.append("</g>")
     if legend_entries:
@@ -303,23 +325,46 @@ def render_raster_and_pdf(
                     facecolor=_tile_color(row, colors, label_col, color_by),
                     edgecolor="white",
                     linewidth=0.4,
-                    alpha=MOLECULE_TILE_OPACITY,
                     zorder=1,
                 )
             )
-            if color_by == "class_support" and bool(row.get("offset_pair_touched", False)):
-                axis.add_patch(Polygon(
-                    ((x - .5, y - .38), (x - .5, y - .14), (x - .14, y - .5), (x - .38, y - .5)),
-                    closed=True, facecolor="#172536", edgecolor="none", zorder=5,
-                ))
+            frame = STRUCTURE_FRAME_FRACTION
+            axis.add_patch(Rectangle(
+                (x - .5 + frame, y - .5 + frame),
+                1 - 2 * frame,
+                1 - 2 * frame,
+                facecolor="white",
+                edgecolor="none",
+                zorder=2,
+            ))
             molecule = _molecule_rgba(str(row[smiles_col]))
             if molecule is not None:
+                margin = min(.04, frame / 2)
+                inner_low, inner_high = -.5 + frame + margin, .5 - frame - margin
                 axis.imshow(
                     molecule,
-                    extent=(x - 0.47, x + 0.47, y - 0.47, y + 0.47),
+                    extent=(x + inner_low, x + inner_high, y + inner_low, y + inner_high),
                     interpolation="bilinear",
                     zorder=3,
                 )
+            if (
+                pd.notna(row.get("is_conflicted"))
+                and row.get("is_conflicted") == 1
+                and color_by in {"activity", "class_support"}
+            ):
+                corner = CORNER_MARKER_FRACTION
+                axis.add_patch(Polygon(
+                    ((x + .5 - corner, y + .5), (x + .5, y + .5),
+                     (x + .5, y + .5 - corner)),
+                    closed=True, facecolor="#172536", edgecolor="none", zorder=5,
+                ))
+            if color_by == "class_support" and bool(row.get("offset_pair_touched", False)):
+                corner = CORNER_MARKER_FRACTION
+                axis.add_patch(Polygon(
+                    ((x - .5, y - .5 + corner), (x - .5, y - .5),
+                     (x - .5 + corner, y - .5)),
+                    closed=True, facecolor="#172536", edgecolor="none", zorder=5,
+                ))
     else:
         image = np.ones((height_cells, width_cells, 3), dtype=np.float32)
         for _, row in data.iterrows():
@@ -327,7 +372,7 @@ def render_raster_and_pdf(
             y = int(row["grid_row"]) - min_row
             label = str(row[label_col]).lower()
             rgb = np.asarray(to_rgb(_tile_color(row, colors, label_col, color_by)), dtype=np.float32)
-            image[y, x] = OVERVIEW_TILE_OPACITY * rgb + (1.0 - OVERVIEW_TILE_OPACITY)
+            image[y, x] = rgb
         axis.imshow(
             image,
             extent=(-0.5, width_cells - 0.5, -0.5, height_cells - 0.5),
@@ -341,10 +386,26 @@ def render_raster_and_pdf(
         for _, row in touched_rows.iterrows():
             x = int(row["grid_col"]) - min_col
             y = int(row["grid_row"]) - min_row
+            corner = CORNER_MARKER_FRACTION
             axis.add_patch(Polygon(
-                ((x - .5, y - .5), (x - .5, y - .1), (x - .1, y - .5)),
+                ((x - .5, y - .5 + corner), (x - .5, y - .5),
+                 (x - .5 + corner, y - .5)),
                 closed=True, facecolor="#172536", edgecolor="none", zorder=5,
             ))
+        if color_by in {"activity", "class_support"}:
+            flagged_rows = data[
+                data.get("is_conflicted", pd.Series(False, index=data.index))
+                .fillna(False).astype(bool)
+            ]
+            for _, row in flagged_rows.iterrows():
+                x = int(row["grid_col"]) - min_col
+                y = int(row["grid_row"]) - min_row
+                corner = CORNER_MARKER_FRACTION
+                axis.add_patch(Polygon(
+                    ((x + .5 - corner, y + .5), (x + .5, y + .5),
+                     (x + .5, y + .5 - corner)),
+                    closed=True, facecolor="#172536", edgecolor="none", zorder=5,
+                ))
 
     axis.set_xlim(-0.55, width_cells - 0.45)
     axis.set_ylim(-0.55, height_cells - 0.45)

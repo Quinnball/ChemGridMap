@@ -11,7 +11,7 @@ import zipfile
 import pandas as pd
 import pytest
 
-from chemgridmap.app import ASSETS, AppSession, DEMO, LocalServer, validate_options
+from chemgridmap.app import ASSETS, AppSession, DEMO, LocalServer, point_rows, validate_options
 from chemgridmap import build_grid_map, curate_chembl_activity_data
 
 
@@ -45,6 +45,11 @@ def test_app_uses_the_same_curation_and_grid_as_library(tmp_path):
         params = json.loads(archive.read("map_run_manifest.json"))["parameters"]
         assert params["map_color_modes"] == ["neighbor_recall", "structure_group"]
         assert params["map_color_formats"] == ["svg"]
+        assert params["confidence_threshold"] == 0.8
+        assert params["offset_display"] == "uncertain"
+        assert params["offset_min_shared"] == 3
+        assert params["offset_threshold"] == 1.0
+        assert params["offset_sign_agreement"] == 0.8
         assert "map_neighbor_recall.svg" in archive.namelist()
         assert "map_structure_group.svg" in archive.namelist()
         assert not any(name.startswith(("map_activity.", "map_class_support.")) for name in archive.namelist())
@@ -103,6 +108,31 @@ def test_generic_activity_records_use_shared_support_code(tmp_path):
     assert app.job["options"]["evidence_model"] == "gaussian"
 
 
+def test_browser_excludes_identity_conflicts(tmp_path):
+    rows = pd.DataFrame([
+        {"Molecule ChEMBL ID": "CHEMBL1", "Parent Molecule ChEMBL ID": "CHEMBL9",
+         "Smiles": "CCO", "pChEMBL Value": 6.0},
+        {"Molecule ChEMBL ID": "CHEMBL2", "Parent Molecule ChEMBL ID": "CHEMBL9",
+         "Smiles": "c1ccccc1", "pChEMBL Value": 6.5},
+        {"Molecule ChEMBL ID": "CHEMBL3", "Parent Molecule ChEMBL ID": "CHEMBL10",
+         "Smiles": "CCC", "pChEMBL Value": 7.0},
+        {"Molecule ChEMBL ID": "CHEMBL4", "Parent Molecule ChEMBL ID": "CHEMBL11",
+         "Smiles": "CCN", "pChEMBL Value": 5.5},
+    ])
+    app = AppSession(tmp_path)
+    app.load(rows.to_csv(index=False).encode(), "conflicts.csv")
+    app.start({
+        "projection": "pca", "grouping": "none", "identity_conflicts": "exclude",
+        "output_formats": ["svg"],
+    }, background=False)
+    assert app.job["state"] == "done", app.job
+    assert "map_identity_conflicts.csv" in app.files
+    conflicts = pd.read_csv(app.files["map_identity_conflicts.csv"])
+    assert conflicts.molecule_identity_key.tolist() == ["CHEMBL9"]
+    options = json.loads(app.files["app_options.json"].read_text())
+    assert options["identity_conflicts"] == "exclude"
+
+
 def test_error_is_visible_and_does_not_leave_old_outputs(tmp_path):
     app = AppSession(tmp_path)
     app.load(b'smiles\nCCO\n', 'missing.csv')
@@ -119,7 +149,10 @@ def test_csv_delimiters_and_single_column(tmp_path, raw, columns):
 
 
 @pytest.mark.parametrize("options", [{"grid_occupancy":0}, {"lower_threshold":float('nan')},
-                                    {"random_state":-1}, {"projection":"fake"}, {"output_dir":"../outside"}])
+                                    {"random_state":-1}, {"projection":"fake"}, {"output_dir":"../outside"},
+                                    {"support_level":0.5}, {"offset_min_shared":1},
+                                    {"offset_min_difference":0}, {"offset_sign_agreement":0.5},
+                                    {"offset_display":"fake"}, {"identity_conflicts":"fake"}])
 def test_invalid_options_rejected(options):
     with pytest.raises(ValueError):
         validate_options(options)
@@ -170,6 +203,22 @@ def test_http_input_session_restore_and_file_allowlist(local_server):
     assert restored['input']['filename'] == 'sample.csv'
     with pytest.raises(urllib.error.HTTPError):
         request(local_server,'/api/file?name=../../pyproject.toml')
+
+
+def test_points_include_is_conflicted_without_class_support(tmp_path):
+    app = AppSession(tmp_path)
+    app.load(RAW, "sample.csv")
+    app.start({
+        "projection": "pca",
+        "grouping": "none",
+        "output_formats": ["svg"],
+    }, background=False)
+    assert app.job["state"] == "done", app.job
+    points = point_rows(app.result.data)
+    assert points and all("is_conflicted" in point for point in points)
+    assert not any("class_status" in point for point in points)
+    script = (ASSETS / "app.js").read_text(encoding="utf-8")
+    assert "point.wide_record_range ?? point.is_conflicted" in script
 
 
 def test_workspace_dom_matches_javascript_controls():

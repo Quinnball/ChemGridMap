@@ -17,7 +17,7 @@ from chemgridmap.reliability import (grid_neighbor_weights, neighbor_recall,
                                      representation_neighbor_weights)
 from chemgridmap.representations import morgan_fingerprints
 from chemgridmap.projection import project_2d
-from chemgridmap.provenance import git_provenance
+from chemgridmap.provenance import environment_versions, git_provenance
 
 
 def test_tanimoto_neighbor_sets_keep_ties_and_exclude_self():
@@ -29,6 +29,16 @@ def test_tanimoto_neighbor_sets_keep_ties_and_exclude_self():
     tied = representation_neighbor_sets(np.array([[0, 0], [1, 0], [-1, 0], [0, 5.0]]), k=1, metric="euclidean")
     assert sorted(tied[0]) == [1, 2]
     assert neighbor_recall([np.array([1, 2])], [np.array([2, 3])])[0] == 0.5
+    neighbors, weights, kth_distance = representation_neighbor_weights(
+        bits, k=1, metric="jaccard", return_kth=True
+    )
+    assert len(neighbors) == len(weights) == len(kth_distance) == len(bits)
+    assert np.all((0 <= kth_distance) & (kth_distance <= 1))
+
+
+def test_environment_versions_record_umap_numba_stack():
+    packages = environment_versions()["packages"]
+    assert {"numba", "pynndescent", "llvmlite"} <= set(packages)
 
 
 def test_refinement_keeps_unique_cells_and_lowers_neighbor_objective():
@@ -130,6 +140,57 @@ def test_offset_pair_rule_keeps_probabilities_and_changes_only_display_status():
     assert indexed.loc["CLEAN", "status_reason"] in {"supported", "low_support"}
     assert {"class_confidence", "class_reproducibility"} <= set(out)
     assert fit["sigma_doc"] == fit["tau"]
+    assert fit["document_offsets"][0]["touched_entry_count"] == 6
+
+
+def test_offset_display_none_keeps_offsets_but_uses_support_only():
+    records = _records()
+    molecules = records.groupby("molecule_identity_key").pchembl_value.median().rename("activity_pchembl").reset_index()
+    default, _ = annotate_activity_confidence(molecules, records)
+    unchanged, fit = annotate_activity_confidence(
+        molecules, records, offset_display="none"
+    )
+    indexed = unchanged.set_index("molecule_identity_key")
+    expected = np.where(
+        default.set_index("molecule_identity_key")["class_confidence"] >= 0.8,
+        "supported", "uncertain"
+    )
+    assert indexed.loc[default.set_index("molecule_identity_key").index, "class_status"].tolist() == expected.tolist()
+    assert set(indexed.status_reason) <= {"supported", "low_support"}
+    assert indexed.offset_pair_touched.any()
+    assert fit["offset_display"] == "none"
+
+
+def test_offset_min_shared_filters_pairs_and_support_is_monotone():
+    rows = []
+    for index in range(3):
+        rows.extend([
+            {"molecule_identity_key": f"E{index}", "document_chembl_id": "D1", "pchembl_value": 5.5},
+            {"molecule_identity_key": f"E{index}", "document_chembl_id": "D2", "pchembl_value": 7.5},
+        ])
+    records = pd.DataFrame(rows)
+    molecules = records.groupby("molecule_identity_key").pchembl_value.median().rename("activity_pchembl").reset_index()
+    loose, _ = annotate_activity_confidence(molecules, records, offset_min_shared=3)
+    strict, _ = annotate_activity_confidence(molecules, records, offset_min_shared=5)
+    assert loose.offset_pair_touched.all()
+    assert not strict.offset_pair_touched.any()
+    low, _ = annotate_activity_confidence(molecules, records, confidence_threshold=0.8)
+    high, _ = annotate_activity_confidence(molecules, records, confidence_threshold=0.9)
+    assert set(high.loc[high.class_status.eq("supported"), "molecule_identity_key"]) <= set(
+        low.loc[low.class_status.eq("supported"), "molecule_identity_key"]
+    )
+
+
+@pytest.mark.parametrize("kwargs,message", [
+    ({"offset_min_shared": 1}, "at least 2"),
+    ({"offset_threshold": 0}, "greater than 0"),
+    ({"offset_sign_agreement": 0.5}, r"\(0.5, 1\]"),
+])
+def test_offset_parameter_validation(kwargs, message):
+    records = _records()
+    molecules = records.groupby("molecule_identity_key").pchembl_value.median().rename("activity_pchembl").reset_index()
+    with pytest.raises(ValueError, match=message):
+        annotate_activity_confidence(molecules, records, **kwargs)
 
 
 def test_between_unit_sd_falls_back_to_literature_value_for_small_inputs():
@@ -157,6 +218,16 @@ def test_fmcs_core_exports_valid_attachment_smiles():
     attached = Chem.MolFromSmiles(result["core_smiles_attached"])
     assert attached is not None
     assert any(atom.GetAtomicNum() == 0 for atom in attached.GetAtoms())
+
+
+def test_fmcs_core_search_is_nonchiral_but_containment_uses_chirality():
+    mols = [Chem.MolFromSmiles(value) for value in ["C[C@H](O)F", "C[C@@H](O)F"]]
+    result = mcs_core(mols, min_coverage=1.0, timeout=10)
+    pattern = Chem.MolFromSmarts(result["core_smarts"])
+    assert result["core_heavy_atoms"] == 4
+    assert result["coverage_count"] == 2
+    assert all(atom.GetChiralTag() == Chem.ChiralType.CHI_UNSPECIFIED for atom in pattern.GetAtoms())
+    assert all(mol.HasSubstructMatch(pattern, useChirality=True) for mol in mols)
 
 
 def _temporary_git_package(tmp_path, *, track):

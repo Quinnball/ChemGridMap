@@ -33,7 +33,20 @@ def test_id_and_cell_recover_the_same_measurements(case):
     assert summary["status_reason"] is None
 
 
-def test_inspector_reports_each_touching_offset_pair_with_present_documents():
+def test_inspector_reports_kth_fingerprint_neighbor(case):
+    grid, records = case
+    grid = grid.copy()
+    grid["neighbor_kth_similarity"] = [0.42, 0.51]
+    _, _, summary = inspect_entry(grid, records, molecule_id="CHEMBL20", k=10)
+    assert summary["neighbor_kth_label"] == "10th fingerprint neighbor: Tanimoto 0.510"
+
+
+@pytest.mark.parametrize(("offset_display", "expected_rule"), [
+    ("uncertain", "This entry has records from DOC_A, so it is shown as uncertain."),
+    ("none", "This entry has records from DOC_A; the display is unchanged because the offset rule is off."),
+])
+def test_inspector_reports_each_touching_offset_pair_with_present_documents(
+        offset_display, expected_rule):
     records = pd.DataFrame({
         "source_row": [0],
         "molecule_identity_key": ["CHEMBL4"],
@@ -48,9 +61,10 @@ def test_inspector_reports_each_touching_offset_pair_with_present_documents():
     })
     activity_confidence = {
         "confidence_threshold": 0.8,
+        "offset_display": offset_display,
         "document_offsets": [{
             "document_a": "DOC_A", "document_b": "DOC_B",
-            "median_offset": 3.0, "shared_entries": 3,
+            "median_offset": 3.0, "shared_entries": 3, "touched_entry_count": 7,
         }],
     }
 
@@ -63,7 +77,8 @@ def test_inspector_reports_each_touching_offset_pair_with_present_documents():
     assert summary["confidence_threshold"] == 0.8
     assert (
         "Offset document pair: DOC_A vs DOC_B, median difference 3 log units, "
-        "n shared 3; this entry has records from DOC_A."
+        "n shared 3; the pair touches 7 entries. "
+        + expected_rule
     ) in summary["warnings"]
 
     _, _, unavailable = inspect_entry(

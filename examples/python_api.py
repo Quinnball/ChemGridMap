@@ -25,6 +25,11 @@ def run(input_path, output_dir, *, target_id="CHEMBL205",
             curated.retained_records,
             value="activity_pchembl_raw",
             document=document_column,
+            confidence_threshold=0.8,
+            offset_display="uncertain",
+            offset_min_shared=3,
+            offset_threshold=1.0,
+            offset_sign_agreement=0.8,
         )
         curated.report["activity_confidence"] = fit
     result = build_grid_map(
@@ -43,7 +48,8 @@ def run(input_path, output_dir, *, target_id="CHEMBL205",
     columns = [
         "molecule_identity_key", "activity_pchembl", "class_confidence",
         "class_status", "status_reason", "offset_pair_touched",
-        "neighbor_recall", "neighbor_recall_fixed_k", "structure_group",
+        "neighbor_recall", "neighbor_recall_fixed_k",
+        "neighbor_kth_similarity", "structure_group",
     ]
     result.data[columns].to_csv(
         Path(output_dir) / "entry_reliability.csv", index=False

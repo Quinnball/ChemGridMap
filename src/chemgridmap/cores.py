@@ -181,15 +181,19 @@ def mcs_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8, timeout: in
                 "seconds": time.perf_counter() - started}
     result = rdFMCS.FindMCS(list(mols), threshold=min_coverage, ringMatchesRingOnly=True, completeRingsOnly=True,
                             atomCompare=rdFMCS.AtomCompare.CompareElements,
-                            bondCompare=rdFMCS.BondCompare.CompareOrder, timeout=int(timeout))
+                            bondCompare=rdFMCS.BondCompare.CompareOrder,
+                            timeout=int(timeout))
     pattern = Chem.MolFromSmarts(result.smartsString) if result.numAtoms else None
-    matched = [bool(pattern is not None and m.HasSubstructMatch(pattern)) for m in mols]
+    matched = [
+        bool(pattern is not None and m.HasSubstructMatch(pattern, useChirality=True))
+        for m in mols
+    ]
     core_smiles = ""
     core_smiles_source = ""
     for mol, is_match in zip(mols, matched):
         if not is_match:
             continue
-        atom_indices = list(mol.GetSubstructMatch(pattern))
+        atom_indices = list(mol.GetSubstructMatch(pattern, useChirality=True))
         atom_set = set(atom_indices)
         bond_indices = [
             bond.GetIdx() for bond in mol.GetBonds()

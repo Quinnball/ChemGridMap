@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import re
@@ -95,6 +95,7 @@ class ChemblCurationResult:
     retained_records: pd.DataFrame
     excluded_records: pd.DataFrame
     report: Dict[str, object]
+    identity_conflicts: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def _normalize_column_name(value: object) -> str:
@@ -148,6 +149,7 @@ def curate_chembl_activity_data(
     molecule_identity: str = "auto",
     structure_policy: str = "auto",
     assay_types: Optional[List[str]] = None,
+    identity_conflicts: str = "error",
 ) -> ChemblCurationResult:
     """Convert a ChEMBL activity export into an audited molecule-level table.
 
@@ -168,6 +170,8 @@ def curate_chembl_activity_data(
 
     if structure_policy not in {"auto", "parent", "as-recorded"}:
         raise ValueError("structure_policy must be auto, parent or as-recorded.")
+    if identity_conflicts not in {"error", "exclude"}:
+        raise ValueError("identity_conflicts must be 'error' or 'exclude'.")
     effective_structure_policy = structure_policy
     if structure_policy == "auto":
         effective_structure_policy = (
@@ -363,15 +367,47 @@ def curate_chembl_activity_data(
                 "back to canonical representation SMILES under the selected structure policy."
             )
 
-    grouped = retained.groupby("molecule_identity_key", sort=True)
-    molecule_rows = []
-    for identity_key, group in grouped:
-        structures = sorted(group["representation_smiles"].astype(str).unique())
-        if len(structures) > 1 and effective_structure_policy == "parent":
-            raise ValueError(
-                "Identity {} maps to multiple normalized parent structures. "
-                "Review the records, or explicitly use canonical-smiles identity.".format(identity_key)
+    group_records = list(retained.groupby("molecule_identity_key", sort=True))
+    conflict_rows = []
+    if effective_structure_policy == "parent":
+        for identity_key, group in group_records:
+            structures = sorted(group["representation_smiles"].astype(str).unique())
+            if len(structures) > 1:
+                conflict_rows.append({
+                    "molecule_identity_key": identity_key,
+                    "structures": ";".join(structures),
+                    "record_count": int(len(group)),
+                })
+    identity_conflict_table = pd.DataFrame(
+        conflict_rows,
+        columns=("molecule_identity_key", "structures", "record_count"),
+    )
+    if conflict_rows and identity_conflicts == "error":
+        raise ValueError(
+            "Molecule identities map to multiple normalized parent structures: {}. "
+            "Review the records, use identity_conflicts='exclude', or explicitly "
+            "use canonical-smiles identity.".format(
+                ", ".join(row["molecule_identity_key"] for row in conflict_rows)
             )
+        )
+    if conflict_rows:
+        conflicting_ids = set(identity_conflict_table["molecule_identity_key"])
+        removed = retained["molecule_identity_key"].isin(conflicting_ids)
+        conflict_records = retained.loc[removed].copy()
+        conflict_records["exclusion_reason"] = "identity_conflicts"
+        excluded = pd.concat([excluded, conflict_records], ignore_index=True)
+        retained = retained.loc[~removed].reset_index(drop=True)
+        if retained.empty:
+            raise ValueError("No ChEMBL activity records remained after excluding identity conflicts.")
+        group_records = list(retained.groupby("molecule_identity_key", sort=True))
+        warnings.append(
+            f"Excluded {len(conflict_rows)} parent identities with multiple normalized "
+            f"structures and {len(conflict_records)} associated records."
+        )
+
+    molecule_rows = []
+    for identity_key, group in group_records:
+        structures = sorted(group["representation_smiles"].astype(str).unique())
         canonical_smiles = structures[0]
         values = group["activity_pchembl_raw"].to_numpy(dtype=float)
         rules = dict(zip(RULE_KEYS, (lower_threshold, upper_threshold, conflict_range_threshold)))
@@ -418,6 +454,10 @@ def curate_chembl_activity_data(
     for reasons in exclusion_reasons:
         for reason in set(reasons):
             exclusion_counts[reason] = exclusion_counts.get(reason, 0) + 1
+    if len(identity_conflict_table):
+        exclusion_counts["identity_conflicts"] = int(
+            identity_conflict_table["record_count"].sum()
+        )
 
     repeat_counts = molecules["repeat_status"].value_counts().to_dict()
     class_counts = molecules["activity_class"].value_counts().to_dict()
@@ -450,6 +490,11 @@ def curate_chembl_activity_data(
         "exclusion_counts": {
             str(key): int(value) for key, value in sorted(exclusion_counts.items())
         },
+        "identity_conflict_count": int(len(identity_conflict_table)),
+        "identity_conflict_record_count": (
+            int(identity_conflict_table["record_count"].sum())
+            if len(identity_conflict_table) else 0
+        ),
         "detected_columns": columns,
         "parameters": {
             "target_id": effective_target_id,
@@ -468,6 +513,7 @@ def curate_chembl_activity_data(
                 if effective_structure_policy == "parent" else "none"
             ),
             "assay_types": assay_types,
+            "identity_conflicts": identity_conflicts,
         },
         "warnings": warnings,
     }
@@ -476,6 +522,7 @@ def curate_chembl_activity_data(
         retained_records=retained,
         excluded_records=excluded.reset_index(drop=True),
         report=report,
+        identity_conflicts=identity_conflict_table,
     )
 
 
@@ -493,12 +540,18 @@ def save_chembl_curation(
         "excluded_records": output_dir / f"{name}_excluded_records.csv",
         "curation_report": output_dir / f"{name}_curation_report.json",
     }
+    if result.report.get("parameters", {}).get("identity_conflicts") == "exclude":
+        paths["identity_conflicts"] = output_dir / f"{name}_identity_conflicts.csv"
     result.molecules.to_csv(paths["molecule_level"], index=False,
                             encoding="utf-8", lineterminator="\n")
     result.retained_records.to_csv(paths["retained_records"], index=False,
                                    encoding="utf-8", lineterminator="\n")
     result.excluded_records.to_csv(paths["excluded_records"], index=False,
                                    encoding="utf-8", lineterminator="\n")
+    if "identity_conflicts" in paths:
+        result.identity_conflicts.to_csv(
+            paths["identity_conflicts"], index=False, encoding="utf-8", lineterminator="\n"
+        )
     with paths["curation_report"].open("w", encoding="utf-8", newline="\n") as handle:
         json.dump(result.report, handle, indent=2, ensure_ascii=True)
     return {key: str(path) for key, path in paths.items()}

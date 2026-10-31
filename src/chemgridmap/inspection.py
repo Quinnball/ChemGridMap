@@ -79,7 +79,7 @@ def verify_annotations(row, evidence, values, parameters):
 
 
 def inspect_entry(coordinates, records, *, molecule_id=None, cell=None, parameters=None,
-                  activity_confidence=None):
+                  activity_confidence=None, k=None):
     """Select one entry by exact ID or zero-based (row, column), then verify its records."""
     if (molecule_id is None) == (cell is None):
         raise ValueError("Select either molecule_id or cell=(row, column).")
@@ -139,17 +139,33 @@ def inspect_entry(coordinates, records, *, molecule_id=None, cell=None, paramete
     matched_offsets = []
     offset_warnings = []
     if touched:
+        offset_display = str(confidence.get("offset_display") or "uncertain")
         for pair in confidence.get("document_offsets", []):
             document_a, document_b = str(pair["document_a"]), str(pair["document_b"])
             present = [document for document in (document_a, document_b) if document in documents]
             if not present:
                 continue
             matched_offsets.append(pair)
+            touched_count = pair.get("touched_entry_count")
+            touches = (
+                f"the pair touches {int(touched_count)} entries"
+                if touched_count is not None else "the pair touches an unrecorded number of entries"
+            )
+            record_text = ", ".join(present)
+            if offset_display == "uncertain":
+                display_rule = (
+                    f"This entry has records from {record_text}, so it is shown as uncertain."
+                )
+            else:
+                display_rule = (
+                    f"This entry has records from {record_text}; "
+                    "the display is unchanged because the offset rule is off."
+                )
             offset_warnings.append(
                 "Offset document pair: {} vs {}, median difference {:.3g} log units, "
-                "n shared {}; this entry has records from {}.".format(
+                "n shared {}; {}. {}".format(
                     document_a, document_b, float(pair["median_offset"]),
-                    int(pair["shared_entries"]), "; ".join(present),
+                    int(pair["shared_entries"]), touches, display_rule,
                 )
             )
         if not matched_offsets:
@@ -168,6 +184,10 @@ def inspect_entry(coordinates, records, *, molecule_id=None, cell=None, paramete
         "status_reason": status_reason,
         "document_offsets": matched_offsets,
         "confidence_threshold": confidence.get("confidence_threshold"),
+        "offset_display": confidence.get("offset_display"),
+        "offset_min_shared": confidence.get("offset_min_shared"),
+        "offset_threshold": confidence.get("offset_threshold"),
+        "offset_sign_agreement": confidence.get("offset_sign_agreement"),
         "sigma_doc": confidence.get("sigma_doc", confidence.get("tau")),
         "sigma_doc_degrees_of_freedom": confidence.get(
             "sigma_doc_degrees_of_freedom", confidence.get("degrees_of_freedom")
@@ -190,6 +210,19 @@ def inspect_entry(coordinates, records, *, molecule_id=None, cell=None, paramete
     }
     for name, field in (("n_activity_ids", "activity_id"), ("n_assays", "assay_id"), ("n_documents", "document_id")):
         summary[name] = int(evidence[columns[field]].nunique()) if columns[field] else None
+    neighbor_k = f"{int(k)}th" if k else "kth"
+    if "neighbor_kth_similarity" in row.index and pd.notna(row["neighbor_kth_similarity"]):
+        summary["neighbor_kth_similarity"] = float(row["neighbor_kth_similarity"])
+        summary["neighbor_kth_label"] = (
+            f"{neighbor_k} fingerprint neighbor: Tanimoto "
+            f"{float(row['neighbor_kth_similarity']):.3f}"
+        )
+    elif "neighbor_kth_distance" in row.index and pd.notna(row["neighbor_kth_distance"]):
+        summary["neighbor_kth_distance"] = float(row["neighbor_kth_distance"])
+        summary["neighbor_kth_label"] = (
+            f"{neighbor_k} representation neighbor: Euclidean distance "
+            f"{float(row['neighbor_kth_distance']):.3f}"
+        )
     return selected.copy(), evidence, summary
 
 
@@ -246,6 +279,7 @@ def main(argv=None):
         pd.read_csv(args.records, encoding="utf-8-sig"),
         molecule_id=args.molecule_id, cell=args.cell, parameters=parameters,
         activity_confidence=manifest.get("activity_confidence"),
+        k=manifest.get("parameters", {}).get("k"),
     )
     summary["run_binding_verified"] = run_verified
     summary["warnings"].extend(warnings)

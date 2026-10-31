@@ -91,6 +91,11 @@ def build_grid_map(
     relation_col: Optional[str] = None,
     evidence_model: str = "gaussian",
     merge_identical_documents: bool = True,
+    confidence_threshold: float = 0.8,
+    offset_display: str = "uncertain",
+    offset_min_shared: int = 3,
+    offset_threshold: float = 1.0,
+    offset_sign_agreement: float = 0.8,
     map_color_modes: Optional[List[str]] = None,
     map_color_formats: Optional[Sequence[str]] = None,
 ) -> GridMapResult:
@@ -117,8 +122,13 @@ def build_grid_map(
             upper=upper_threshold,
             conflict_range_threshold=1.0,
             confidence=bool(document_col),
+            confidence_threshold=confidence_threshold,
             merge_identical=merge_identical_documents,
             evidence_model=evidence_model,
+            offset_display=offset_display,
+            offset_min_shared=offset_min_shared,
+            offset_threshold=offset_threshold,
+            offset_sign_agreement=offset_sign_agreement,
         )
         smiles_col, value_col, label_col = (
             "canonical_smiles", "activity_pchembl", "activity_class"
@@ -144,6 +154,13 @@ def build_grid_map(
     reliability_parameters.update((provenance or {}).get("reliability_parameters", {}))
     if confidence_fit is not None:
         reliability_parameters["merge_identical_documents"] = confidence_fit["merge_identical_documents"]
+        reliability_parameters.update({
+            "confidence_threshold": confidence_fit.get("confidence_threshold"),
+            "offset_display": confidence_fit.get("offset_display"),
+            "offset_min_shared": confidence_fit.get("offset_min_shared"),
+            "offset_threshold": confidence_fit.get("offset_threshold"),
+            "offset_sign_agreement": confidence_fit.get("offset_sign_agreement"),
+        })
 
     prepared, report = prepare_molecules(
         data,
@@ -156,6 +173,12 @@ def build_grid_map(
     )
     if len(prepared) < 2:
         raise ValueError("At least two valid molecule rows are required.")
+    if grouping != "none" and len(prepared) > 10_000:
+        raise ValueError(
+            f"Exact grouping would process {len(prepared):,} entries, above the "
+            "10,000-entry limit. Use --grouping none (No grouping in the browser) "
+            "or map an explicit subset."
+        )
 
     projection_fallback = None
     if x_col and y_col:
@@ -237,9 +260,10 @@ def build_grid_map(
     assignment_seconds = time.perf_counter() - assignment_started
     projected_01 = normalize_coordinates(projected, mode=coordinate_scaling)
     reliability_started = time.perf_counter()
-    reference_neighbors, reference_weights = representation_neighbor_weights(
+    reference_neighbors, reference_weights, reference_kth = representation_neighbor_weights(
         representation_matrix, k=k,
-        metric="jaccard" if representation_distance_metric == "jaccard" else "euclidean")
+        metric="jaccard" if representation_distance_metric == "jaccard" else "euclidean",
+        return_kth=True)
     refinement_diagnostics = {"method": "none"}
     if grid_refinement == "neighbors":
         cells = np.rint(grid * np.array([grid_cols - 1, grid_rows - 1])).astype(int)
@@ -256,9 +280,20 @@ def build_grid_map(
         reference_weights=reference_weights,
         displayed_weights=displayed_weights,
         k=k,
+        kth_values=(
+            1.0 - reference_kth if representation_distance_metric == "jaccard"
+            else reference_kth
+        ),
+        kth_column=(
+            "neighbor_kth_similarity" if representation_distance_metric == "jaccard"
+            else "neighbor_kth_distance"
+        ),
     )
     reliability_seconds = time.perf_counter() - reliability_started
     result_data = prepared.copy()
+    result_data.attrs["representation_type"] = representation_name
+    if confidence_fit is not None:
+        result_data.attrs["activity_confidence_fit"] = confidence_fit
     result_data["projection_x_raw"] = projected[:, 0]
     result_data["projection_y_raw"] = projected[:, 1]
     result_data["projection_x"] = projected_01[:, 0]
@@ -410,6 +445,11 @@ def build_grid_map(
                 "core_min_coverage": core_min_coverage, "fmcs_timeout": fmcs_timeout,
                 "evidence_model": evidence_model,
                 "merge_identical_documents": merge_identical_documents,
+                "confidence_threshold": confidence_threshold,
+                "offset_display": offset_display,
+                "offset_min_shared": offset_min_shared,
+                "offset_threshold": offset_threshold,
+                "offset_sign_agreement": offset_sign_agreement,
                 "map_color_modes": map_color_modes,
                 "map_color_formats": map_color_formats,
                 **reliability_parameters,

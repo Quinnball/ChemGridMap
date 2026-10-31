@@ -41,7 +41,7 @@ VARIANCE_FLOOR = 1e-4  # pChEMBL values are reported to two decimals
 LITERATURE_BETWEEN_UNIT_SD = 0.64
 DOCUMENT_OFFSET_COLUMNS = (
     "document_a", "document_b", "shared_entries", "median_offset", "mean_offset",
-    "std_offset", "sign_agreement", "systematic_offset",
+    "std_offset", "sign_agreement", "systematic_offset", "touched_entry_count",
 )
 
 
@@ -91,6 +91,7 @@ def document_pair_offsets(records: pd.DataFrame, *, entry: str = "molecule_ident
     if offset_threshold < 0 or not 0 <= sign_agreement <= 1:
         raise ValueError("offset_threshold must be nonnegative and sign_agreement must lie between 0 and 1.")
     doc = document_values(records, entry=entry, value=value, document=document, merge_identical=False)
+    doc_entries = doc.groupby("document")["entry"].agg(set).to_dict()
     differences = defaultdict(list)
     for _, group in doc.groupby("entry", sort=False):
         values = group[["document", "document_value"]].itertuples(index=False, name=None)
@@ -109,6 +110,9 @@ def document_pair_offsets(records: pd.DataFrame, *, entry: str = "molecule_ident
             "std_offset": float(values.std(ddof=1)) if len(values) > 1 else 0.0,
             "sign_agreement": agreement,
             "systematic_offset": bool(abs(median) >= offset_threshold and agreement >= sign_agreement),
+            "touched_entry_count": len(
+                doc_entries[document_a] | doc_entries[document_b]
+            ),
         })
     out = pd.DataFrame(rows, columns=DOCUMENT_OFFSET_COLUMNS)
     out = out.sort_values(["shared_entries", "document_a", "document_b"], ascending=[False, True, True]).reset_index(drop=True)
@@ -254,7 +258,11 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
                                  model: str = "gaussian", fit: Optional[Dict[str, object]] = None,
                                  entry: str = "molecule_identity_key", value: str = "pchembl_value",
                                  document: str = "document_chembl_id", displayed: str = "activity_pchembl",
-                                 merge_identical: bool = True):
+                                 merge_identical: bool = True,
+                                 offset_display: str = "uncertain",
+                                 offset_min_shared: int = 3,
+                                 offset_threshold: float = 1.0,
+                                 offset_sign_agreement: float = 0.8):
     """Add document-balanced estimates and class confidence to entry-level annotations.
 
     Returns the annotated copy and the fit. Displayed classes, medians and
@@ -265,8 +273,28 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
         raise ValueError("confidence_threshold must lie between 0.5 and 1.")
     if model not in {"gaussian", "exclude-flagged", "moderated_t"}:
         raise ValueError("model must be 'gaussian', 'exclude-flagged' or 'moderated_t'.")
+    if offset_display not in {"uncertain", "none"}:
+        raise ValueError("offset_display must be 'uncertain' or 'none'.")
+    if (
+        isinstance(offset_min_shared, bool)
+        or not isinstance(offset_min_shared, (int, np.integer))
+        or offset_min_shared < 2
+    ):
+        raise ValueError("offset_min_shared must be an integer of at least 2.")
+    if not np.isfinite(offset_threshold) or offset_threshold <= 0:
+        raise ValueError("offset_threshold must be a finite number greater than 0.")
+    if not 0.5 < offset_sign_agreement <= 1:
+        raise ValueError("offset_sign_agreement must lie in (0.5, 1].")
     doc = document_values(records, entry=entry, value=value, document=document, merge_identical=merge_identical)
-    offsets = document_pair_offsets(records, entry=entry, value=value, document=document)
+    offsets = document_pair_offsets(
+        records,
+        entry=entry,
+        value=value,
+        document=document,
+        min_shared=int(offset_min_shared),
+        offset_threshold=float(offset_threshold),
+        sign_agreement=float(offset_sign_agreement),
+    )
     flagged = offsets[offsets.systematic_offset.astype(bool)].to_dict("records")
     if fit is None:
         fit = fit_predictive_variance(doc) if model == "moderated_t" else fit_between_unit_sd(doc)
@@ -364,16 +392,14 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
     out["discordant_documents"] = [";".join(sorted(discordant_documents[key])) for key in out[entry]]
     out["offset_pair_touched"] = [key in touched_entries for key in out[entry]]
     supported = out["class_confidence"] >= confidence_threshold
-    out["status_reason"] = np.where(
-        out["offset_pair_touched"], "offset_pair",
-        np.where(supported, "supported", "low_support"),
-    )
+    out["status_reason"] = np.where(supported, "supported", "low_support")
+    if offset_display == "uncertain":
+        out.loc[out["offset_pair_touched"], "status_reason"] = "offset_pair"
     # Rule P changes only the display status. Probabilities and their inputs
     # remain the Gaussian model G values.
-    out["class_status"] = np.where(
-        out["offset_pair_touched"], "uncertain",
-        np.where(supported, "supported", "uncertain"),
-    )
+    displayed_uncertain = out["offset_pair_touched"] if offset_display == "uncertain" else False
+    out["class_status"] = np.where(displayed_uncertain, "uncertain",
+                                   np.where(supported, "supported", "uncertain"))
     if "is_conflicted" in out:
         out["wide_record_range"] = out["is_conflicted"].astype(int)
     policy = "identical values merged" if merge_identical else "identical values kept separate"
@@ -391,6 +417,10 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
                 "document_offsets": flagged, "document_offset_min_shared": offsets.attrs["min_shared"],
                 "document_offset_threshold": offsets.attrs["offset_threshold"],
                 "document_offset_sign_agreement": offsets.attrs["sign_agreement"],
+                "offset_display": offset_display,
+                "offset_min_shared": int(offset_min_shared),
+                "offset_threshold": float(offset_threshold),
+                "offset_sign_agreement": float(offset_sign_agreement),
                 "flagged_document_count": len(flagged_documents),
                 "offset_pair_touched_entry_count": int(out["offset_pair_touched"].sum())})
     if model == "exclude-flagged":
@@ -413,8 +443,13 @@ def prepare_generic_activity_records(
     upper: float = 7.0,
     conflict_range_threshold: float = 1.0,
     confidence: bool = True,
+    confidence_threshold: float = 0.8,
     merge_identical: bool = True,
     evidence_model: str = "gaussian",
+    offset_display: str = "uncertain",
+    offset_min_shared: int = 3,
+    offset_threshold: float = 1.0,
+    offset_sign_agreement: float = 0.8,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[Dict[str, object]], Dict[str, object]]:
     """Curate a generic activity-record CSV into the molecule-level map schema.
 
@@ -502,8 +537,13 @@ def prepare_generic_activity_records(
             records,
             lower=lower,
             upper=upper,
+            confidence_threshold=confidence_threshold,
             model=evidence_model,
             merge_identical=merge_identical,
+            offset_display=offset_display,
+            offset_min_shared=offset_min_shared,
+            offset_threshold=offset_threshold,
+            offset_sign_agreement=offset_sign_agreement,
         )
     report = {
         "input_rows": int(len(data)),

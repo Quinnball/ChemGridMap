@@ -143,6 +143,26 @@ class ChemblCurationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Multiple Target ChEMBL IDs"):
             curate_chembl_activity_data(data)
 
+    def test_identity_conflicts_can_be_excluded_and_reported(self):
+        data = pd.DataFrame([
+            chembl_row("CHEMBL1", "CCO", 6.0, parent_molecule_id="CHEMBL9"),
+            chembl_row("CHEMBL2", "c1ccccc1", 6.5, parent_molecule_id="CHEMBL9"),
+            chembl_row("CHEMBL3", "CCC", 7.5, parent_molecule_id="CHEMBL10"),
+        ])
+        with self.assertRaisesRegex(ValueError, "multiple normalized parent structures"):
+            curate_chembl_activity_data(data, identity_conflicts="error")
+        result = curate_chembl_activity_data(data, identity_conflicts="exclude")
+        self.assertEqual(result.report["identity_conflict_count"], 1)
+        self.assertEqual(result.report["identity_conflict_record_count"], 2)
+        self.assertEqual(result.identity_conflicts.to_dict("records"), [{
+            "molecule_identity_key": "CHEMBL9",
+            "structures": "CCO;c1ccccc1",
+            "record_count": 2,
+        }])
+        self.assertEqual(result.molecules["molecule_identity_key"].tolist(), ["CHEMBL10"])
+        self.assertIn("identity_conflicts", result.excluded_records["exclusion_reason"].tolist())
+        self.assertTrue(any("Excluded 1 parent identities" in text for text in result.report["warnings"]))
+
     def test_parent_molecule_identity_groups_salt_records(self):
         data = pd.DataFrame(
             [
