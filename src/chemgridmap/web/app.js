@@ -474,7 +474,9 @@ async function inspect(query) {
     }
     if (summary.median_verified) { const verified = document.createElement('p'); verified.className = 'verified'; verified.textContent = summary.quality_annotations_verified ? 'Identity, counts, median, activity class and quality flags checked against retained records and saved rules.' : 'Record count and median verified; quality annotations remain unverified.'; $('evidence-summary').append(verified); }
     const neighbors = summary.neighborhood;
-    $('neighbor-summary').textContent = `${neighbors.representation} (${neighbors.representation_metric}), k=${neighbors.effective_k}: ${neighbors.shared_count} shared neighbors out of ${neighbors.representation_count} representation neighbors and ${neighbors.grid_count} grid neighbors. Recall ${(100 * neighbors.recall).toFixed(1)}%.`;
+    const fingerprintNeighbors = job.options.representation === 'morgan';
+    $('neighbor-title').textContent = `${fingerprintNeighbors ? 'Fingerprint' : 'Representation'} vs grid neighbors`;
+    $('neighbor-summary').textContent = `${neighbors.representation} (${neighbors.representation_metric}), k=${neighbors.effective_k}: ${neighbors.shared_count} shared neighbors out of ${neighbors.representation_count} ${fingerprintNeighbors ? 'fingerprint' : 'representation'} neighbors and ${neighbors.grid_count} grid neighbors. Recall ${(100 * neighbors.recall).toFixed(1)}%.`;
     table(detail.neighbors, $('neighbor-table'));
     $('download-audit').onclick = () => download('/api/file?name=' + encodeURIComponent(detail.audit_file), detail.audit_file);
     $('download-evidence').hidden = !detail.total_records;

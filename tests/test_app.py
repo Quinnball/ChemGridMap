@@ -247,6 +247,41 @@ def test_workspace_dom_matches_javascript_controls():
     assert "offset document pair" in script
 
 
+def test_number_input_defaults_satisfy_html_constraints():
+    class NumberInputs(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.inputs = []
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == 'input' and attrs.get('type') == 'number':
+                self.inputs.append(attrs)
+
+    parser = NumberInputs()
+    parser.feed((ASSETS / 'index.html').read_text(encoding='utf-8'))
+    assert parser.inputs
+
+    failures = []
+    for attrs in parser.inputs:
+        input_id = attrs.get('id', '<unnamed>')
+        value = float(attrs['value'])
+        minimum = float(attrs.get('min', 0))
+        if value < minimum:
+            failures.append(f'{input_id}: value {value} is below min {minimum}')
+        if 'max' in attrs and value > float(attrs['max']):
+            failures.append(f'{input_id}: value {value} exceeds max {attrs["max"]}')
+
+        step = attrs.get('step', '1')
+        if step != 'any':
+            ratio = (value - minimum) / float(step)
+            if abs(ratio - round(ratio)) > 1e-9:
+                failures.append(
+                    f'{input_id}: value {value} is not on step {step} from min {minimum}'
+                )
+    assert not failures, '\n'.join(failures)
+
+
 def test_map_outlines_stay_fixed_in_screen_space_and_offset_legend_is_conditional():
     script = (ASSETS / 'app.js').read_text(encoding='utf-8')
     stylesheet = (ASSETS / 'app.css').read_text(encoding='utf-8')
@@ -283,6 +318,17 @@ def test_inspector_uses_neutral_note_for_wide_record_range():
     for declaration in ('color: var(--ink)', 'background: var(--pale)', 'padding: 9px', 'font-size: 11px', 'border-radius: 4px'):
         assert declaration in declarations
     assert '--red' not in declarations
+
+
+def test_inspector_neighbor_terms_follow_representation():
+    html = (ASSETS / 'index.html').read_text(encoding='utf-8')
+    script = (ASSETS / 'app.js').read_text(encoding='utf-8')
+
+    assert '<summary id="neighbor-title">Representation vs grid neighbors</summary>' in html
+    assert "job.options.representation === 'morgan'" in script
+    assert "${fingerprintNeighbors ? 'Fingerprint' : 'Representation'} vs grid neighbors" in script
+    assert "${neighbors.representation_count} ${fingerprintNeighbors ? 'fingerprint' : 'representation'} neighbors" in script
+    assert '${neighbors.representation_count} representation neighbors' not in script
 
 
 @pytest.mark.parametrize('filename', ['app.js', 'app.css', 'example-map.svg', 'example-molecule.svg'])
