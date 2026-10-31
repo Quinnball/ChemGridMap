@@ -1,13 +1,23 @@
+from pathlib import Path
+import shutil
+import subprocess
+
 import numpy as np
 import pandas as pd
 import pytest
 from rdkit import Chem
 
-from chemgridmap.cores import select_core
+from chemgridmap import __all__
+from chemgridmap.cores import mcs_core, select_core
 from chemgridmap.evidence import (annotate_activity_confidence, class_probabilities, document_values,
                                   fit_between_unit_sd, predictive_parameters)
 from chemgridmap.refinement import neighbor_objective, refine_grid_layout, symmetric_neighbor_lists
-from chemgridmap.reliability import neighbor_recall, representation_neighbor_sets
+from chemgridmap.reliability import (grid_neighbor_weights, neighbor_recall,
+                                     neighbor_recall_fixed_k, representation_neighbor_sets,
+                                     representation_neighbor_weights)
+from chemgridmap.representations import morgan_fingerprints
+from chemgridmap.projection import project_2d
+from chemgridmap.provenance import git_provenance
 
 
 def test_tanimoto_neighbor_sets_keep_ties_and_exclude_self():
@@ -89,6 +99,39 @@ def test_activity_confidence_keeps_display_and_reports_support():
     assert 0 <= a.class_confidence.min() and a.class_confidence.max() <= 1
 
 
+def test_offset_pair_rule_keeps_probabilities_and_changes_only_display_status():
+    rows = []
+    for index in range(5):
+        rows.extend([
+            {"molecule_identity_key": f"TOUCHED{index}", "document_chembl_id": "D1",
+             "pchembl_value": 5.5},
+            {"molecule_identity_key": f"TOUCHED{index}", "document_chembl_id": "D2",
+             "pchembl_value": 7.5},
+        ])
+    rows.append({"molecule_identity_key": "SINGLE_DOCUMENT", "document_chembl_id": "D1",
+                 "pchembl_value": 8.0})
+    rows.append({"molecule_identity_key": "CLEAN", "document_chembl_id": "D3",
+                 "pchembl_value": 8.0})
+    records = pd.DataFrame(rows)
+    molecules = (
+        records.groupby("molecule_identity_key").pchembl_value.median()
+        .rename("activity_pchembl").reset_index()
+    )
+    out, fit = annotate_activity_confidence(molecules, records)
+    indexed = out.set_index("molecule_identity_key")
+    touched = indexed.loc[[f"TOUCHED{i}" for i in range(5)]]
+    assert touched.offset_pair_touched.all()
+    assert touched.status_reason.eq("offset_pair").all()
+    assert touched.class_status.eq("uncertain").all()
+    assert fit["offset_pair_touched_entry_count"] == 6
+    assert indexed.loc["SINGLE_DOCUMENT", "discordant_document_pairs"] == 0
+    assert indexed.loc["SINGLE_DOCUMENT", "offset_pair_touched"]
+    assert indexed.loc["SINGLE_DOCUMENT", "status_reason"] == "offset_pair"
+    assert indexed.loc["CLEAN", "status_reason"] in {"supported", "low_support"}
+    assert {"class_confidence", "class_reproducibility"} <= set(out)
+    assert fit["sigma_doc"] == fit["tau"]
+
+
 def test_between_unit_sd_falls_back_to_literature_value_for_small_inputs():
     doc = document_values(_records().query("molecule_identity_key in ['A', 'B']"))
     fit = fit_between_unit_sd(doc)
@@ -103,6 +146,102 @@ def test_coverage_aware_core_prefers_largest_core_meeting_target():
     assert choice["core_smiles"] == "c1ccc2scnc2c1" and choice["coverage_count"] == 3 and choice["target_met"]
     strict = select_core(mols, min_coverage=1.0)
     assert strict["coverage_count"] == 4 and strict["core_heavy_atoms"] == 6  # only benzene covers all
+
+
+def test_fmcs_core_exports_valid_attachment_smiles():
+    mols = [Chem.MolFromSmiles(smiles) for smiles in [
+        "c1ccccc1CC", "c1ccccc1CO", "c1ccccc1CN",
+    ]]
+    result = mcs_core(mols, min_coverage=1.0, timeout=10)
+    assert result["core_smiles_attached"]
+    attached = Chem.MolFromSmiles(result["core_smiles_attached"])
+    assert attached is not None
+    assert any(atom.GetAtomicNum() == 0 for atom in attached.GetAtoms())
+
+
+def _temporary_git_package(tmp_path, *, track):
+    repo = tmp_path / "repo"
+    package = repo / "src" / "sample_package"
+    package.mkdir(parents=True)
+    (package / "provenance.py").write_text("# test module\n", encoding="utf-8")
+    (package / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+    if track:
+        subprocess.run(["git", "-C", str(repo), "add", "src/sample_package"], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "initial"], check=True)
+    return repo, package
+
+
+def test_git_provenance_ignores_an_untracked_module_in_a_repository(tmp_path):
+    if shutil.which("git") is None:
+        pytest.skip("git is not available")
+    _, package = _temporary_git_package(tmp_path, track=False)
+    assert git_provenance(package) == {"git_commit": None, "git_dirty": None}
+
+
+def test_git_provenance_tracks_clean_and_modified_package_only(tmp_path):
+    if shutil.which("git") is None:
+        pytest.skip("git is not available")
+    _, package = _temporary_git_package(tmp_path, track=True)
+    clean = git_provenance(package)
+    assert len(clean["git_commit"]) == 40
+    assert clean["git_dirty"] is False
+
+    (package / "module.py").write_text("VALUE = 2\n", encoding="utf-8")
+    assert git_provenance(package)["git_dirty"] is True
+
+
+def test_fixed_k_weights_sum_to_k_and_expected_recall_uses_tie_probabilities():
+    reference = [{1: 1.0, 2: 0.5, 3: 0.5}]
+    displayed = [{2: 0.5, 3: 0.5, 4: 1.0}]
+    assert neighbor_recall_fixed_k(reference, displayed, k=2)[0] == pytest.approx(0.25)
+    sets, weights = representation_neighbor_weights(
+        np.array([[0, 0], [1, 0], [-1, 0], [0, 5.0]]), k=1, metric="euclidean"
+    )
+    assert all(sum(row.values()) == pytest.approx(1.0) for row in weights)
+    assert sorted(sets[0]) == [1, 2]
+
+
+def test_caii_fixed_k_recall_matches_e6_r1():
+    root = Path(__file__).resolve().parents[1]
+    coordinates_path = (
+        root / "paper/output/reliability_v1/layouts/chembl205/coordinates_seed_42.csv"
+    )
+    if not coordinates_path.exists():
+        pytest.skip("The frozen CA II coordinates are available in the research checkout.")
+    coordinates = pd.read_csv(coordinates_path)
+    fingerprints = morgan_fingerprints(coordinates.canonical_smiles.tolist())
+    reference, reference_weights = representation_neighbor_weights(
+        fingerprints, k=10, metric="jaccard"
+    )
+    displayed, displayed_weights = grid_neighbor_weights(
+        coordinates[["refined_grid_col", "refined_grid_row"]].to_numpy(float), k=10
+    )
+    retained = neighbor_recall(reference, displayed)
+    fixed = neighbor_recall_fixed_k(reference_weights, displayed_weights, k=10)
+    assert np.nanmean(retained) == pytest.approx(0.5845, abs=1e-3)
+    assert np.nanmean(fixed) == pytest.approx(0.5359, abs=1e-3)
+
+
+def test_umap_disconnected_graph_is_repeatable_with_same_seed():
+    matrix = np.array([
+        [0, 0], [0, 1], [0, 2], [0, 3],
+        [100, 0], [100, 1], [100, 2], [100, 3],
+    ], dtype=float)
+    first = project_2d(matrix, method="umap", random_state=42, umap_metric="euclidean")
+    second = project_2d(matrix, method="umap", random_state=42, umap_metric="euclidean")
+    assert np.array_equal(first, second)
+
+
+def test_public_api_exports_evidence_neighbors_and_cores():
+    expected = {
+        "document_values", "fit_between_unit_sd", "annotate_activity_confidence",
+        "document_pair_offsets", "neighbor_recall", "neighbor_recall_fixed_k",
+        "select_core", "mcs_core", "structural_groups",
+    }
+    assert expected <= set(__all__)
 
 
 def test_activity_confidence_report_is_strict_json():

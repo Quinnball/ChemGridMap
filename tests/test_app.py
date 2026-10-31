@@ -193,6 +193,9 @@ def test_workspace_dom_matches_javascript_controls():
     for panel in ('page-configure', 'page-explore', 'inspector'):
         assert 'hidden' in html.attributes[panel]
     assert 'open' not in html.attributes['advanced']
+    script = (ASSETS / 'app.js').read_text(encoding='utf-8')
+    assert "return '> 99%'" in script and "return '< 1%'" in script
+    assert "offset document pair" in script
 
 
 @pytest.mark.parametrize('filename', ['app.js', 'app.css', 'example-map.svg', 'example-molecule.svg'])

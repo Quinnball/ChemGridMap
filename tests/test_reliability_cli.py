@@ -8,7 +8,7 @@ from rdkit import Chem
 
 from chemgridmap.cli import build_parser, main
 from chemgridmap.comparison import structural_groups
-from chemgridmap.cores import mcs_core
+from chemgridmap.cores import _attached_candidate, _core_smiles_with_attachments, mcs_core
 
 INDOLE_SULFONAMIDES = [
     "CC(=O)Oc1ccc2cc(S(N)(=O)=O)[nH]c2c1",
@@ -53,6 +53,9 @@ def test_cli_evidence_policy_offsets_layers_and_archive(tmp_path, merge_identica
     data = pd.read_csv(tmp_path / "check_grid_coordinates.csv")
     assert data.n_evidence_units.eq(2 if merge_identical else 3).all()
     assert data.discordant_document_pairs.eq(2).all()
+    assert data.offset_pair_touched.all()
+    assert data.status_reason.eq("offset_pair").all()
+    assert data.wide_record_range.equals(data.is_conflicted)
     offsets = pd.read_csv(tmp_path / "check_document_offsets.csv")
     assert len(offsets) == 2
     assert offsets.shared_entries.eq(6).all()
@@ -60,6 +63,10 @@ def test_cli_evidence_policy_offsets_layers_and_archive(tmp_path, merge_identica
     assert offsets.total_evaluated_pairs.eq(3).all()
     manifest = json.loads((tmp_path / "check_run_manifest.json").read_text())
     assert manifest["software_version"] == "0.5.0"
+    assert len(manifest["software_source_sha256"]) == 64
+    assert manifest["software_source_file_count"] > 0
+    assert manifest["git_commit"] is None or len(manifest["git_commit"]) == 40
+    assert manifest["git_dirty"] is None or isinstance(manifest["git_dirty"], bool)
     params = manifest["parameters"]
     assert params["merge_identical_documents"] is merge_identical
     assert params["activity_confidence"] is True
@@ -68,6 +75,8 @@ def test_cli_evidence_policy_offsets_layers_and_archive(tmp_path, merge_identica
     assert params["map_color_modes"] == modes
     assert params["map_color_formats"] is None
     assert manifest["activity_confidence"]["discordant_document_pair_count"] == 2
+    assert manifest["activity_confidence"]["offset_pair_touched_entry_count"] == 6
+    assert manifest["activity_confidence"]["sigma_doc"] == manifest["activity_confidence"]["tau"]
     assert (tmp_path / "check.svg").read_bytes() == (tmp_path / "check_activity.svg").read_bytes()
     assert (tmp_path / "check.png").read_bytes() == (tmp_path / "check_activity.png").read_bytes()
     with zipfile.ZipFile(tmp_path / "check_results.zip") as archive:
@@ -196,6 +205,7 @@ def test_mcs_core_writes_valid_smiles_from_matched_aromatic_member():
     assert result["core_heavy_atoms"] == 13
     assert result["coverage_count"] == 3
     assert result["core_smiles_source"] == "matched_member"
+    assert result["core_smiles_attached_source"] == "matched_member"
     assert all(mol.HasSubstructMatch(pattern) for mol in mols)
 
 
@@ -226,6 +236,32 @@ def test_structural_groups_uses_fmcs_heavy_atom_count():
     assert groups[0]["size"] == 3
     assert groups[0]["core_heavy_atoms"] == 13
     assert Chem.MolFromSmiles(groups[0]["core_smiles"]) is not None
+
+
+def test_attached_indole_core_uses_kekule_carbazole_without_rdkit_stderr(capfd):
+    indole = Chem.MolFromSmiles("c1ccc2[nH]ccc2c1")
+    carbazole = Chem.MolFromSmiles("c1ccc2c(c1)c1ccccc1[nH]2")
+    attached, source = _core_smiles_with_attachments(indole, [carbazole])
+    parsed = Chem.MolFromSmiles(attached)
+    captured = capfd.readouterr()
+    assert source == "matched_member_kekule"
+    assert parsed is not None
+    assert any(atom.GetAtomicNum() == 0 for atom in parsed.GetAtoms())
+    assert "non-ring atom" not in captured.err
+
+
+def test_attached_core_adds_missing_member_bond_once_at_each_end():
+    pattern = Chem.MolFromSmiles("CCCC")
+    member = Chem.MolFromSmiles("C1CCC1")
+    attached = _attached_candidate(
+        pattern, member, member.GetSubstructMatch(pattern), kekule=False
+    )
+    parsed = Chem.MolFromSmiles(attached)
+    _, source = _core_smiles_with_attachments(pattern, [member])
+    assert attached
+    assert parsed is not None
+    assert sum(atom.GetAtomicNum() == 0 for atom in parsed.GetAtoms()) == 2
+    assert source == "matched_member"
 
 
 def test_cli_fmcs_core_accepts_aromatic_heterocycles(tmp_path):

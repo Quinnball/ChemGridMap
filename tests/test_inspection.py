@@ -29,6 +29,48 @@ def test_id_and_cell_recover_the_same_measurements(case):
     assert summary["median_pchembl"] == 7.2
     assert summary["is_conflicted"]
     assert summary["n_assays"] is None
+    assert summary["offset_pair_touched"] is None
+    assert summary["status_reason"] is None
+
+
+def test_inspector_reports_each_touching_offset_pair_with_present_documents():
+    records = pd.DataFrame({
+        "source_row": [0],
+        "molecule_identity_key": ["CHEMBL4"],
+        "activity_pchembl_raw": [6.5],
+        "document_chembl_id": ["DOC_A"],
+    })
+    grid = pd.DataFrame({
+        "molecule_identity_key": ["CHEMBL4"], "source_rows": ["0"],
+        "n_records": [1], "activity_pchembl": [6.5],
+        "grid_row": [0], "grid_col": [0],
+        "offset_pair_touched": [True], "status_reason": ["offset_pair"],
+    })
+    activity_confidence = {
+        "confidence_threshold": 0.8,
+        "document_offsets": [{
+            "document_a": "DOC_A", "document_b": "DOC_B",
+            "median_offset": 3.0, "shared_entries": 3,
+        }],
+    }
+
+    _, _, summary = inspect_entry(
+        grid, records, molecule_id="CHEMBL4",
+        activity_confidence=activity_confidence,
+    )
+    assert len(summary["document_offsets"]) == 1
+    assert summary["status_reason"] == "offset_pair"
+    assert summary["confidence_threshold"] == 0.8
+    assert (
+        "Offset document pair: DOC_A vs DOC_B, median difference 3 log units, "
+        "n shared 3; this entry has records from DOC_A."
+    ) in summary["warnings"]
+
+    _, _, unavailable = inspect_entry(
+        grid, records, molecule_id="CHEMBL4"
+    )
+    assert unavailable["document_offsets"] == []
+    assert "Offset document pair details are unavailable for this map." in unavailable["warnings"]
 
 
 def test_id_is_exact_not_substring(case):

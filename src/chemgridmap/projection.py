@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy.sparse.csgraph import connected_components
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.preprocessing import StandardScaler
@@ -59,13 +60,21 @@ def project_2d(
                 "umap_metric must be 'euclidean', 'jaccard' or 'cosine'."
             )
         umap_input = matrix if metric == "jaccard" else scaled
-        return umap.UMAP(
-            n_components=2,
-            n_neighbors=min(15, max(2, len(scaled) - 1)),
-            min_dist=0.1,
-            metric=metric,
-            random_state=random_state,
-        ).fit_transform(umap_input)
+        parameters = {
+            "n_components": 2,
+            "n_neighbors": min(15, max(2, len(scaled) - 1)),
+            "min_dist": 0.1,
+            "metric": metric,
+            "random_state": random_state,
+        }
+        reducer = umap.UMAP(init="spectral", **parameters)
+        embedding = reducer.fit_transform(umap_input)
+        # UMAP's spectral initialization is not stable for disconnected kNN
+        # graphs. Re-run only those graphs from its seeded uniform initialization;
+        # connected graphs retain the historical spectral coordinates.
+        if connected_components(reducer.graph_)[0] > 1:
+            embedding = umap.UMAP(init="random", **parameters).fit_transform(umap_input)
+        return embedding
 
     raise ValueError(
         "Unsupported projection {!r}. Choose pca, tsne or umap.".format(method)

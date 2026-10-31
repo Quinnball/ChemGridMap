@@ -17,7 +17,7 @@ import pandas as pd
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.colors import to_rgb
 from matplotlib.figure import Figure
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Polygon, Rectangle
 from rdkit import Chem
 from rdkit.Chem import Draw
 from rdkit.Chem.Draw import rdMolDraw2D
@@ -67,7 +67,9 @@ def _color_legend(data, color_by):
             entries.extend([(DEFAULT_COLORS[label], label), (FADED_COLORS[label], f"{label}: uncertain")])
         threshold = data.attrs.get("activity_confidence_fit", {}).get("confidence_threshold")
         threshold_text = f"{threshold:g}" if threshold is not None else "configured threshold"
-        return f"Activity class support (uncertain: probability below {threshold_text})", entries
+        if data.get("offset_pair_touched", pd.Series(dtype=bool)).fillna(False).astype(bool).any():
+            entries.append(("#172536", "offset document pair (bottom-left marker)"))
+        return f"Activity class support (pale: probability below {threshold_text} or offset document pair)", entries
     if color_by == "structure_group":
         if "structure_group_color" not in data:
             return "Structure groups", [(DEFAULT_COLORS["unlabelled"], "No grouping")]
@@ -224,6 +226,12 @@ def render_svg(
                 f'<path data-conflict-marker="true" d="M{x+tile_size-corner},{y+1} '
                 f'L{x+tile_size-1},{y+1} L{x+tile_size-1},{y+corner} Z" fill="#172536"/>'
             )
+        if color_by == "class_support" and bool(row.get("offset_pair_touched", False)):
+            corner = tile_size * 0.12
+            parts.append(
+                f'<path data-offset-pair-marker="true" d="M{x+1},{y+tile_size-corner} '
+                f'L{x+1},{y+tile_size-1} L{x+corner},{y+tile_size-1} Z" fill="#172536"/>'
+            )
         parts.append("</g>")
     if legend_entries:
         parts.append('<g data-color-legend="{}" font-family="Arial, sans-serif" font-size="14" fill="#172536">'.format(color_by))
@@ -299,6 +307,11 @@ def render_raster_and_pdf(
                     zorder=1,
                 )
             )
+            if color_by == "class_support" and bool(row.get("offset_pair_touched", False)):
+                axis.add_patch(Polygon(
+                    ((x - .5, y - .38), (x - .5, y - .14), (x - .14, y - .5), (x - .38, y - .5)),
+                    closed=True, facecolor="#172536", edgecolor="none", zorder=5,
+                ))
             molecule = _molecule_rgba(str(row[smiles_col]))
             if molecule is not None:
                 axis.imshow(
@@ -321,6 +334,17 @@ def render_raster_and_pdf(
             origin="lower",
             interpolation="nearest",
         )
+        touched_rows = data[
+            data.get("offset_pair_touched", pd.Series(False, index=data.index))
+            .fillna(False).astype(bool)
+        ] if color_by == "class_support" else data.iloc[0:0]
+        for _, row in touched_rows.iterrows():
+            x = int(row["grid_col"]) - min_col
+            y = int(row["grid_row"]) - min_row
+            axis.add_patch(Polygon(
+                ((x - .5, y - .5), (x - .5, y - .1), (x - .1, y - .5)),
+                closed=True, facecolor="#172536", edgecolor="none", zorder=5,
+            ))
 
     axis.set_xlim(-0.55, width_cells - 0.45)
     axis.set_ylim(-0.55, height_cells - 0.45)

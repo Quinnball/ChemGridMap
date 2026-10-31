@@ -2,6 +2,36 @@
 
 ## 0.5.0 — 2026-10-29
 
+- Apply the offset-aware display rule: an entry touched by a flagged document
+  pair is uncertain and pale, with `status_reason=offset_pair`, while all model
+  probabilities remain unchanged. Record touched-entry counts in fits and
+  manifests, show document-pair details and a distinct bottom-left map marker.
+- Rename the user-facing "conflict" flag to "wide record range", retain
+  `is_conflicted` for compatibility, and add the equal-valued
+  `wide_record_range` alias.
+- Add `neighbor_recall_fixed_k` for expected recall under random tie-breaking.
+  Keep the existing tie-inclusive `neighbor_recall` unchanged.
+- Make UMAP layouts repeatable for a given seed when the kNN graph is
+  disconnected: such graphs are rerun from UMAP's seeded uniform
+  initialization, because its multi-component spectral initialization was not
+  repeatable. Their coordinates therefore differ from earlier runs. Connected
+  graphs keep the spectral initialization, and the frozen seed-42 layouts are
+  unchanged.
+- Add `core_smiles_attached` with `[*]` attachment points for FMCS and selected
+  coverage cores, and use it for the browser core drawing.
+- Show inspector percentages as `> 99%` above 99.5% and `< 1%` below 0.5%.
+  Display σ_doc, degrees of freedom and the number of multi-unit entries.
+- Export evidence, offset, recall, group and core functions from
+  `chemgridmap.__all__`; add a tested Python API example and document output
+  columns.
+- Record the package source-tree SHA-256, file count, Git commit and dirty
+  state in run manifests.
+- Report every offset document pair touching an inspector entry, fall back to a
+  Kekulé matched member for aromatic bond-cut cores and export
+  `core_smiles_attached_source`, and limit Git provenance to a tracked package
+  directory.
+- Correct the CA II tutorial: the main map is the activity layer, while class
+  support is a separate layer.
 - Add document-balanced activity class support, configurable merging of identical
   document values, and systematic document-pair offset diagnostics. Export pair
   statistics and annotate affected entries; show source-disagreement warnings in

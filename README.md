@@ -42,6 +42,12 @@ python -m pip install -e ".[dev]"
 On Windows PowerShell, activate the environment with
 `.venv\Scripts\Activate.ps1`.
 
+The CI suite runs with Python 3.10 and 3.12 on Linux, macOS and Windows. It
+installs the newest dependency versions that satisfy the declared lower bounds
+when the workflow runs, so those resolved versions are the ones tested; each
+run manifest records the versions actually used. The declared minimum versions
+have not been tested separately.
+
 ## Quick start
 
 Download the activities for ChEMBL target CA II (`CHEMBL205`), include
@@ -78,25 +84,43 @@ source records and median pChEMBL value.
 ## Reading the three reliability layers
 
 **Activity evidence.** The main activity layer keeps the observed
-molecule-level median and class. A faded/`uncertain` cell means that the
-document-balanced evidence does not reach the default 0.8 support threshold;
-it is not a missing measurement and is not silently reclassified. Inspect the
-cell to compare document counts, evidence units, class probabilities and
-document-offset diagnostics.
+molecule-level median and class. In the separate class-support layer, a pale
+(`uncertain`) cell means that the document-balanced evidence does not reach the
+default 0.8 support threshold, that the entry has records from a document in a
+flagged offset pair, or both. A document pair is flagged when the two documents
+share at least three entries, their median difference is at least one log unit
+and at least 80% of the shared entries differ in the direction of the median. A
+pale cell is not a missing measurement, and its class is not changed.
+`status_reason` is `offset_pair` for every touched entry, whatever its support,
+and otherwise `supported` or `low_support`. Touched cells carry a bottom-left
+marker in the class-support layer; their model probabilities are unchanged.
+Inspect the cell to compare document counts, evidence units, σ_doc and its
+degrees of freedom, class probabilities and the offset document pairs.
 
 **Neighbor recall.** The neighbor-recall layer reports how many
 fingerprint-space neighbors also appear among the selected cell's tie-aware
-grid neighbors. A dark cell has better local neighborhood agreement; a pale
-cell is a warning that the 2D layout does not preserve that local fingerprint
-neighborhood. Grid adjacency by itself is not evidence of chemical or
-biological similarity.
+grid neighbors. The default `neighbor_recall` retains every distance tie, so a
+neighbor set can contain more than k members. `neighbor_recall_fixed_k`
+reports the expected recall after independently breaking each row's ties at
+random, with total weight k. A dark cell has better local neighborhood
+agreement; a pale cell is a warning that the 2D layout does not preserve that
+local fingerprint neighborhood. Grid adjacency by itself is not evidence of
+chemical or biological similarity.
 
 **Core coverage.** For each representation-defined structure group, the default
 core is the largest member scaffold or scaffold-network ring fragment that
 matches at least 80% of members. The comparison reports the actual coverage
 count and fraction. `coverage`, `most_frequent` and optional `fmcs` cores are
 selectable; an FMCS timeout is recorded because a partial search can depend on
-machine speed and load.
+machine speed and load. `core_smiles_attached` is a valid SMILES drawing of the
+core with `[*]` at bonds cut from its matched parent molecule; the browser uses
+it when drawing the selected core. `core_smiles_attached_source` is
+`matched_member`, `matched_member_kekule`, or empty when no attached core could
+be built.
+
+`is_conflicted` remains in exported tables for compatibility. Its alias
+`wide_record_range` has the same value and names the rule directly: records
+span more than one log unit or lie on both sides of the class thresholds.
 
 To reproduce the earlier 0.4 layout and core policy explicitly:
 
@@ -140,6 +164,76 @@ separate evidence units.
 A curated one-row-per-molecule table remains supported through `--smiles-col`,
 `--value-col` and `--label-col`.
 
+## Python API
+
+The public functions for evidence units, σ_doc, class probabilities, offset
+pairs, both neighbour-recall definitions, structure groups and cores are listed
+in `chemgridmap.__all__`. This example is kept executable in
+[`examples/python_api.py`](examples/python_api.py).
+
+```python
+from pathlib import Path
+
+import pandas as pd
+
+from chemgridmap import (
+    annotate_activity_confidence,
+    build_grid_map,
+    curate_chembl_activity_data,
+)
+
+
+def run(input_path, output_dir, *, target_id="CHEMBL205",
+        activity_type="IC50", projection="umap"):
+    raw = pd.read_csv(input_path, encoding="utf-8-sig")
+    curated = curate_chembl_activity_data(
+        raw, target_id=target_id, activity_type=activity_type
+    )
+    document_column = curated.report["detected_columns"]["document_id"]
+    molecules = curated.molecules
+    if document_column:
+        molecules, fit = annotate_activity_confidence(
+            molecules,
+            curated.retained_records,
+            value="activity_pchembl_raw",
+            document=document_column,
+        )
+        curated.report["activity_confidence"] = fit
+    result = build_grid_map(
+        molecules,
+        output_dir=output_dir,
+        name="caii",
+        smiles_col="canonical_smiles",
+        value_col="activity_pchembl",
+        label_col="activity_class",
+        projection=projection,
+        map_color_modes=(
+            ["class_support", "neighbor_recall"]
+            if "class_status" in molecules else ["neighbor_recall"]
+        ),
+    )
+    columns = [
+        "molecule_identity_key", "activity_pchembl", "class_confidence",
+        "class_status", "status_reason", "offset_pair_touched",
+        "neighbor_recall", "neighbor_recall_fixed_k", "structure_group",
+    ]
+    result.data[columns].to_csv(
+        Path(output_dir) / "entry_reliability.csv", index=False
+    )
+    core_columns = [
+        "structure_group", "size", "core_smiles", "core_smiles_attached",
+        "core_coverage_count", "core_coverage_fraction",
+    ]
+    pd.DataFrame(result.structure_groups)[core_columns].to_csv(
+        Path(output_dir) / "group_cores.csv", index=False
+    )
+    return result
+
+
+if __name__ == "__main__":
+    run("chembl205_ic50.csv", "caii_map")
+```
+
 ## Outputs
 
 A run writes:
@@ -163,6 +257,30 @@ chemgridmap chembl205_ic50.csv --input-format chembl \
   --map-color-modes activity class_support neighbor_recall structure_group \
   --output-dir caii_layers
 ```
+
+Main exported columns:
+
+- `grid_coordinates.csv`: `molecule_identity_key`, `canonical_smiles`,
+  `activity_pchembl`, `activity_class`, `n_records`, `pchembl_min`,
+  `pchembl_max`, `is_conflicted`, `wide_record_range`, `class_confidence`,
+  `class_reproducibility`, `class_status`, `status_reason`,
+  `offset_pair_touched`, `n_documents`, `n_evidence_units`, `neighbor_recall`,
+  `neighbor_recall_fixed_k`, `neighbor_shared_count`, `grid_neighbor_count`,
+  `projection_x`, `projection_y`, `grid_row`, `grid_col`, `structure_group`.
+- `metrics.csv`: representation and projection names, projection/grid
+  diagnostics, assignment method, tie-aware mean recall and fixed-k mean
+  recall.
+- `structure_groups.json`: group size and members, `core_smiles`,
+  `core_smiles_attached`, core rule and coverage, scaffold counts, and FMCS
+  timeout status.
+- `structure_members.csv`: molecule-level group, scaffold and activity fields.
+- `document_offsets.csv`: evaluated document pairs, shared entries, median,
+  mean and SD offsets, sign agreement and systematic-offset status.
+- `run_manifest.json`: software version and source-tree SHA-256, Git commit and
+  dirty state when available, parameters, dependency versions, σ_doc fit,
+  assignment/refinement diagnostics, timings and output SHA-256 digests. Git
+  dirty state covers only the package directory; commit is empty when the
+  software is not in a tracked repository.
 
 ## Paper reproduction
 

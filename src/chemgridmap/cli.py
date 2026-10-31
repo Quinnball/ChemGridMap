@@ -103,7 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--conflict-range-threshold",
         type=float,
         default=1.0,
-        help="pChEMBL range above which repeated measurements are flagged.",
+        help="pChEMBL range above which repeated measurements are marked as a wide record range.",
     )
     parser.add_argument(
         "--keep-potential-duplicates",
@@ -371,7 +371,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(
             "ChEMBL curation retained {retained_activity_records} records and "
             "produced {unique_molecules} unique molecules "
-            "({repeated_conflicted_molecules} conflicted repeats).".format(
+            "({repeated_conflicted_molecules} with a wide record range).".format(
                 **audit
             )
         )

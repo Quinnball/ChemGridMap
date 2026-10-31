@@ -29,7 +29,7 @@ def activity_annotations(values, *, lower_threshold, upper_threshold, conflict_r
     large = high - low > conflict_range_threshold
     conflicted = crossing or large
     classes = {activity_class(value, lower_threshold, upper_threshold) for value in values}
-    return {
+    annotations = {
         "activity_pchembl": median, "activity_class": activity_class(median, lower_threshold, upper_threshold),
         "n_records": len(values), "pchembl_min": low, "pchembl_max": high,
         "pchembl_median": median, "pchembl_std": float(np.std(values, ddof=1)) if len(values) > 1 else np.nan,
@@ -39,3 +39,7 @@ def activity_annotations(values, *, lower_threshold, upper_threshold, conflict_r
         "has_class_boundary_crossing": int(len(classes) > 1), "n_measurement_classes": len(classes),
         "repeat_status": "singleton" if len(values) == 1 else "repeated_conflicted" if conflicted else "repeated_unflagged",
     }
+    # Keep is_conflicted for file compatibility; the public wording is now
+    # "wide record range", which also covers values on both threshold sides.
+    annotations["wide_record_range"] = annotations["is_conflicted"]
+    return annotations

@@ -51,6 +51,7 @@ class AppSession:
         self.filename = ""
         self.result = None
         self.curation = None
+        self.activity_confidence = None
         self.files = {}
         self.group_cache = {}
         self.job = {"state": "empty", "message": "Choose a CSV or open the example."}
@@ -75,6 +76,7 @@ class AppSession:
             self.frame, self.raw = frame, content
             self.filename = Path(filename.replace("\\", "/")).name
             self.result, self.curation, self.files = None, None, {}
+            self.activity_confidence = None
             self.group_cache = {}
             self.job = {"state": "ready", "message": "Input loaded. Review the options, then build the map."}
             return self.input_info()
@@ -97,6 +99,7 @@ class AppSession:
                 raise ValueError("A map is already running.")
             options = validate_options(options)
             self.result, self.curation, self.files = None, None, {}
+            self.activity_confidence = None
             self.group_cache = {}
             self.job = {"state": "running", "message": "Preparing input records...", "started": time.time()}
         if background:
@@ -141,6 +144,7 @@ class AppSession:
                             model=options["evidence_model"])
                         curation.report["activity_confidence"] = fit
                         source["activity_confidence"] = fit
+                        self.activity_confidence = fit
                     except ValueError as exc:
                         curation.report["warnings"].append(f"Activity class support was not estimated: {exc}")
                 elif options["activity_confidence"]:
@@ -173,6 +177,7 @@ class AppSession:
                     source["generic_activity"] = report
                     if fit is not None:
                         source["activity_confidence"] = fit
+                        self.activity_confidence = fit
                     smiles_col, value_col, label_col = (
                         "canonical_smiles", "activity_pchembl", "activity_class"
                     )
@@ -230,8 +235,10 @@ class AppSession:
             members = self.result.data[self.result.data.structure_group.eq(group_id)]
             drawings = {}
             for field in ('core_smiles', 'representative_smiles'):
+                molecule = summary.get("core_smiles_attached") if field == 'core_smiles' else summary[field]
+                molecule = molecule or summary[field]
                 drawings[field] = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">'
-                                   + (_svg_molecule_content(summary[field], 180) or '') + '</svg>') if summary[field] else ''
+                                   + (_svg_molecule_content(molecule, 180) or '') + '</svg>') if molecule else ''
             payload = {'summary': summary, 'svg': svg, 'drawings': drawings,
                        'members': json_rows(members), 'selected_count': len(selected),
                        'selection_rule': 'Representative first; then scaffold, canonical SMILES and identifier. At most 12 cards; all members are exported.',
@@ -264,12 +271,15 @@ class AppSession:
                 raise ValueError("Build a map first.")
             data, curation = self.result.data, self.curation
             if curation is not None:
-                _, run_bound, binding_warnings = load_audit_context(
-                    Path(self.result.output_files['coordinates']), Path(self.result.output_files['retained_records']))
+                _, run_bound, binding_warnings, manifest = load_audit_context(
+                    Path(self.result.output_files['coordinates']),
+                    Path(self.result.output_files['retained_records']),
+                    return_manifest=True)
                 chosen, records, summary = inspect_entry(
                     data, curation.retained_records, molecule_id=molecule_id,
                     cell=(row, col) if molecule_id is None else None,
-                    parameters=curation.report["parameters"])
+                    parameters=curation.report["parameters"],
+                    activity_confidence=manifest.get("activity_confidence"))
                 summary['run_binding_verified'] = run_bound
                 summary['warnings'].extend(binding_warnings)
             else:
@@ -281,19 +291,15 @@ class AppSession:
                 records = pd.DataFrame()
                 summary = {"interpretation": "Molecule-table input: no assay-record audit is available.",
                            "record_count_verified": False, "median_verified": False,
-                           "quality_annotations_verified": False, "run_binding_verified": False}
+                           "quality_annotations_verified": False, "run_binding_verified": False,
+                           "sigma_doc": (self.activity_confidence or {}).get("sigma_doc"),
+                           "sigma_doc_degrees_of_freedom": (
+                               self.activity_confidence or {}
+                           ).get("sigma_doc_degrees_of_freedom"),
+                           "multi_unit_entry_count": (
+                               self.activity_confidence or {}
+                           ).get("multi_unit_entry_count")}
             selected = chosen.iloc[0]
-            if curation is not None and selected.get("discordant_document_pairs", 0):
-                document_column = curation.report["detected_columns"].get("document_id")
-                documents = set(records[document_column].dropna().astype(str))
-                offsets = curation.report.get("activity_confidence", {}).get("document_offsets", [])
-                summary["document_offsets"] = [pair for pair in offsets
-                    if pair["document_a"] in documents and pair["document_b"] in documents]
-                for pair in summary["document_offsets"]:
-                    summary["warnings"].append(
-                        "Source documents disagree systematically: {} vs {} "
-                        "(median offset {:.3g} log units, {} shared entries).".format(
-                            pair["document_a"], pair["document_b"], pair["median_offset"], pair["shared_entries"]))
             row, col = int(selected.grid_row), int(selected.grid_col)
             neighbors = data[data.grid_row.sub(row).abs().le(1) & data.grid_col.sub(col).abs().le(1)]
             directory = Path(self.job["output_dir"])
@@ -363,7 +369,7 @@ def validate_options(options):
     if not (-100 < values["lower_threshold"] < values["upper_threshold"] < 100):
         raise ValueError("Activity thresholds must be finite, with the lower threshold below the upper.")
     if not 0 <= values["conflict_range_threshold"] < 100:
-        raise ValueError("Conflict range must be finite and non-negative.")
+        raise ValueError("Wide record range threshold must be finite and non-negative.")
     values["random_state"] = int(values["random_state"])
     values['group_similarity'] = float(values['group_similarity'])
     if not 0 < values['group_similarity'] <= 1:
@@ -452,7 +458,8 @@ class LocalHandler(BaseHTTPRequestHandler):
                     raise ValueError("Build a map first.")
                 columns = [name for name in ("projection_x", "projection_y", "grid_x", "grid_y", "grid_row", "grid_col",
                            "activity_class", "molecule_id", "molecule_identity_key", "structure_group", "structure_group_color", "comparison_id",
-                           "neighbor_recall", "class_confidence", "class_status", "n_evidence_units") if name in session.result.data]
+                           "neighbor_recall", "neighbor_recall_fixed_k", "class_confidence", "class_status",
+                           "status_reason", "offset_pair_touched", "n_evidence_units") if name in session.result.data]
                 self.send(json_rows(session.result.data[columns]))
             elif path == "/api/groups":
                 if session.result is None:

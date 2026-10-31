@@ -23,9 +23,9 @@ from .plotting import render_grid_map
 from .evidence import DOCUMENT_OFFSET_COLUMNS, prepare_generic_activity_records
 from .projection import project_2d
 from .refinement import refine_grid_layout
-from .reliability import grid_neighbor_sets, reliability_columns, representation_neighbor_sets
+from .reliability import grid_neighbor_weights, reliability_columns, representation_neighbor_weights
 from .representations import compute_representation
-from .provenance import environment_versions, file_digests
+from .provenance import environment_versions, file_digests, git_provenance, source_tree_digest
 from .comparison import structural_groups, save_group_outputs
 
 
@@ -237,7 +237,7 @@ def build_grid_map(
     assignment_seconds = time.perf_counter() - assignment_started
     projected_01 = normalize_coordinates(projected, mode=coordinate_scaling)
     reliability_started = time.perf_counter()
-    reference_neighbors = representation_neighbor_sets(
+    reference_neighbors, reference_weights = representation_neighbor_weights(
         representation_matrix, k=k,
         metric="jaccard" if representation_distance_metric == "jaccard" else "euclidean")
     refinement_diagnostics = {"method": "none"}
@@ -247,9 +247,16 @@ def build_grid_map(
                                      reference_neighbors, int(grid_rows), random_state=random_state,
                                      diagnostics=refinement_diagnostics)
         grid = refined / np.array([grid_cols - 1, grid_rows - 1], dtype=np.float64)
+    displayed_neighbors, displayed_weights = grid_neighbor_weights(
+        np.rint(grid * np.array([grid_cols - 1, grid_rows - 1])), k=k
+    )
     reliability = reliability_columns(
         reference_neighbors,
-        grid_neighbor_sets(np.rint(grid * np.array([grid_cols - 1, grid_rows - 1])), k=k))
+        displayed_neighbors,
+        reference_weights=reference_weights,
+        displayed_weights=displayed_weights,
+        k=k,
+    )
     reliability_seconds = time.perf_counter() - reliability_started
     result_data = prepared.copy()
     result_data["projection_x_raw"] = projected[:, 0]
@@ -324,6 +331,9 @@ def build_grid_map(
     metrics["coordinate_scaling"] = str(coordinate_scaling).strip().lower()
     metrics["grid_refinement"] = grid_refinement
     metrics["representation_grid_tie_aware_recall"] = float(np.nanmean(reliability["neighbor_recall"]))
+    metrics["representation_grid_fixed_k_recall"] = float(
+        np.nanmean(reliability["neighbor_recall_fixed_k"])
+    )
     for key, value in assignment_diagnostics.items():
         metrics["assignment_" + key] = json.dumps(value) if isinstance(value, (dict, list)) else value
 
@@ -369,8 +379,13 @@ def build_grid_map(
                                          formats=mode_formats, color_by=mode)
             output_files.update({mode + "_" + key: path for key, path in mode_files.items()})
         from . import __version__
+        source_digest = source_tree_digest()
+        git = git_provenance()
         manifest = {
             "software_version": __version__,
+            "software_source_sha256": source_digest["source_sha256"],
+            "software_source_file_count": source_digest["source_file_count"],
+            **git,
             "map_name": name,
             "input_table_sha256": hashlib.sha256(
                 data.to_csv(index=False, lineterminator="\n").encode("utf-8")

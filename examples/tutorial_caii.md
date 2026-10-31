@@ -22,13 +22,17 @@ coverage cores and Gaussian activity support.
 ## 2. Read the layers
 
 Open `caii_map/caii.svg` first. Cell color is the observed activity class;
-cell opacity indicates class-support status. A faded cell is `uncertain`, not
-unmeasured.
+the main map is the activity layer. Class-support status is shown in the
+separate `caii_class_support` layer. There, a faded cell is `uncertain`, not
+unmeasured. Pale cells can be below the support threshold or touched by an
+offset document pair; a bottom-left marker identifies the latter.
 
 Then open:
 
 - `caii_map/caii_neighbor_recall.svg` to check how many fingerprint neighbors
-  are also grid neighbors;
+  are also grid neighbors; the coordinates CSV also contains
+  `neighbor_recall_fixed_k`, which breaks distance ties at random with total
+  weight k;
 - `caii_map/caii_structure_group.svg` to inspect representation-defined groups;
 - `caii_map/caii_structure_groups.json` to read core coverage and, when selected,
   FMCS timeout status.
@@ -49,8 +53,8 @@ chemgridmap inspect caii_map/caii_grid_coordinates.csv \
 ```
 
 Read `caii_record_audit/audit_summary.json` for the verified counts, median,
-annotation rules, document warnings and run binding. The source rows are in
-`source_records.csv`.
+annotation rules, offset document pairs, σ_doc value and degrees of freedom,
+and run binding. The source rows are in `source_records.csv`.
 
 ## 4. Use the browser
 

@@ -342,31 +342,57 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
         out[f"p_new_document_{name}"] = predictive[:, k]
     out["class_confidence"] = consensus[rows, index]
     out["class_reproducibility"] = predictive[rows, index]
-    out["class_status"] = np.where(out["class_confidence"] >= confidence_threshold, "supported", "uncertain")
     doc_entries = defaultdict(set)
     for item in doc.itertuples(index=False):
         for source_document in item.documents.split(";"):
             doc_entries[source_document].add(item.entry)
     discordant_pairs, discordant_documents = defaultdict(int), defaultdict(set)
+    flagged_documents = {
+        str(pair[name])
+        for pair in flagged
+        for name in ("document_a", "document_b")
+    }
+    touched_entries = set()
     for pair in flagged:
         document_a, document_b = pair["document_a"], pair["document_b"]
         for key in doc_entries[document_a] & doc_entries[document_b]:
             discordant_pairs[key] += 1
             discordant_documents[key].update((document_a, document_b))
+    for source_document in flagged_documents:
+        touched_entries.update(doc_entries[source_document])
     out["discordant_document_pairs"] = [discordant_pairs[key] for key in out[entry]]
     out["discordant_documents"] = [";".join(sorted(discordant_documents[key])) for key in out[entry]]
+    out["offset_pair_touched"] = [key in touched_entries for key in out[entry]]
+    supported = out["class_confidence"] >= confidence_threshold
+    out["status_reason"] = np.where(
+        out["offset_pair_touched"], "offset_pair",
+        np.where(supported, "supported", "low_support"),
+    )
+    # Rule P changes only the display status. Probabilities and their inputs
+    # remain the Gaussian model G values.
+    out["class_status"] = np.where(
+        out["offset_pair_touched"], "uncertain",
+        np.where(supported, "supported", "uncertain"),
+    )
+    if "is_conflicted" in out:
+        out["wide_record_range"] = out["is_conflicted"].astype(int)
     policy = "identical values merged" if merge_identical else "identical values kept separate"
     fit.update({"model": "exclude_offset_documents" if model == "exclude-flagged" else model,
                 "confidence_threshold": confidence_threshold, "lower_threshold": lower,
                 "upper_threshold": upper, "evidence_unit": f"{document} ({policy})",
                 "evidence_unit_policy": f"document; {policy}", "merge_identical_documents": bool(merge_identical),
+                "sigma_doc": float(fit["tau"]),
+                "sigma_doc_degrees_of_freedom": fit.get("degrees_of_freedom"),
+                "multi_unit_entry_count": int(fit.get("n_entries", 0)),
                 "document_pair_count": offsets.attrs["document_pair_count"],
                 "observed_document_pair_count": offsets.attrs["observed_document_pair_count"],
                 "document_pair_possible_count": offsets.attrs["document_pair_possible_count"],
                 "discordant_document_pair_count": len(flagged), "document_offsets_top10": flagged[:10],
                 "document_offsets": flagged, "document_offset_min_shared": offsets.attrs["min_shared"],
                 "document_offset_threshold": offsets.attrs["offset_threshold"],
-                "document_offset_sign_agreement": offsets.attrs["sign_agreement"]})
+                "document_offset_sign_agreement": offsets.attrs["sign_agreement"],
+                "flagged_document_count": len(flagged_documents),
+                "offset_pair_touched_entry_count": int(out["offset_pair_touched"].sum())})
     if model == "exclude-flagged":
         fit["flagged_documents"] = sorted(flagged_documents)
         fit["excluded_entry_count"] = len(excluded_entries)

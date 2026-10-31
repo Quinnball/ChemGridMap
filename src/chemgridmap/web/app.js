@@ -206,11 +206,11 @@ async function showResult() {
   restoreOptions(job.options);
   const report = job.report;
   $('summary').replaceChildren(stat(report.input_rows, 'Input records'),stat(job.molecules, 'Mapped molecules'),
-    stat(report.retained_activity_records, 'Retained records'),stat(report.repeated_conflicted_molecules, 'Flagged molecules'));
+    stat(report.retained_activity_records, 'Retained records'),stat(report.repeated_conflicted_molecules, 'Wide record ranges'));
   $('summary').hidden = false; $('audit').hidden = false; $('preview').open = false;
   $('audit-body').replaceChildren();
   const note = document.createElement('p');
-  note.textContent = job.options.input_format === 'chembl' ? 'All retained records are summarized by median pChEMBL. A conflict flag is retained, not converted to Medium or silently removed. Aggregation does not harmonize assay conditions. An unflagged entry is not proof of experimental agreement.' : 'This map uses the supplied molecule-level annotations. It does not create an assay-record provenance trail.';
+  note.textContent = job.options.input_format === 'chembl' ? 'All retained records are summarized by median pChEMBL. A wide record range is retained, not converted to Medium or silently removed. Aggregation does not harmonize assay conditions. An entry without a wide record range is not proof of experimental agreement.' : 'This map uses the supplied molecule-level annotations. It does not create an assay-record provenance trail.';
   $('audit-body').append(note);
   const exclusions = report.exclusion_counts || {};
   if (Object.keys(exclusions).length) {
@@ -303,6 +303,19 @@ function colorMap() {
     else if (mode === 'reliability') fill = reliabilityColor(point.neighbor_recall);
     else if (mode === 'support' && point.class_status === 'uncertain') fill = fadedColors[point.activity_class] || fill;
     mark.setAttribute('fill', fill);
+    let offsetMarker = el.querySelector(':scope > [data-offset-pair-marker]');
+    if (mode === 'support' && point.offset_pair_touched) {
+      if (!offsetMarker) {
+        const x = Number(mark.getAttribute('x') || 0), y = Number(mark.getAttribute('y') || 0);
+        const width = Number(mark.getAttribute('width') || 100), height = Number(mark.getAttribute('height') || 100);
+        const corner = width * 0.12;
+        offsetMarker = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        offsetMarker.dataset.offsetPairMarker = 'true';
+        offsetMarker.setAttribute('d', `M${x + 1},${y + height - corner} L${x + 1},${y + height - 1} L${x + corner},${y + height - 1} Z`);
+        offsetMarker.setAttribute('fill', '#172536');
+        el.append(offsetMarker);
+      }
+    } else if (offsetMarker) offsetMarker.remove();
   });
   renderLegend(mode);
 }
@@ -329,8 +342,10 @@ function renderLegend(mode) {
     $('legend').append(legendItem(colors[label], text));
     if (mode === 'support') $('legend').append(legendItem(fadedColors[label], 'uncertain'));
   }
-  if (mode === 'support') $('legend').append(document.createTextNode('Uncertain: source documents support the class with probability < 0.8.'));
-  else { const flag = document.createElement('span'); flag.textContent = '◥ Conflict flag'; $('legend').append(flag); }
+  if (mode === 'support') {
+    $('legend').append(document.createTextNode('Pale: uncertain (class support below 0.8, or an offset document pair).'));
+    const offset = document.createElement('span'); offset.textContent = '◣ offset document pair'; $('legend').append(offset);
+  } else { const flag = document.createElement('span'); flag.textContent = '◥ Wide record range'; $('legend').append(flag); }
 }
 function applyTransform() {
   $('map-stage').style.transform = `translate(${transform.x}px,${transform.y}px) scale(${transform.s})`;
@@ -362,6 +377,12 @@ function highlight() {
   });
 }
 function format(value) { return value == null ? '—' : typeof value === 'number' ? Number(value.toFixed(3)).toString() : String(value); }
+function percentage(value) {
+  if (value == null || Number.isNaN(value)) return '—';
+  if (value >= 0.995) return '> 99%';
+  if (value < 0.005) return '< 1%';
+  return `${Math.round(100 * value)}%`;
+}
 async function inspect(query) {
   const request = ++requestNumber;
   try {
@@ -391,17 +412,33 @@ async function inspect(query) {
     const stats = document.createElement('dl');
     const fields = [['Median pChEMBL',summary.median_pchembl],['pChEMBL range',summary.minimum_pchembl == null ? null : `${format(summary.minimum_pchembl)}–${format(summary.maximum_pchembl)}`],['Source records',summary.n_records],['Distinct assays',summary.n_assays],['Distinct documents',summary.n_documents]];
     if (!summary.median_verified) fields.splice(0,fields.length,['Activity class',row.activity_class],['Source-record audit','Not available']);
-    if (row.class_confidence != null) fields.push(['Evidence units', `${row.n_evidence_units} (${row.n_documents} documents)`],
+    if (row.class_confidence != null) {
+      fields.push(['Evidence units', `${row.n_evidence_units} (${row.n_documents} documents)`],
       ['Document-balanced pChEMBL', row.document_balanced_pchembl],
-      ['Class support', `${Math.round(100 * row.class_confidence)}% ${row.activity_class} · ${row.class_status}`]);
-    if (row.neighbor_recall != null) fields.push(['Neighbor recall', `${row.neighbor_shared_count}/${row.representation_neighbor_count} (${Math.round(100 * row.neighbor_recall)}%)`]);
+      ['Class support', `${percentage(row.class_confidence)} ${row.activity_class} · ${row.class_status}`]);
+      if (summary.status_reason != null) {
+        const threshold = summary.confidence_threshold == null ? 0.8 : summary.confidence_threshold;
+        const supportText = summary.status_reason === 'supported' ? 'supported' :
+          summary.status_reason === 'low_support' ? `low support (below ${threshold})` :
+          summary.status_reason === 'offset_pair' ? 'offset document pair' : summary.status_reason;
+        fields.push(['Support status', supportText]);
+      }
+    }
+    if (summary.sigma_doc != null) fields.push(
+      ['σ_doc', format(summary.sigma_doc)],
+      ['σ_doc degrees of freedom', summary.sigma_doc_degrees_of_freedom == null ? 'not estimated (fallback)' : summary.sigma_doc_degrees_of_freedom],
+      ['Entries with multiple units', summary.multi_unit_entry_count]);
+    if (row.neighbor_recall != null) fields.push(
+      ['Neighbor recall (tie-inclusive)', `${row.neighbor_shared_count}/${row.representation_neighbor_count} (${percentage(row.neighbor_recall)})`]);
+    if (row.neighbor_recall_fixed_k != null) fields.push(
+      ['Neighbor recall (fixed k)', percentage(row.neighbor_recall_fixed_k)]);
     for (const [label,value] of fields) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = format(value); stats.append(dt,dd); }
     $('evidence-summary').append(stats);
     const marker = document.createElement('p'); marker.className = summary.is_conflicted ? 'flag' : 'micro';
-    marker.textContent = !summary.quality_annotations_verified && summary.median_verified ? 'Quality flags not verified: original annotation rules are unavailable.' : summary.is_conflicted ? 'Conflict flagged. Review the underlying assays before interpretation.' : summary.median_verified ? 'No conflict rule triggered. This does not establish assay equivalence.' : summary.interpretation;
+    marker.textContent = !summary.quality_annotations_verified && summary.median_verified ? 'Quality flags not verified: original annotation rules are unavailable.' : summary.wide_record_range ? 'Records span more than one log unit or lie on both sides of the class thresholds. Class support already accounts for agreement among documents.' : summary.median_verified ? 'No wide record range rule triggered. This does not establish assay equivalence.' : summary.interpretation;
     $('evidence-summary').append(marker);
     for (const text of summary.warnings || []) {
-      if (!text.startsWith('Source documents disagree systematically:')) continue;
+      if (!text.startsWith('Offset document pair:')) continue;
       const warning = document.createElement('p'); warning.className = 'flag';
       warning.dataset.documentOffsetWarning = 'true'; warning.textContent = text;
       $('evidence-summary').append(warning);

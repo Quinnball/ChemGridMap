@@ -78,7 +78,8 @@ def verify_annotations(row, evidence, values, parameters):
     return calculated, rules, verified, quality_verified
 
 
-def inspect_entry(coordinates, records, *, molecule_id=None, cell=None, parameters=None):
+def inspect_entry(coordinates, records, *, molecule_id=None, cell=None, parameters=None,
+                  activity_confidence=None):
     """Select one entry by exact ID or zero-based (row, column), then verify its records."""
     if (molecule_id is None) == (cell is None):
         raise ValueError("Select either molecule_id or cell=(row, column).")
@@ -121,6 +122,38 @@ def inspect_entry(coordinates, records, *, molecule_id=None, cell=None, paramete
         raise ValueError("Recalculated activity does not match the map annotation.")
     columns = detect_chembl_columns(evidence)
     calculated, rules, verified, quality_verified = verify_annotations(row, evidence, values, parameters)
+    if "offset_pair_touched" not in row.index or pd.isna(row["offset_pair_touched"]):
+        touched = None
+        status_reason = None
+    else:
+        touched = bool(row["offset_pair_touched"])
+        status_reason = None if pd.isna(row.get("status_reason")) else row.get("status_reason")
+    confidence = activity_confidence or {}
+    document_column = columns["document_id"]
+    documents = set()
+    if document_column:
+        documents = {
+            str(value) for value in evidence[document_column].dropna().astype(str)
+            if str(value)
+        }
+    matched_offsets = []
+    offset_warnings = []
+    if touched:
+        for pair in confidence.get("document_offsets", []):
+            document_a, document_b = str(pair["document_a"]), str(pair["document_b"])
+            present = [document for document in (document_a, document_b) if document in documents]
+            if not present:
+                continue
+            matched_offsets.append(pair)
+            offset_warnings.append(
+                "Offset document pair: {} vs {}, median difference {:.3g} log units, "
+                "n shared {}; this entry has records from {}.".format(
+                    document_a, document_b, float(pair["median_offset"]),
+                    int(pair["shared_entries"]), "; ".join(present),
+                )
+            )
+        if not matched_offsets:
+            offset_warnings.append("Offset document pair details are unavailable for this map.")
     summary = {
         "molecule_identity_key": str(row.molecule_identity_key),
         "grid_row": int(row.grid_row), "grid_col": int(row.grid_col),
@@ -129,26 +162,48 @@ def inspect_entry(coordinates, records, *, molecule_id=None, cell=None, paramete
         "minimum_pchembl": float(values.min()), "maximum_pchembl": float(values.max()),
         "n_records": len(evidence),
         "is_conflicted": bool(calculated["is_conflicted"]) if rules is not None else None,
+        "wide_record_range": bool(calculated["is_conflicted"]) if rules is not None else None,
         "has_class_boundary_crossing": bool(calculated["has_class_boundary_crossing"]) if rules is not None else None,
+        "offset_pair_touched": touched,
+        "status_reason": status_reason,
+        "document_offsets": matched_offsets,
+        "confidence_threshold": confidence.get("confidence_threshold"),
+        "sigma_doc": confidence.get("sigma_doc", confidence.get("tau")),
+        "sigma_doc_degrees_of_freedom": confidence.get(
+            "sigma_doc_degrees_of_freedom", confidence.get("degrees_of_freedom")
+        ),
+        "multi_unit_entry_count": confidence.get(
+            "multi_unit_entry_count", confidence.get("n_entries")
+        ),
         "record_count_verified": True, "median_verified": True,
         "quality_annotations_verified": quality_verified, "annotation_rules": rules,
         "verified_fields": verified,
-        "warnings": [] if quality_verified else ["Quality annotations are not fully verified. Legacy maps need the original curation parameters; no default thresholds were assumed."],
-        "interpretation": "Median annotation summarizes retained records; it does not harmonize assay conditions.",
+        "warnings": offset_warnings + (
+            [] if quality_verified else [
+                "Quality annotations are not fully verified. Legacy maps need the original curation parameters; no default thresholds were assumed."
+            ]
+        ),
+        "interpretation": (
+            "Median annotation summarizes retained records; it does not harmonize assay conditions. "
+            "Class support accounts for agreement among documents."
+        ),
     }
     for name, field in (("n_activity_ids", "activity_id"), ("n_assays", "assay_id"), ("n_documents", "document_id")):
         summary[name] = int(evidence[columns[field]].nunique()) if columns[field] else None
     return selected.copy(), evidence, summary
 
 
-def load_audit_context(coordinates_path, records_path, *, manifest_path=None, report_path=None):
+def load_audit_context(coordinates_path, records_path, *, manifest_path=None, report_path=None,
+                       return_manifest=False):
     """Check saved file digests before interpreting them as outputs of the same run."""
     explicit_manifest = manifest_path is not None
     manifest_path = Path(manifest_path) if manifest_path else coordinates_path.with_name(
         coordinates_path.name.replace("_grid_coordinates.csv", "_run_manifest.json"))
     parameters, verified, warnings = None, False, []
+    run_manifest = {}
     if manifest_path != coordinates_path and manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        run_manifest = manifest
         parameters = manifest.get("source", {}).get("curation_parameters")
         expected = {"coordinates": manifest.get("output_digests", {}).get("coordinates"),
                     "retained_records": manifest.get("source", {}).get("curation_outputs", {}).get("retained_records")}
@@ -167,6 +222,8 @@ def load_audit_context(coordinates_path, records_path, *, manifest_path=None, re
         parameters = supplied
     if not verified:
         warnings.append("Run binding is not verified: original output digests are unavailable. Current file hashes alone do not establish a shared run.")
+    if return_manifest:
+        return parameters, verified, warnings, run_manifest
     return parameters, verified, warnings
 
 
@@ -181,12 +238,14 @@ def main(argv=None):
     selection.add_argument("--cell", nargs=2, type=int, metavar=("ROW", "COL"), help="Zero-based row and column in the grid CSV.")
     parser.add_argument("--output-dir", type=Path, default=Path("record_audit"))
     args = parser.parse_args(argv)
-    parameters, run_verified, warnings = load_audit_context(
-        args.coordinates, args.records, manifest_path=args.manifest, report_path=args.curation_report)
+    parameters, run_verified, warnings, manifest = load_audit_context(
+        args.coordinates, args.records, manifest_path=args.manifest,
+        report_path=args.curation_report, return_manifest=True)
     selected, records, summary = inspect_entry(
         pd.read_csv(args.coordinates, encoding="utf-8-sig"),
         pd.read_csv(args.records, encoding="utf-8-sig"),
         molecule_id=args.molecule_id, cell=args.cell, parameters=parameters,
+        activity_confidence=manifest.get("activity_confidence"),
     )
     summary["run_binding_verified"] = run_verified
     summary["warnings"].extend(warnings)

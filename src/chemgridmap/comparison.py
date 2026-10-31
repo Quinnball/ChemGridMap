@@ -122,7 +122,11 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
             "representative_id": keys[order[indices[0]]],
             "representative_smiles": str(ordered.canonical_smiles.iloc[indices[0]]),
             "representative_role": "group medoid" if cluster_col else "Butina center",
-            "core_smiles": core, "core_exact_scaffold_count": counts.get(core, 0),
+            "core_smiles": core, "core_smiles_attached": choice.get("core_smiles_attached", "") if choice else "",
+            "core_smiles_attached_source": (
+                choice.get("core_smiles_attached_source", "") if choice else ""
+            ),
+            "core_exact_scaffold_count": counts.get(core, 0),
             "core_coverage_count": covered, "core_coverage_fraction": covered / len(indices),
             "core_member_ids": [keys[order[i]] for i, yes in zip(indices, matched) if yes],
             "core_rule": core_rule,

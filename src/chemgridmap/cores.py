@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 from typing import Dict, Sequence
 
-from rdkit import Chem
+from rdkit import Chem, rdBase
 from rdkit.Chem import rdFMCS
 from rdkit.Chem.Scaffolds import MurckoScaffold, rdScaffoldNetwork
 
@@ -53,6 +53,86 @@ def _coverage(pattern: Chem.Mol, mols: Sequence[Chem.Mol]) -> list:
     return [bool(m.HasSubstructMatch(pattern, useChirality=True)) for m in mols]
 
 
+def _attached_candidate(pattern: Chem.Mol, member: Chem.Mol, match: tuple, *,
+                        kekule: bool) -> str:
+    source = Chem.Mol(member)
+    if kekule:
+        Chem.Kekulize(source, clearAromaticFlags=True)
+    drawing = Chem.RWMol()
+    for pattern_atom, member_index in zip(pattern.GetAtoms(), match):
+        member_atom = source.GetAtomWithIdx(member_index)
+        atom = Chem.Atom(pattern_atom.GetAtomicNum())
+        atom.SetFormalCharge(member_atom.GetFormalCharge())
+        if not kekule:
+            atom.SetIsAromatic(any(
+                bond.GetBondType() == Chem.BondType.AROMATIC
+                for bond in pattern_atom.GetBonds()
+            ))
+        atom.SetNoImplicit(True)
+        atom.SetNumExplicitHs(member_atom.GetTotalNumHs())
+        drawing.AddAtom(atom)
+    for bond in pattern.GetBonds():
+        if kekule:
+            member_bond = source.GetBondBetweenAtoms(
+                match[bond.GetBeginAtomIdx()], match[bond.GetEndAtomIdx()]
+            )
+            bond_type = member_bond.GetBondType()
+        else:
+            bond_type = bond.GetBondType()
+        drawing.AddBond(bond.GetBeginAtomIdx(), bond.GetEndAtomIdx(), bond_type)
+        drawing.GetBondBetweenAtoms(
+            bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+        ).SetIsAromatic(bond_type == Chem.BondType.AROMATIC and not kekule)
+
+    member_atoms = set(match)
+    member_to_core = {member_index: core_index for core_index, member_index in enumerate(match)}
+    handled_member_bonds = set()
+
+    def add_dummy(core_index, bond_type):
+        dummy_index = drawing.AddAtom(Chem.Atom(0))
+        drawing.GetAtomWithIdx(dummy_index).SetNoImplicit(True)
+        drawing.AddBond(core_index, dummy_index, bond_type)
+        drawing.GetBondBetweenAtoms(core_index, dummy_index).SetIsAromatic(
+            bond_type == Chem.BondType.AROMATIC and not kekule
+        )
+
+    for core_index, member_index in enumerate(match):
+        for member_bond in source.GetAtomWithIdx(member_index).GetBonds():
+            other_index = member_bond.GetOtherAtomIdx(member_index)
+            bond_type = member_bond.GetBondType()
+            if other_index not in member_atoms:
+                add_dummy(core_index, bond_type)
+                continue
+            other_core_index = member_to_core[other_index]
+            if drawing.GetBondBetweenAtoms(core_index, other_core_index) is None:
+                if member_bond.GetIdx() in handled_member_bonds:
+                    continue
+                add_dummy(core_index, bond_type)
+                add_dummy(other_core_index, bond_type)
+                handled_member_bonds.add(member_bond.GetIdx())
+    molecule = drawing.GetMol()
+    Chem.SanitizeMol(molecule)
+    return Chem.MolToSmiles(molecule, isomericSmiles=True)
+
+
+def _core_smiles_with_attachments(pattern: Chem.Mol, mols: Sequence[Chem.Mol]) -> tuple[str, str]:
+    """Encode a matched core and report its aromatic or Kekulé source."""
+    with rdBase.BlockLogs():
+        matches = [(member, member.GetSubstructMatch(pattern)) for member in mols]
+        matches = [(member, match) for member, match in matches if match]
+        for member, match in matches:
+            try:
+                return _attached_candidate(pattern, member, match, kekule=False), "matched_member"
+            except Exception:
+                continue
+        for member, match in matches:
+            try:
+                return _attached_candidate(pattern, member, match, kekule=True), "matched_member_kekule"
+            except Exception:
+                continue
+    return "", ""
+
+
 def select_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8) -> Dict:
     """Largest candidate core matching at least ``min_coverage`` of the members.
 
@@ -74,11 +154,17 @@ def select_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8) -> Dict:
         rank = (-heavy, -fraction) if meets else (-fraction, -heavy)
         scored.append((not meets, rank, smiles, matched, heavy))
     if not scored:
-        return {"core_smiles": "", "core_rule": "coverage_aware", "coverage_target": min_coverage,
+        return {"core_smiles": "", "core_smiles_attached": "", "core_smiles_attached_source": "",
+                "core_rule": "coverage_aware", "coverage_target": min_coverage,
                 "coverage_count": 0, "coverage_fraction": 0.0, "core_heavy_atoms": 0, "matched": [False] * len(mols),
                 "target_met": False, "candidates": 0, "seconds": time.perf_counter() - started}
     missed, _, smiles, matched, heavy = min(scored, key=lambda item: (item[0], item[1], item[2]))
-    return {"core_smiles": smiles, "core_rule": "coverage_aware", "coverage_target": min_coverage,
+    pattern = Chem.MolFromSmiles(smiles)
+    attached, attached_source = _core_smiles_with_attachments(pattern, mols)
+    return {"core_smiles": smiles,
+            "core_smiles_attached": attached,
+            "core_smiles_attached_source": attached_source,
+            "core_rule": "coverage_aware", "coverage_target": min_coverage,
             "coverage_count": int(sum(matched)), "coverage_fraction": sum(matched) / len(mols),
             "core_heavy_atoms": int(heavy), "matched": matched, "target_met": not missed,
             "candidates": len(candidates), "seconds": time.perf_counter() - started}
@@ -88,7 +174,8 @@ def mcs_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8, timeout: in
     """Maximum common substructure present in at least ``min_coverage`` of members (comparison method)."""
     started = time.perf_counter()
     if len(mols) < 2:
-        return {"core_smiles": "", "core_smarts": "", "core_rule": "fmcs_threshold",
+        return {"core_smiles": "", "core_smiles_attached": "", "core_smiles_attached_source": "",
+                "core_smarts": "", "core_rule": "fmcs_threshold",
                 "coverage_target": min_coverage, "coverage_count": 0, "coverage_fraction": 0.0,
                 "core_heavy_atoms": 0, "timed_out": False, "core_smiles_source": "",
                 "seconds": time.perf_counter() - started}
@@ -130,7 +217,12 @@ def mcs_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8, timeout: in
             core_smiles = candidate
             core_smiles_source = "matched_member_kekule"
         break
+    attached, attached_source = (
+        _core_smiles_with_attachments(pattern, mols) if pattern is not None else ("", "")
+    )
     return {"core_smiles": core_smiles,
+            "core_smiles_attached": attached,
+            "core_smiles_attached_source": attached_source,
             "core_smarts": result.smartsString, "core_rule": "fmcs_threshold", "coverage_target": min_coverage,
             "coverage_count": int(sum(matched)), "coverage_fraction": sum(matched) / len(mols),
             "core_heavy_atoms": int(result.numAtoms), "timed_out": bool(result.canceled),

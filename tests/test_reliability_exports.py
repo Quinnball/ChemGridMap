@@ -113,6 +113,15 @@ def test_support_legend_uses_the_configured_threshold(tmp_path, colored_grid):
     assert "probability below 0.9" in Path(files["svg"]).read_text()
 
 
+def test_offset_touched_support_cell_has_distinct_marker_and_legend(tmp_path, colored_grid):
+    touched = colored_grid.copy()
+    touched["offset_pair_touched"] = [False, True, False]
+    files = render_grid_map(touched, tmp_path / "support", color_by="class_support", formats=["svg"])
+    svg = Path(files["svg"]).read_text()
+    assert 'data-offset-pair-marker="true"' in svg
+    assert "offset document pair (bottom-left marker)" in svg
+
+
 def test_png_molecule_positions_are_identical_across_modes(tmp_path, colored_grid):
     images = {}
     for mode in ("activity", "class_support", "neighbor_recall", "structure_group"):
@@ -150,7 +159,10 @@ def test_browser_exports_offsets_colors_and_evidence_policy(tmp_path, monkeypatc
     detail, _ = app.inspect(molecule_id="CHEMBL1")
     assert detail["molecule"]["n_evidence_units"] == (2 if merge_identical else 3)
     assert detail["molecule"]["discordant_document_pairs"] == 1
-    assert any("DOC_A vs DOC_B (median offset 3.5 log units, 3 shared entries)" in warning
+    assert detail["summary"]["offset_pair_touched"] is True
+    assert detail["summary"]["status_reason"] == "offset_pair"
+    assert any("Offset document pair: DOC_A vs DOC_B, median difference 3.5 log units, n shared 3; "
+               "this entry has records from DOC_A; DOC_B." in warning
                for warning in detail["summary"]["warnings"])
     modes = ["neighbor_recall", "class_support"]
     if grouping != "none":
@@ -161,6 +173,9 @@ def test_browser_exports_offsets_colors_and_evidence_policy(tmp_path, monkeypatc
     assert {path.name for path in Path(app.job["output_dir"]).iterdir() if path.stem in layer_stems} == {
         f"map_{mode}.svg" for mode in modes}
     manifest = json.loads(app.files["map_run_manifest.json"].read_text())
+    assert detail["summary"]["sigma_doc"] == manifest["activity_confidence"]["sigma_doc"]
+    assert detail["summary"]["sigma_doc_degrees_of_freedom"] == manifest["activity_confidence"]["sigma_doc_degrees_of_freedom"]
+    assert detail["summary"]["multi_unit_entry_count"] == manifest["activity_confidence"]["multi_unit_entry_count"]
     assert manifest["parameters"]["map_color_modes"] == modes
     assert manifest["parameters"]["map_color_formats"] == ["svg"]
     with zipfile.ZipFile(app.files["chemgridmap_results.zip"]) as archive:
