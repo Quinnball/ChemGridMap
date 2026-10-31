@@ -136,8 +136,10 @@ def test_inspect_cli_exports_auditable_native_svg(case, tmp_path):
     records.to_csv(tmp_path / "records.csv", index=False)
     assert main(["inspect", str(tmp_path / "grid.csv"), "--records", str(tmp_path / "records.csv"),
                  "--molecule-id", "CHEMBL20", "--output-dir", str(tmp_path / "audit")]) == 0
-    summary = json.loads((tmp_path / "audit/audit_summary.json").read_text())
+    summary = json.loads(
+        (tmp_path / "audit/audit_summary.json").read_text(encoding="utf-8")
+    )
     assert summary["median_verified"] and summary["record_count_verified"]
-    svg = (tmp_path / "audit/selected_molecule.svg").read_text()
+    svg = (tmp_path / "audit/selected_molecule.svg").read_text(encoding="utf-8")
     assert "data-conflict-marker" in svg and "<image" not in svg
     assert len(summary["inputs"]["coordinates"]["sha256"]) == 64

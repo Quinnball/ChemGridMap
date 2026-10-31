@@ -131,7 +131,9 @@ class CliTests(unittest.TestCase):
             for filename in expected:
                 self.assertTrue(Path(directory, filename).is_file(), filename)
 
-            with Path(directory, "chembl_map_curation_report.json").open() as handle:
+            with Path(directory, "chembl_map_curation_report.json").open(
+                encoding="utf-8"
+            ) as handle:
                 report = json.load(handle)
             self.assertEqual(report["input_rows"], 9)
             self.assertEqual(report["retained_activity_records"], 8)

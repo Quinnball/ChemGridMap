@@ -46,7 +46,9 @@ def test_semicolon_web_export_runs_with_parent_fallback_and_manifest(tmp_path):
     molecules = pd.read_csv(out / "grid_map_molecule_level.csv")
     assert len(molecules) == 3
     assert "CCN" in molecules.canonical_smiles.values
-    manifest = json.loads((out / "grid_map_run_manifest.json").read_text())
+    manifest = json.loads(
+        (out / "grid_map_run_manifest.json").read_text(encoding="utf-8")
+    )
     assert manifest["source"]["input_file_sha256"]
     assert manifest["assignment"]["cost_dtype"] == "float64"
     root = ET.parse(out / "grid_map.svg").getroot()

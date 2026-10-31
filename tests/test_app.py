@@ -129,7 +129,7 @@ def test_browser_excludes_identity_conflicts(tmp_path):
     assert "map_identity_conflicts.csv" in app.files
     conflicts = pd.read_csv(app.files["map_identity_conflicts.csv"])
     assert conflicts.molecule_identity_key.tolist() == ["CHEMBL9"]
-    options = json.loads(app.files["app_options.json"].read_text())
+    options = json.loads(app.files["app_options.json"].read_text(encoding="utf-8"))
     assert options["identity_conflicts"] == "exclude"
 
 

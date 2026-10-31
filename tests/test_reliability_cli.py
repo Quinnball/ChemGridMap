@@ -62,7 +62,9 @@ def test_cli_evidence_policy_offsets_layers_and_archive(tmp_path, merge_identica
     assert offsets.shared_entries.eq(6).all()
     assert offsets.median_offset.eq(2).all()
     assert offsets.total_evaluated_pairs.eq(3).all()
-    manifest = json.loads((tmp_path / "check_run_manifest.json").read_text())
+    manifest = json.loads(
+        (tmp_path / "check_run_manifest.json").read_text(encoding="utf-8")
+    )
     assert manifest["software_version"] == "0.5.0"
     assert len(manifest["software_source_sha256"]) == 64
     assert manifest["software_source_file_count"] > 0
@@ -228,7 +230,9 @@ def test_cli_fmcs_core_end_to_end_records_timeout(tmp_path):
         "--core-rule", "fmcs", "--fmcs-timeout", "1", "--output-dir", str(tmp_path),
         "--name", "fmcs", "--output-formats", "svg", "--render-detail", "overview",
     ]) == 0
-    groups = json.loads((tmp_path / "fmcs_structure_groups.json").read_text())["groups"]
+    groups = json.loads(
+        (tmp_path / "fmcs_structure_groups.json").read_text(encoding="utf-8")
+    )["groups"]
     assert all(group["core_rule"] == "fmcs" and isinstance(group["fmcs_timed_out"], bool) for group in groups)
     members = pd.read_csv(tmp_path / "fmcs_structure_members.csv")
     assert "activity_pchembl" not in members
@@ -341,7 +345,9 @@ def test_cli_fmcs_core_accepts_aromatic_heterocycles(tmp_path):
         "--name", "fmcs_indoles", "--output-formats", "svg",
         "--render-detail", "overview",
     ]) == 0
-    groups = json.loads((tmp_path / "fmcs_indoles_structure_groups.json").read_text())["groups"]
+    groups = json.loads(
+        (tmp_path / "fmcs_indoles_structure_groups.json").read_text(encoding="utf-8")
+    )["groups"]
     assert len(groups) == 1
     assert groups[0]["core_heavy_atoms"] == 13
     assert Chem.MolFromSmiles(groups[0]["core_smiles"]) is not None

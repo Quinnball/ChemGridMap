@@ -87,7 +87,7 @@ def test_manifest_binds_original_files_and_all_quality_flags(tmp_path):
     assert load_audit_context(grid, records)[1]
     output = tmp_path/'inspect'
     assert main([str(grid), '--records', str(records), '--molecule-id', 'CHEMBL20', '--output-dir', str(output)]) == 0
-    summary = json.loads((output/'audit_summary.json').read_text())
+    summary = json.loads((output/'audit_summary.json').read_text(encoding='utf-8'))
     assert summary['run_binding_verified'] and summary['quality_annotations_verified']
     other = tmp_path/'other_records.csv'
     other.write_bytes(records.read_bytes().replace(b'5.2', b'5.3'))

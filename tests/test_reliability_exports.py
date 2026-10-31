@@ -64,7 +64,7 @@ def test_activity_svg_default_matches_and_uses_opaque_tiles(tmp_path, colored_gr
     explicit = render_grid_map(data, tmp_path / "explicit", detail="overview", formats=["svg", "png"], color_by="activity")
     for extension in ("svg", "png"):
         assert Path(implicit[extension]).read_bytes() == Path(explicit[extension]).read_bytes()
-    assert 'fill-opacity="1"' in Path(explicit["svg"]).read_text()
+    assert 'fill-opacity="1"' in Path(explicit["svg"]).read_text(encoding="utf-8")
 
 
 def test_unknown_color_mode_is_rejected(tmp_path, colored_grid):
@@ -88,7 +88,9 @@ def test_additional_layer_formats_are_independent_of_main_map(
         f"map_neighbor_recall.{extension}" for extension in expected}
     assert {path.name for path in tmp_path.glob("map.*")} == {
         f"map.{extension}" for extension in main_formats}
-    manifest = json.loads(Path(result.output_files["run_manifest"]).read_text())
+    manifest = json.loads(
+        Path(result.output_files["run_manifest"]).read_text(encoding="utf-8")
+    )
     assert manifest["parameters"]["map_color_formats"] == layer_formats
 
 
@@ -108,7 +110,7 @@ def test_reliability_color_requires_the_estimated_values(tmp_path, colored_grid,
 def test_support_legend_uses_the_configured_threshold(tmp_path, colored_grid):
     colored_grid.attrs["activity_confidence_fit"] = {"confidence_threshold": .9}
     files = render_grid_map(colored_grid, tmp_path / "support", color_by="class_support", formats=["svg"])
-    assert "class support below 0.9" in Path(files["svg"]).read_text()
+    assert "class support below 0.9" in Path(files["svg"]).read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("threshold", [.8, .9])
@@ -128,14 +130,16 @@ def test_pipeline_passes_support_threshold_to_static_layers(tmp_path, colored_gr
         output_formats=["svg"], map_color_modes=["class_support"],
         map_color_formats=["svg"],
     ).output_files
-    assert f"class support below {threshold:g}" in Path(files["class_support_svg"]).read_text()
+    assert f"class support below {threshold:g}" in Path(
+        files["class_support_svg"]
+    ).read_text(encoding="utf-8")
 
 
 def test_offset_touched_support_cell_has_distinct_marker_and_legend(tmp_path, colored_grid):
     touched = colored_grid.copy()
     touched["offset_pair_touched"] = [False, True, False]
     files = render_grid_map(touched, tmp_path / "support", color_by="class_support", formats=["svg"])
-    svg = Path(files["svg"]).read_text()
+    svg = Path(files["svg"]).read_text(encoding="utf-8")
     assert 'data-offset-pair-marker="true"' in svg
     assert "◣ offset document pair" in svg
 
@@ -191,7 +195,9 @@ def test_browser_exports_offsets_colors_and_evidence_policy(tmp_path, monkeypatc
     layer_stems = {f"map_{mode}" for mode in ("activity", "neighbor_recall", "class_support", "structure_group")}
     assert {path.name for path in Path(app.job["output_dir"]).iterdir() if path.stem in layer_stems} == {
         f"map_{mode}.svg" for mode in modes}
-    manifest = json.loads(app.files["map_run_manifest.json"].read_text())
+    manifest = json.loads(
+        app.files["map_run_manifest.json"].read_text(encoding="utf-8")
+    )
     assert detail["summary"]["sigma_doc"] == manifest["activity_confidence"]["sigma_doc"]
     assert detail["summary"]["sigma_doc_degrees_of_freedom"] == manifest["activity_confidence"]["sigma_doc_degrees_of_freedom"]
     assert detail["summary"]["multi_unit_entry_count"] == manifest["activity_confidence"]["multi_unit_entry_count"]

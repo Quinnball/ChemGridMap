@@ -1,5 +1,6 @@
 """Generated text exports must not depend on the host newline convention."""
 
+import ast
 from pathlib import Path
 
 import pandas as pd
@@ -37,3 +38,22 @@ def test_generated_svg_csv_and_json_outputs_use_lf(tmp_path):
         contents = path.read_bytes()
         assert b"\r\n" not in contents, path.name
         contents.decode("utf-8")
+
+
+def test_all_test_text_reads_declare_utf8():
+    test_root = Path(__file__).resolve().parent
+    current = Path(__file__).resolve()
+    offenders = []
+    for path in sorted(test_root.rglob("*.py")):
+        if path == current:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "read_text"
+                and not any(keyword.arg == "encoding" for keyword in node.keywords)
+            ):
+                offenders.append(f"{path.relative_to(test_root)}:{node.lineno}")
+    assert not offenders, "read_text() calls without encoding='utf-8': " + ", ".join(offenders)
