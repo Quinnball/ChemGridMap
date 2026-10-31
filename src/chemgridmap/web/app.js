@@ -344,11 +344,14 @@ function renderLegend(mode) {
   }
   if (mode === 'support') {
     $('legend').append(document.createTextNode('Pale: uncertain (class support below 0.8, or an offset document pair).'));
-    const offset = document.createElement('span'); offset.textContent = '◣ offset document pair'; $('legend').append(offset);
+    if (points.some(point => point.offset_pair_touched)) {
+      const offset = document.createElement('span'); offset.textContent = '◣ offset document pair'; $('legend').append(offset);
+    }
   } else { const flag = document.createElement('span'); flag.textContent = '◥ Wide record range'; $('legend').append(flag); }
 }
 function applyTransform() {
   $('map-stage').style.transform = `translate(${transform.x}px,${transform.y}px) scale(${transform.s})`;
+  $('map-stage').style.setProperty('--zoom-inverse', String(1 / transform.s));
   // Suppress unreadable bonds only in the browser; exported SVGs remain untouched.
   const overview = view === 'grid' && tileWidth * transform.s < 24;
   $('map-viewport').classList.toggle('color-overview', overview);

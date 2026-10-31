@@ -198,6 +198,30 @@ def test_workspace_dom_matches_javascript_controls():
     assert "offset document pair" in script
 
 
+def test_map_outlines_stay_fixed_in_screen_space_and_offset_legend_is_conditional():
+    script = (ASSETS / 'app.js').read_text(encoding='utf-8')
+    stylesheet = (ASSETS / 'app.css').read_text(encoding='utf-8')
+    inverse = 'var(--zoom-inverse, 1)'
+
+    assert "$('map-stage').style.setProperty('--zoom-inverse', String(1 / transform.s))" in script
+    assert "points.some(point => point.offset_pair_touched)" in script
+    for width in ('3.5', '2.5', '2'):
+        assert f'calc({width} * {inverse})' in stylesheet
+    for dash in ('6', '3', '1.5', '2.5'):
+        assert f'calc({dash} * {inverse})' in stylesheet
+    assert 'stroke-linecap: round' in stylesheet
+    for selector in (
+        '#map-stage g.selected-cell>rect',
+        '#map-stage circle.selected-cell',
+        '#map-stage circle.neighbor-shared',
+        '#map-stage circle.neighbor-grid_only',
+        '#map-stage circle.neighbor-representation_only',
+    ):
+        assert selector in stylesheet
+    for color in ('#0072B2', '#D55E00', '#7A5195', '#193e91'):
+        assert color in stylesheet
+
+
 @pytest.mark.parametrize('filename', ['app.js', 'app.css', 'example-map.svg', 'example-molecule.svg'])
 def test_workspace_assets_are_served_locally(local_server, filename):
     with request(local_server, '/' + filename, token=False) as response:

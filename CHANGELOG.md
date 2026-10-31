@@ -2,6 +2,9 @@
 
 ## 0.5.0 — 2026-10-29
 
+- Keep selected-cell and neighbor outlines at a fixed on-screen width while
+  zooming in the browser, and list the offset marker in the legend only when an
+  offset document pair touches a displayed entry.
 - Apply the offset-aware display rule: an entry touched by a flagged document
   pair is uncertain and pale, with `status_reason=offset_pair`, while all model
   probabilities remain unchanged. Record touched-entry counts in fits and
