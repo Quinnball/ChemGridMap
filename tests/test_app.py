@@ -331,6 +331,25 @@ def test_inspector_neighbor_terms_follow_representation():
     assert '${neighbors.representation_count} representation neighbors' not in script
 
 
+def test_inspector_kth_neighbor_line_is_compact():
+    script = (ASSETS / 'app.js').read_text(encoding='utf-8')
+
+    assert 'function ordinal(n)' in script
+    assert 'const lastTwo = n % 100;' in script
+    assert "lastTwo >= 11 && lastTwo <= 13 ? 'th'" in script
+    assert "({1: 'st', 2: 'nd', 3: 'rd'})[n % 10] || 'th'" in script
+    assert '[`${ordinal(neighbors.effective_k)} fingerprint neighbor`, `Tanimoto ${summary.neighbor_kth_similarity.toFixed(2)}`]' in script
+    assert '[`${ordinal(neighbors.effective_k)} representation neighbor`, `distance ${summary.neighbor_kth_distance.toFixed(2)}`]' in script
+    assert 'summary.neighbor_kth_label' not in script
+
+    suffixes = dict(re.findall(r"([123]): '([a-z]{2})'", script))
+    examples = {1: '1st', 2: '2nd', 3: '3rd', 4: '4th', 11: '11th', 12: '12th',
+                13: '13th', 21: '21st', 22: '22nd', 23: '23rd', 101: '101st'}
+    for number, expected in examples.items():
+        suffix = 'th' if 11 <= number % 100 <= 13 else suffixes.get(str(number % 10), 'th')
+        assert f'{number}{suffix}' == expected
+
+
 @pytest.mark.parametrize('filename', ['app.js', 'app.css', 'example-map.svg', 'example-molecule.svg'])
 def test_workspace_assets_are_served_locally(local_server, filename):
     with request(local_server, '/' + filename, token=False) as response:

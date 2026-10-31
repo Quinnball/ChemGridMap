@@ -405,6 +405,10 @@ function highlight() {
   });
 }
 function format(value) { return value == null ? '—' : typeof value === 'number' ? Number(value.toFixed(3)).toString() : String(value); }
+function ordinal(n) {
+  const lastTwo = n % 100;
+  return `${n}${lastTwo >= 11 && lastTwo <= 13 ? 'th' : ({1: 'st', 2: 'nd', 3: 'rd'})[n % 10] || 'th'}`;
+}
 function percentage(value) {
   if (value == null || Number.isNaN(value)) return '—';
   if (value >= 0.995) return '> 99%';
@@ -438,6 +442,8 @@ async function inspect(query) {
     $('cell-location').textContent = `Grid row ${row.grid_row} · column ${row.grid_col} (zero-based)`;
     $('evidence-summary').replaceChildren();
     const stats = document.createElement('dl');
+    const neighbors = summary.neighborhood;
+    const fingerprintNeighbors = job.options.representation === 'morgan';
     const fields = [['Median pChEMBL',summary.median_pchembl],['pChEMBL range',summary.minimum_pchembl == null ? null : `${format(summary.minimum_pchembl)}–${format(summary.maximum_pchembl)}`],['Source records',summary.n_records],['Distinct assays',summary.n_assays],['Distinct documents',summary.n_documents]];
     if (!summary.median_verified) fields.splice(0,fields.length,['Activity class',row.activity_class],['Source-record audit','Not available']);
     if (row.class_confidence != null) {
@@ -460,7 +466,10 @@ async function inspect(query) {
       ['Neighbor recall (tie-inclusive)', `${row.neighbor_shared_count}/${row.representation_neighbor_count} (${percentage(row.neighbor_recall)})`]);
     if (row.neighbor_recall_fixed_k != null) fields.push(
       ['Neighbor recall (fixed k)', percentage(row.neighbor_recall_fixed_k)]);
-    if (summary.neighbor_kth_label) fields.push(['Kth-neighbor similarity', summary.neighbor_kth_label]);
+    if (summary.neighbor_kth_similarity != null) fields.push(
+      [`${ordinal(neighbors.effective_k)} fingerprint neighbor`, `Tanimoto ${summary.neighbor_kth_similarity.toFixed(2)}`]);
+    if (summary.neighbor_kth_distance != null) fields.push(
+      [`${ordinal(neighbors.effective_k)} representation neighbor`, `distance ${summary.neighbor_kth_distance.toFixed(2)}`]);
     for (const [label,value] of fields) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = format(value); stats.append(dt,dd); }
     $('evidence-summary').append(stats);
     const marker = document.createElement('p'); marker.className = !summary.quality_annotations_verified && summary.median_verified ? 'flag' : summary.wide_record_range ? 'note' : 'micro';
@@ -473,8 +482,6 @@ async function inspect(query) {
       $('evidence-summary').append(warning);
     }
     if (summary.median_verified) { const verified = document.createElement('p'); verified.className = 'verified'; verified.textContent = summary.quality_annotations_verified ? 'Identity, counts, median, activity class and quality flags checked against retained records and saved rules.' : 'Record count and median verified; quality annotations remain unverified.'; $('evidence-summary').append(verified); }
-    const neighbors = summary.neighborhood;
-    const fingerprintNeighbors = job.options.representation === 'morgan';
     $('neighbor-title').textContent = `${fingerprintNeighbors ? 'Fingerprint' : 'Representation'} vs grid neighbors`;
     $('neighbor-summary').textContent = `${neighbors.representation} (${neighbors.representation_metric}), k=${neighbors.effective_k}: ${neighbors.shared_count} shared neighbors out of ${neighbors.representation_count} ${fingerprintNeighbors ? 'fingerprint' : 'representation'} neighbors and ${neighbors.grid_count} grid neighbors. Recall ${(100 * neighbors.recall).toFixed(1)}%.`;
     table(detail.neighbors, $('neighbor-table'));
