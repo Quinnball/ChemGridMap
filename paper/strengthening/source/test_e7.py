@@ -9,6 +9,7 @@ from e7_analysis import (
     dataset_counts,
     entry_equal_weights,
     pooled_stratified_auc,
+    recompute_hypotheses,
     two_stage_weights,
     weighted_auc,
 )
@@ -84,3 +85,28 @@ def test_entry_equal_weights_sum_to_entry_count():
         "entry": ["a1", "a1", "a2", "a3"],
     })
     assert np.isclose(entry_equal_weights(frame).sum(), frame.entry.nunique())
+
+
+def test_h7_excludes_unpaired_zero_differences():
+    frame = pd.DataFrame({
+        "target": ["paired", "unpaired"],
+        "endpoint": ["IC50", "IC50"],
+        "h3_difference": [0.2, 0.1],
+        "h4_difference": [-0.1, -0.1],
+        "h5_difference": [0.1, 0.1],
+        "h6_difference": [0.1, 0.1],
+        "h7_difference": [0.25, 0.0],
+        "h8_difference": [0.1, 0.1],
+    })
+
+    result = recompute_hypotheses(
+        frame,
+        "synthetic",
+        h7_eligible={"IC50": {"paired"}, "Ki": set()},
+    )
+    h7 = result.loc[
+        (result.hypothesis == "H7") & (result.endpoint == "IC50")
+    ].iloc[0]
+
+    assert h7.n_datasets == 1
+    assert h7.median_difference == 0.25

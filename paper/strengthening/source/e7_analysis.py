@@ -1093,7 +1093,18 @@ def build_shared_document_clusters(
 def recompute_hypotheses(
     dataset_values: pd.DataFrame,
     label: str,
+    h7_eligible: dict[str, set[str]] | None = None,
 ) -> pd.DataFrame:
+    if h7_eligible is None:
+        hypothesis_tests = pd.read_csv(E2 / "hypothesis_tests.csv")
+        h7_tests = hypothesis_tests.loc[
+            (hypothesis_tests.hypothesis == "H7")
+            & (hypothesis_tests.population == "all")
+        ]
+        h7_eligible = {
+            row.endpoint: set(str(row.eligible_targets).split(";"))
+            for row in h7_tests.itertuples(index=False)
+        }
     rows = []
     definitions = {
         "H3": ("h3_difference", "greater", "H3-H7"),
@@ -1106,7 +1117,12 @@ def recompute_hypotheses(
     for endpoint in ENDPOINTS:
         selected = dataset_values.loc[dataset_values.endpoint == endpoint]
         for hypothesis, (column, alternative, family) in definitions.items():
-            values = selected.loc[selected[column].notna(), column]
+            analysis_values = selected.loc[selected[column].notna()]
+            if hypothesis == "H7":
+                analysis_values = analysis_values.loc[
+                    analysis_values.target.isin(h7_eligible.get(endpoint, set()))
+                ]
+            values = analysis_values[column]
             statistic, p_value, count = one_sided_wilcoxon(values, alternative)
             low, high = bootstrap_median_ci(values)
             rows.append({
@@ -1126,12 +1142,16 @@ def recompute_hypotheses(
             })
     result = pd.DataFrame(rows)
     for (analysis, endpoint), locations in result.groupby(["analysis", "endpoint"]).groups.items():
-        local_h = result.loc[locations]
-        for family in ("H3-H7", "H8"):
-            family_locations = local_h.loc[local_h.correction_family == family].index
-            result.loc[family_locations, "holm_p"] = holm_adjust(
-                result.loc[family_locations, "raw_p"]
-            )
+        family_locations = result.loc[
+            locations
+        ].loc[lambda frame: frame.correction_family == "H3-H7"].index
+        result.loc[family_locations, "holm_p"] = holm_adjust(
+            result.loc[family_locations, "raw_p"]
+        )
+    for analysis, locations in result.loc[
+        result.correction_family == "H8"
+    ].groupby("analysis").groups.items():
+        result.loc[locations, "holm_p"] = holm_adjust(result.loc[locations, "raw_p"])
     return result
 
 
