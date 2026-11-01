@@ -11,15 +11,14 @@ import pandas as pd
 from scipy.stats import t
 
 
-ROOT = Path(__file__).resolve().parents[4]
-REV = ROOT / "project1/JCIM_reliability_revision_20261024"
-TASK_S = REV / "strengthening"
-E1B_SOURCE = REV / "strengthening/source/e1b_neighbors.py"
-E1B_ERRORS = REV / "strengthening/output/E1B/layout_activity_error.csv"
-LAYOUT_ROOT = ROOT / "chemgridmap/paper/output/reliability_v1"
+ROOT = Path(__file__).resolve().parents[3]
+S = ROOT / "paper/strengthening"
+E1B_SOURCE = S / "source/e1b_neighbors.py"
+E1B_ERRORS = S / "output/E1B/layout_activity_error.csv"
+LAYOUT_ROOT = ROOT / "paper/output/reliability_v1"
 CHECKPOINT_ROOT = LAYOUT_ROOT / "baselines/checkpoints"
-OUTPUT = TASK_S / "output/E4/layout_baselines_ten_seed.csv"
-VALIDATION = TASK_S / "qa/E4/e4d_validation.json"
+OUTPUT = S / "output/E4/layout_baselines_ten_seed.csv"
+VALIDATION = S / "qa/E4/e4d_validation.json"
 K = 10
 OCCUPANCY = 0.4
 ANALYSIS_ROLE = "post hoc"

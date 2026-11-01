@@ -59,7 +59,7 @@ CURATION_DEFAULTS = {
 
 def curation_settings(target_id: str, endpoint: str) -> dict:
     """原三靶点沿用冻结报告；其余靶点使用封存计划指定的默认整理。"""
-    frozen = ROOT / f"chemgridmap/paper/output/revision_v6/{target_id.lower()}"
+    frozen = ROOT / f"paper/output/revision_v6/{target_id.lower()}"
     report_path = frozen / f"{target_id.lower()}_curation_report.json"
     if endpoint == "IC50" and report_path.exists():
         params = json.loads(report_path.read_text())["parameters"]

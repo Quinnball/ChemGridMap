@@ -16,3 +16,11 @@ paper/output/
 validation_data/**/activity_offset_*.json
 validation_data/**/chemgridmap_output/
 validation_data/**/chemgridmap_output_umap/
+paper/strengthening/data/
+paper/strengthening/output/
+paper/strengthening/qa/
+paper/figures/data_final/
+paper/figures/data_fig2/
+paper/figures/data_fig6/
+paper/figures/output/
+paper/figures/qa/

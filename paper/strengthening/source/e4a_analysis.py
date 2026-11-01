@@ -9,13 +9,12 @@ from pathlib import Path
 import sys
 
 sys.dont_write_bytecode = True
-ROOT = Path(__file__).resolve().parents[4]
-REV = ROOT / "project1/JCIM_reliability_revision_20261024"
-S = REV / "strengthening"
+ROOT = Path(__file__).resolve().parents[3]
+S = ROOT / "paper/strengthening"
 sys.path[:0] = [
     str(S / "source"),
-    str(ROOT / "chemgridmap/paper"),
-    str(ROOT / "chemgridmap/src"),
+    str(ROOT / "paper"),
+    str(ROOT / "src"),
 ]
 
 import numpy as np

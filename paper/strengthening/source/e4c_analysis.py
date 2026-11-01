@@ -9,13 +9,12 @@ import pickle
 import sys
 
 sys.dont_write_bytecode = True
-ROOT = Path(__file__).resolve().parents[4]
-CGM = ROOT / "chemgridmap"
-REV = ROOT / "project1/JCIM_reliability_revision_20261024"
-S = REV / "strengthening"
+ROOT = Path(__file__).resolve().parents[3]
+CGM = ROOT
+S = ROOT / "paper/strengthening"
 OUT = S / "output/E4"
 QA = S / "qa/E4"
-sys.path[:0] = [str(S / "source"), str(CGM / "paper"), str(CGM / "src")]
+sys.path[:0] = [str(S / "source"), str(ROOT / "paper"), str(ROOT / "src")]
 
 import numpy as np
 import pandas as pd

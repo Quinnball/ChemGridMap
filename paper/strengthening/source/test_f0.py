@@ -119,11 +119,6 @@ def test_f0() -> None:
     assert_no_absolute_paths()
     assert_manifest_sources_and_counts(manifest)
 
-    archive = DATA_OUT / "archive_R0"
-    assert len(list(archive.glob("*.csv"))) == 15
-    assert (archive / "data_manifest.json").is_file()
-    assert (PLAN_OUT.parent / "archive_R0" / "gui_plan.md").is_file()
-
     # 3a remains the endpoint-wide target table from E2.
     metrics = data["e2_metrics_by_target"]
     b0 = metrics.loc[

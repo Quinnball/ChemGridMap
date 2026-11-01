@@ -19,8 +19,8 @@ import pandas as pd
 SOURCE = Path(__file__).resolve().parent
 STRENGTHENING = SOURCE.parent
 REV = STRENGTHENING.parent
-WORKSPACE = REV.parents[1]
-CGM = WORKSPACE / "chemgridmap"
+WORKSPACE = REV.parent
+CGM = WORKSPACE
 
 S_OUT = STRENGTHENING / "output"
 E2_OUT = S_OUT / "E2"
@@ -30,8 +30,8 @@ E2C_OUT = S_OUT / "E2c"
 E4_OUT = S_OUT / "E4"
 CGM_OUT = CGM / "paper" / "output" / "reliability_v1"
 
-DATA_OUT = REV / "prism_jcheminf" / "data"
-PLAN_OUT = REV / "prism_jcheminf" / "source" / "gui_plan.md"
+DATA_OUT = S_OUT / "F0"
+PLAN_OUT = DATA_OUT / "gui_plan.md"
 MANIFEST_OUT = DATA_OUT / "data_manifest.json"
 
 ENDPOINTS = ("IC50", "Ki")
@@ -907,7 +907,7 @@ def gui_plan() -> str:
 3. 图标题、图例、系列标签和面板字母均隐藏；在最终多面板布局中统一添加。不得增加 SD、SEM 或显著性标记。
 4. 端点颜色固定为 IC50 `{ENDPOINT_COLORS['IC50']}`、Ki `{ENDPOINT_COLORS['Ki']}`。显示状态颜色固定为 supported `{DISPLAY_STATUS_COLORS['supported']}`、uncertain `{DISPLAY_STATUS_COLORS['uncertain']}`。三靶点颜色保持 CA II `{TARGET_COLORS['CA II']}`、Thrombin `{TARGET_COLORS['Thrombin']}`、hERG `{TARGET_COLORS['hERG']}`。
 5. 每种布局颜色固定为 projection `{LAYOUT_COLORS['projection']}`、minimum_displacement `{LAYOUT_COLORS['minimum_displacement']}`、neighbor_refined `{LAYOUT_COLORS['neighbor_refined']}`、las_projection `{LAYOUT_COLORS['las_projection']}`、las_random `{LAYOUT_COLORS['las_random']}`、flas_random `{LAYOUT_COLORS['flas_random']}`、random `{LAYOUT_COLORS['random']}`。
-6. R0 旧表及旧清单已在 `data/archive_R0/` 和 `source/archive_R0/` 留档；本清单只使用根目录下新表。
+6. 本清单只使用当前输出目录中的新表。
 
 ## 图 3a — `3a_B0_disagreement.csv`
 
@@ -988,7 +988,7 @@ def gui_plan() -> str:
 
 ## 图 5c — 冻结图 3C
 
-- 直接复用 `chemgridmap/paper/output/reliability_v1/figure_data/Figure_3C_CHEMBL81688_neighbors.csv` 生成的现有面板；不新建数据表，不改数值、标签或布局。
+- 直接复用 `paper/output/reliability_v1/figure_data/Figure_3C_CHEMBL81688_neighbors.csv` 生成的现有面板；不新建数据表，不改数值、标签或布局。
 - 保留现有字体、线宽和点样式；最终只需缩放到图 5 的面板槽位并检查可读性。隐藏 P 图标题和图例不影响原有 Q/S/G/F 标记。
 
 ## 图 5d — `5d_layout_correlation.csv`

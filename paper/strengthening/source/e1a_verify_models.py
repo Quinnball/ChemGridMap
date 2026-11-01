@@ -50,7 +50,7 @@ def main():
     errors = {"B1": 0., "G-record": 0., "G-fixed": 0.}
     fold_count, record_count, merged_held_count = 0, 0, 0
     for target in TARGETS:
-        source = pd.read_csv(ROOT / f"chemgridmap/paper/output/revision_v6/{target}/{target}_retained_records.csv")
+        source = pd.read_csv(ROOT / f"paper/output/revision_v6/{target}/{target}_retained_records.csv")
         doc = document_values(source)
         rec = document_values(source, document="activity_id", merge_identical=False)
         assignments = entry_folds(doc, seed=20261024)
