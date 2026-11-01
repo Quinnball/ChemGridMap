@@ -55,3 +55,9 @@ def test_grouping_limit_error_is_recognized():
     assert not t1_scale.expected_limit_error(
         {"size_entries": 10000, "failure": {"message": "another error"}}
     )
+
+
+def test_peak_rss_is_missing_without_resource(monkeypatch):
+    monkeypatch.setattr(t1_scale, "resource", None)
+    assert t1_scale.peak_rss_bytes() is None
+    assert t1_scale.PEAK_RSS_UNAVAILABLE_REASON

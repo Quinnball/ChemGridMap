@@ -14,7 +14,6 @@ import json
 import os
 from pathlib import Path
 import platform
-import resource
 import subprocess
 import sys
 import time
@@ -23,6 +22,11 @@ from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
+
+try:
+    import resource
+except ImportError:
+    resource = None
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -39,6 +43,7 @@ ACTIVITIES = S / "data/chembl37_api/activities"
 SEED = 20261101
 HERG_ENTRIES = 9581
 SCALE_SIZES = (1000, 2000, 5000, 9581, 10000)
+PEAK_RSS_UNAVAILABLE_REASON = "Python resource module is unavailable on this platform"
 TARGETS = {"chembl205": "CA II", "chembl204": "Thrombin", "chembl240": "hERG"}
 CORE_RULES = (
     ("most_frequent", None),
@@ -82,6 +87,13 @@ def dump_json(path: Path, value: object) -> None:
         json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n",
         encoding="utf-8",
     )
+
+
+def peak_rss_bytes() -> int | None:
+    if resource is None:
+        return None
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return int(peak) if platform.system() == "Darwin" else int(peak * 1024)
 
 
 def snapshot_rev(*args, **kwargs):
@@ -766,12 +778,7 @@ def _run_instrumented(args: argparse.Namespace) -> int:
         if failure["stage"] is None:
             failure.update(stage="other", type=type(exc).__name__, message=str(exc))
     cli_wall_seconds = time.perf_counter() - started
-    cli_peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    cli_peak_bytes = (
-        int(cli_peak)
-        if platform.system() == "Darwin"
-        else int(cli_peak * 1024)
-    )
+    cli_peak_bytes = peak_rss_bytes()
 
     pipeline.prepare_molecules = originals["prepare"]
     pipeline.compute_representation = originals["fingerprints"]
@@ -860,11 +867,10 @@ def _run_instrumented(args: argparse.Namespace) -> int:
             "status": "complete" if exit_code == 0 else "failed",
         }
     )
-    process_peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    process_peak_bytes = (
-        int(process_peak)
-        if platform.system() == "Darwin"
-        else int(process_peak * 1024)
+    process_peak_bytes = peak_rss_bytes()
+    peak_values = (cli_peak_bytes, process_peak_bytes)
+    measured_peak_bytes = (
+        max(peak_values) if all(value is not None for value in peak_values) else None
     )
     record = {
         "size_entries": args.size,
@@ -876,8 +882,12 @@ def _run_instrumented(args: argparse.Namespace) -> int:
         "load_finish": list(os.getloadavg()),
         "cli_wall_seconds": cli_wall_seconds,
         "cli_peak_rss_bytes": cli_peak_bytes,
-        "peak_rss_bytes": max(cli_peak_bytes, process_peak_bytes),
-        "peak_rss_mib": max(cli_peak_bytes, process_peak_bytes) / 1024**2,
+        "peak_rss_bytes": measured_peak_bytes,
+        "peak_rss_mib": (
+            measured_peak_bytes / 1024**2
+            if measured_peak_bytes is not None
+            else None
+        ),
         "stages": stage_rows,
         "standalone_group_count": (
             int(standalone_group_count) if exit_code == 0 else None
@@ -891,20 +901,22 @@ def _run_instrumented(args: argparse.Namespace) -> int:
         "failure": failure,
         "command": display_command,
     }
+    if measured_peak_bytes is None:
+        record["peak_rss_unavailable_reason"] = PEAK_RSS_UNAVAILABLE_REASON
     dump_json(Path(args.result_json), record)
+    summary = {
+        "size": args.size,
+        "repeat": args.repeat,
+        "status": record["status"],
+        "wall_seconds": cli_wall_seconds,
+        "grouping_seconds": standalone_grouping_seconds,
+        "assignment": record["assignment_method"],
+        "failure": failure,
+    }
+    if measured_peak_bytes is None:
+        summary["peak_rss_unavailable_reason"] = PEAK_RSS_UNAVAILABLE_REASON
     print(
-        json.dumps(
-            {
-                "size": args.size,
-                "repeat": args.repeat,
-                "status": record["status"],
-                "wall_seconds": cli_wall_seconds,
-                "grouping_seconds": standalone_grouping_seconds,
-                "assignment": record["assignment_method"],
-                "failure": failure,
-            },
-            ensure_ascii=False,
-        ),
+        json.dumps(summary, ensure_ascii=False),
         flush=True,
     )
     return 0
@@ -1161,6 +1173,8 @@ def run_scale() -> dict:
             "structural_groups call on the CLI's exported coordinates."
         ),
     }
+    if resource is None:
+        metadata["peak_rss_unavailable_reason"] = PEAK_RSS_UNAVAILABLE_REASON
     dump_json(OUT / "timing_metadata.json", metadata)
     return {
         "records": flat,
@@ -1208,6 +1222,8 @@ def rerun_limit_probe() -> int:
         OUT / "scaling_summary.csv", index=False, na_rep="NA", lineterminator="\n"
     )
     metadata = json.loads((OUT / "timing_metadata.json").read_text(encoding="utf-8"))
+    if resource is None:
+        metadata["peak_rss_unavailable_reason"] = PEAK_RSS_UNAVAILABLE_REASON
     metadata["limit_probe"] = {
         "size_entries": 10001,
         "runs": 2,

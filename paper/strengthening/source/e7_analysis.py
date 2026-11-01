@@ -204,7 +204,9 @@ def two_stage_weights(frame: pd.DataFrame, seed: int, repetitions: int) -> np.nd
         return np.zeros((repetitions, 0))
     rng = np.random.default_rng(seed)
     keys = list(zip(frame.target.astype(str), frame.endpoint.astype(str)))
-    dataset_codes, datasets = pd.factorize(pd.Series(keys, dtype="string"), sort=True)
+    dataset_codes, datasets = pd.factorize(
+        pd.Series([str(key) for key in keys], dtype="string"), sort=True
+    )
     n_datasets = len(datasets)
     dataset_totals = dataset_counts(n_datasets, rng, repetitions)
     weights = np.zeros((repetitions, len(frame)), dtype=float)
