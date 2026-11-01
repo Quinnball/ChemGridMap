@@ -56,6 +56,36 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
 
     ``core_rule="coverage"`` selects the largest member scaffold or scaffold-network
     ring fragment that matches at least ``core_min_coverage`` of the members.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        Molecule table with canonical SMILES and structure metadata.
+    similarity : float, default 0.6
+        Morgan Tanimoto similarity threshold to a Butina center.
+    cluster_col : str, optional
+        Existing group-label column for external grouping.
+    cluster_source : str, optional
+        Provenance of external group labels.
+    radius : int, default 2
+        Morgan fingerprint radius.
+    n_bits : int, default 2048
+        Morgan fingerprint length.
+    core_rule : {"coverage", "most_frequent", "fmcs"}, default "most_frequent"
+        Group-core selection rule.
+    core_min_coverage : float, default 0.8
+        Coverage target for coverage and FMCS cores.
+    fmcs_timeout : int, default 1
+        FMCS search budget in seconds.
+
+    Returns
+    -------
+    grouped : pandas.DataFrame
+        Copy of ``data`` with group, scaffold and core-member columns.
+    summaries : list of dict
+        Per-group sizes, core choices, coverage and core evidence.
+    protocol : dict
+        Grouping and core-selection parameters and provenance.
     """
     if not 0 < similarity <= 1:
         raise ValueError("Group similarity must be in (0, 1].")

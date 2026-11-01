@@ -151,6 +151,7 @@ def curate_chembl_activity_data(
     structure_policy: str = "auto",
     assay_types: Optional[List[str]] = None,
     identity_conflicts: str = "error",
+    identity_rule: str = "inchikey",
 ) -> ChemblCurationResult:
     """Convert a ChEMBL activity export into an audited molecule-level table.
 
@@ -158,6 +159,41 @@ def curate_chembl_activity_data(
     metadata columns are present, the importer also enforces exact relations,
     nM standard units, accepted validity flags, the requested target, and the
     requested activity type.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        Raw ChEMBL activity export.
+    target_id : str, optional
+        Expected Target ChEMBL ID. When omitted, a single target in the input
+        is used; multiple targets require an explicit value.
+    activity_type : str, default "IC50"
+        Standard activity type retained.
+    lower_threshold : float, default 6.0
+        Upper pChEMBL bound of the inactive class.
+    upper_threshold : float, default 7.0
+        Lower pChEMBL bound of the active class.
+    conflict_range_threshold : float, default 1.0
+        Activity range above which repeated records are marked as wide.
+    exclude_potential_duplicates : bool, default True
+        Remove records flagged as potential duplicate citations.
+    molecule_identity : {"auto", "parent-id", "canonical-smiles"}, default "auto"
+        Entry-identity policy.
+    structure_policy : {"auto", "parent", "as-recorded"}, default "auto"
+        Parent-structure normalization policy.
+    assay_types : sequence of str, optional
+        Assay-type values retained.
+    identity_conflicts : {"error", "exclude"}, default "error"
+        Stop on conflicting identities or exclude and report them.
+    identity_rule : {"inchikey", "normalized-structure"}, default "inchikey"
+        Identity-conflict rule. ``normalized-structure`` reproduces analyses
+        predating version 0.5.
+
+    Returns
+    -------
+    ChemblCurationResult
+        Molecule-level annotations, retained and excluded records, conflicts,
+        structure variants and an audit report.
     """
     if lower_threshold >= upper_threshold:
         raise ValueError("lower_threshold must be smaller than upper_threshold.")
@@ -173,6 +209,11 @@ def curate_chembl_activity_data(
         raise ValueError("structure_policy must be auto, parent or as-recorded.")
     if identity_conflicts not in {"error", "exclude"}:
         raise ValueError("identity_conflicts must be 'error' or 'exclude'.")
+    requested_identity_rule = str(identity_rule).strip().lower()
+    if requested_identity_rule not in {"inchikey", "normalized-structure"}:
+        raise ValueError(
+            "identity_rule must be 'inchikey' or 'normalized-structure'."
+        )
     effective_structure_policy = structure_policy
     if structure_policy == "auto":
         effective_structure_policy = (
@@ -377,6 +418,17 @@ def curate_chembl_activity_data(
     representative_by_identity = {}
     if use_parent_identity and effective_structure_policy == "parent":
         for identity_key, group in group_records:
+            if requested_identity_rule == "normalized-structure":
+                structures = sorted(
+                    group["representation_smiles"].astype(str).unique()
+                )
+                if len(structures) > 1:
+                    conflict_rows.append({
+                        "molecule_identity_key": identity_key,
+                        "structures": ";".join(structures),
+                        "record_count": int(len(group)),
+                    })
+                continue
             inchikeys = sorted(group["_parent_standard_inchikey"].astype(str).unique())
             if len(inchikeys) > 1:
                 conflict_rows.append({
@@ -430,10 +482,14 @@ def curate_chembl_activity_data(
                 )
                 + "."
             )
-    conflict_keys = {
-        row["molecule_identity_key"]: row.pop("_standard_inchikeys")
-        for row in conflict_rows
-    }
+    conflict_keys = (
+        {
+            row["molecule_identity_key"]: row.pop("_standard_inchikeys")
+            for row in conflict_rows
+        }
+        if requested_identity_rule == "inchikey"
+        else {}
+    )
     identity_conflict_table = pd.DataFrame(
         conflict_rows,
         columns=("molecule_identity_key", "structures", "record_count"),
@@ -451,14 +507,21 @@ def curate_chembl_activity_data(
         ),
     )
     if conflict_rows and identity_conflicts == "error":
+        if requested_identity_rule == "normalized-structure":
+            raise ValueError(
+                "Molecule identities map to multiple normalized parent structures: {}. "
+                "Review the records, use identity_conflicts='exclude', or explicitly "
+                "use canonical-smiles identity.".format(
+                    ", ".join(row["molecule_identity_key"] for row in conflict_rows)
+                )
+            )
         raise ValueError(
             "Molecule identities map to multiple normalized parent structures "
             "with different standard InChIKeys: {}. "
             "Review the records, use identity_conflicts='exclude', or explicitly "
             "use canonical-smiles identity.".format(
                 ", ".join(
-                    f"{key} [{conflict_keys[key]}]"
-                    for key in sorted(conflict_keys)
+                    f"{key} [{conflict_keys[key]}]" for key in sorted(conflict_keys)
                 )
             )
         )
@@ -472,10 +535,16 @@ def curate_chembl_activity_data(
         if retained.empty:
             raise ValueError("No ChEMBL activity records remained after excluding identity conflicts.")
         group_records = list(retained.groupby("molecule_identity_key", sort=True))
-        warnings.append(
-            f"Excluded {len(conflict_rows)} parent identities with different "
-            f"standard InChIKeys and {len(conflict_records)} associated records."
-        )
+        if requested_identity_rule == "normalized-structure":
+            warnings.append(
+                f"Excluded {len(conflict_rows)} parent identities with multiple normalized "
+                f"structures and {len(conflict_records)} associated records."
+            )
+        else:
+            warnings.append(
+                f"Excluded {len(conflict_rows)} parent identities with different "
+                f"standard InChIKeys and {len(conflict_records)} associated records."
+            )
 
     molecule_rows = []
     for identity_key, group in group_records:
@@ -599,6 +668,7 @@ def curate_chembl_activity_data(
             ),
             "assay_types": assay_types,
             "identity_conflicts": identity_conflicts,
+            "identity_rule": requested_identity_rule,
         },
         "warnings": warnings,
     }

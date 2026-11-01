@@ -203,7 +203,13 @@ def load_and_curate_selected():
             if (target, endpoint) in cached:
                 records = cached[(target, endpoint)]
             else:
-                result = curate_activity_table(raw, target, endpoint)
+                # The sealed E2 plan fixes the code and the pre-0.5 identity rule.
+                result = curate_activity_table(
+                    raw,
+                    target,
+                    endpoint,
+                    identity_rule="normalized-structure",
+                )
                 records = result.retained_records
             context = prepare_target(records)
             entries = context["doc"].groupby("entry").size()

@@ -111,11 +111,31 @@ COLUMNS: Dict[str, dict] = {
     "comparison_id": _entry(MAP_FILES + ("structure_members.csv",), "Identifier used in structure comparisons."),
     "structure_group": _entry(MAP_FILES + ("structure_members.csv",), "Structure-group identifier."),
     "structure_group_color": _entry(MAP_FILES + ("structure_members.csv",), "Group layer color.", "hex RGB"),
-    "scaffold_smiles": _entry(MAP_FILES + ("structure_members.csv",), "Bemis–Murcko scaffold SMILES.", "SMILES"),
+    "scaffold_smiles": _entry(
+        MAP_FILES + ("structure_members.csv",),
+        (
+            "Bemis–Murcko scaffold SMILES. Charge-separated groups can leave "
+            "representation artifacts after removal of the negative oxygen: "
+            "sulfoxides may appear as `[SH+]` and N-oxides as `[nH+]`. These "
+            "scaffold strings are not neutral structures. Sulfones retain "
+            "`S(=O)(=O)`, so sulfoxides and sulfones yield different scaffolds."
+        ),
+        "SMILES",
+    ),
     "name": _entry(("structure_members.csv",), "Supplied molecule name when present."),
     "core_member": _entry(("structure_members.csv",), "Whether the member is covered by the group core.", "boolean"),
     "core_rule": _entry(("structure_members.csv",), "Core-selection rule.", "coverage, most_frequent or fmcs"),
-    "core_smiles": _entry(("structure_members.csv",), "Selected group core SMILES.", "SMILES"),
+    "core_smiles": _entry(
+        ("structure_members.csv",),
+        (
+            "Selected group core SMILES. Charge-separated groups can leave "
+            "representation artifacts after removal of the negative oxygen: "
+            "sulfoxides may appear as `[SH+]` and N-oxides as `[nH+]`. These "
+            "core strings are not neutral structures. Sulfones retain "
+            "`S(=O)(=O)`, so sulfoxides and sulfones yield different cores."
+        ),
+        "SMILES",
+    ),
     "core_smarts": _entry(("structure_members.csv",), "FMCS core SMARTS when available.", "SMARTS"),
     "core_coverage_target": _entry(("structure_members.csv",), "Requested core-coverage target.", "fraction 0–1"),
     "map_name": _entry(("metrics.csv",), "Map/output prefix."),
@@ -303,7 +323,7 @@ def output_columns_markdown(frames=None) -> str:
 
 
 def api_markdown() -> str:
-    """Render signatures and the first docstring paragraph for every public name."""
+    """Render signatures and complete docstrings for every public name."""
     lines = ["# Public API", ""]
     for name in __all__:
         value = getattr(chemgridmap, name)
@@ -311,8 +331,11 @@ def api_markdown() -> str:
             signature = str(inspect.signature(value))
         except (TypeError, ValueError):
             signature = "()"
-        summary = (inspect.getdoc(value) or "").split("\n\n", 1)[0]
-        lines.extend([f"## `{name}`", "", "```python", f"{name}{signature}", "```", "", summary, ""])
+        documentation = inspect.getdoc(value) or ""
+        lines.extend([
+            f"## `{name}`", "", "```python", f"{name}{signature}", "```", "",
+            documentation, "",
+        ])
     return "\n".join(lines)
 
 

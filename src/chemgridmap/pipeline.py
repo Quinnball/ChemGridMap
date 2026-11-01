@@ -106,6 +106,117 @@ def build_grid_map(
     run reports per-molecule neighbour reliability (``neighbor_recall``).
     Extra color layers use ``map_color_formats`` (SVG/PNG); ``None`` keeps SVG
     plus PNG when enabled by ``output_formats``. Main-map formats are unchanged.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        Molecule table, or generic activity-record table when ``compound_col``
+        is supplied.
+    output_dir : pathlib.Path, optional
+        Directory for map files and the run manifest. No files are written when
+        omitted.
+    name : str, default "grid_map"
+        Output filename prefix and map name.
+    smiles_col : str, default "smiles"
+        SMILES column consumed by the map workflow.
+    value_col : str, optional
+        Numeric activity column.
+    label_col : str, optional
+        Activity-class label column.
+    representation : {"morgan", "descriptors", "embedding"}, default "morgan"
+        Molecular representation used for projection and neighbour diagnostics.
+    projection : {"pca", "tsne", "umap"}, default "umap"
+        Two-dimensional projection method.
+    umap_metric : {"auto", "euclidean", "jaccard", "cosine"}, default "auto"
+        UMAP distance; auto uses Jaccard for Morgan fingerprints.
+    x_col, y_col : str, optional
+        Existing coordinate columns supplied together instead of a projection.
+    embedding_prefix : str, default "emb_"
+        Prefix of numeric embedding columns.
+    radius : int, default 2
+        Morgan fingerprint radius.
+    n_bits : int, default 2048
+        Morgan fingerprint length.
+    lower_threshold : float, default 6.0
+        Upper pActivity bound of the inactive class.
+    upper_threshold : float, default 7.0
+        Lower pActivity bound of the active class.
+    duplicate_policy : {"error", "first", "keep"}, default "error"
+        Handling of repeated canonical structures.
+    random_state : int, default 42
+        Seed for projection and deterministic tie-breaking.
+    k : int, default 10
+        Neighbour count used for reliability diagnostics.
+    trustworthiness_sample_size : int, default 3000
+        Maximum deterministic sample used for trustworthiness.
+    grid_padding : int, optional
+        Explicit padding added to each grid side.
+    grid_occupancy : float, default 0.40
+        Target fraction of occupied candidate cells when padding is omitted.
+    coordinate_scaling : {"isotropic", "independent"}, default "isotropic"
+        Projection normalization mode.
+    assignment_method : {"auto", "dense", "sparse"}, default "auto"
+        Grid-assignment solver.
+    dense_max_pairs : int, default 20000000
+        Pair-count limit used when choosing dense assignment.
+    sparse_neighbors : int, default 128
+        Initial candidate cells per molecule for sparse assignment.
+    render_detail : {"auto", "full", "overview"}, default "auto"
+        Structure rendering detail.
+    output_formats : sequence of {"svg", "png", "pdf"}, optional
+        Main-map formats.
+    color_map : dict, optional
+        Overrides for activity- or reliability-layer colors.
+    provenance : dict, optional
+        Additional source and parameter metadata for the run manifest.
+    sparse_adaptive : bool, default True
+        Expand sparse candidates when initial candidates are insufficient.
+    sparse_max_neighbors : int, default 1024
+        Candidate cap for adaptive sparse assignment.
+    grouping : {"butina", "external", "none"}, default "butina"
+        Structure-grouping method.
+    group_similarity : float, default 0.6
+        Morgan Tanimoto threshold to a Butina center.
+    cluster_col, cluster_source : str, optional
+        External group labels and their provenance.
+    grid_refinement : {"neighbors", "none"}, default "neighbors"
+        Neighbour-guided refinement mode.
+    core_rule : {"coverage", "most_frequent", "fmcs"}, default "coverage"
+        Group-core selection rule.
+    core_min_coverage : float, default 0.8
+        Coverage target for coverage and FMCS cores.
+    fmcs_timeout : int, default 1
+        FMCS search budget in seconds.
+    compound_col : str, optional
+        Compound identifier for generic activity records.
+    document_col : str, optional
+        Source-document column for generic activity support.
+    relation_col : str, optional
+        Generic relation column; only exact ``=`` records are retained.
+    evidence_model : {"gaussian", "exclude-flagged"}, default "gaussian"
+        Activity-support model for generic records.
+    merge_identical_documents : bool, default True
+        Merge identical entry values across documents as one evidence unit.
+    confidence_threshold : float, default 0.8
+        Minimum class support for a supported display.
+    offset_display : {"none", "uncertain"}, default "none"
+        Keep support-only display or show touched entries as uncertain.
+    offset_min_shared : int, default 3
+        Minimum shared entries for an evaluated document pair.
+    offset_threshold : float, default 1.0
+        Minimum absolute median offset in log units.
+    offset_sign_agreement : float, default 0.8
+        Minimum sign agreement for a systematic offset.
+    map_color_modes : sequence of str, optional
+        Additional reliability layers to export.
+    map_color_formats : sequence of {"svg", "png"}, optional
+        Formats for additional reliability layers.
+
+    Returns
+    -------
+    GridMapResult
+        Prepared data, representation, projection, grid, metrics, groups and
+        output-file paths.
     """
     started = time.perf_counter()
     if compound_col:
@@ -389,7 +500,10 @@ def build_grid_map(
         if groups:
             output_files.update(save_group_outputs(result_data, groups, grouping_protocol, output_dir, name))
         if confidence_fit is not None:
-            offsets = pd.DataFrame(confidence_fit["document_offsets"], columns=DOCUMENT_OFFSET_COLUMNS)
+            evaluated_offsets = confidence_fit.get(
+                "document_pair_offsets", confidence_fit["document_offsets"]
+            )
+            offsets = pd.DataFrame(evaluated_offsets, columns=DOCUMENT_OFFSET_COLUMNS)
             offsets["total_evaluated_pairs"] = confidence_fit["document_pair_count"]
             offsets["total_observed_pairs"] = confidence_fit["observed_document_pair_count"]
             offsets["total_possible_pairs"] = confidence_fit["document_pair_possible_count"]
@@ -455,6 +569,7 @@ def build_grid_map(
                 **reliability_parameters,
             },
             "activity_confidence": confidence_fit,
+            "warnings": list(confidence_fit.get("warnings", [])) if confidence_fit else [],
             "assignment": assignment_diagnostics,
             "grid_refinement": refinement_diagnostics,
             "structure_grouping": grouping_protocol,

@@ -47,6 +47,7 @@ def test_document_offsets_use_entry_document_medians_and_count_pairs():
     assert keyed.loc[["E4", "E5"], "discordant_documents"].tolist() == ["", ""]
     assert fit["document_pair_count"] == fit["discordant_document_pair_count"] == 1
     assert fit["document_offsets_top10"] == fit["document_offsets"] == offsets.to_dict("records")
+    assert fit["document_pair_offsets"] == offsets.to_dict("records")
     json.dumps(fit, allow_nan=False)
     pd.testing.assert_frame_equal(records, original)
 

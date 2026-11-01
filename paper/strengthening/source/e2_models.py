@@ -76,7 +76,12 @@ def curation_settings(target_id: str, endpoint: str) -> dict:
     return {**CURATION_DEFAULTS, "activity_type": endpoint}
 
 
-def curate_activity_table(raw: pd.DataFrame, target_id: str, endpoint: str):
+def curate_activity_table(
+    raw: pd.DataFrame,
+    target_id: str,
+    endpoint: str,
+    identity_rule: str = "normalized-structure",
+):
     """Detect API columns with CGM normalization without rewriting assay-time formats here."""
     params = curation_settings(target_id, endpoint)
     return curate_chembl_activity_data(
@@ -90,6 +95,7 @@ def curate_activity_table(raw: pd.DataFrame, target_id: str, endpoint: str):
         molecule_identity=params["molecule_identity_requested"],
         structure_policy=params["structure_policy"],
         assay_types=params["assay_types"],
+        identity_rule=identity_rule,
     )
 
 

@@ -52,12 +52,15 @@ minimum bounds and have not been tested separately.
 
 ## Quick start
 
-The source tree includes a CA II export. Generate a map from it without a
-download:
+Generate a map from the CA II export bundled in the installed package:
 
 ```bash
-chemgridmap src/chemgridmap/data/chembl205_ic50.csv --input-format chembl --target-id CHEMBL205 --output-dir caii_map
+chemgridmap --example caii --output-dir caii_map
 ```
+
+`--example caii` selects the packaged data and sets
+`--input-format chembl --target-id CHEMBL205`; it cannot be combined with an
+input-file argument.
 
 To use your own export, download the activities for ChEMBL target CA II
 (`CHEMBL205`), include
@@ -318,7 +321,9 @@ Main exported columns:
 
 Every emitted column is defined in
 [`docs/OUTPUT_COLUMNS.md`](docs/OUTPUT_COLUMNS.md); public signatures and
-docstring summaries are in [`docs/API.md`](docs/API.md). Regenerate them with:
+complete docstrings are in [`docs/API.md`](docs/API.md). The mapping between
+CLI options, Python arguments, manifest fields and output columns is in
+[`docs/NAMES.md`](docs/NAMES.md). Regenerate the reference files with:
 
 ```bash
 python -m chemgridmap.columns \

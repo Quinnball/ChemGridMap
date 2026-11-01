@@ -7,8 +7,9 @@ VENV_PYTHON := .venv/bin/python
 	paper-e5 paper-e5b paper-e5c paper-e5d paper-e6-prepare \
 	paper-e2c paper-e6-regression paper-e6 paper-e7 paper-e9 \
 	paper-e10 paper-e11 paper-e12a paper-e12b paper-posthoc paper-t1 \
-	paper-e15 paper-e16 paper-all \
-	paper-fig2-data paper-figures-data paper-figures paper-figure6-capture \
+	paper-e15 paper-e16 paper-e22 paper-all \
+	paper-fig2-data paper-figures-data paper-figures paper-figures-archived \
+	paper-figure6-capture \
 	paper-reproduce-tests
 setup:
 	$(PYTHON) -c "import sys; assert sys.version_info >= (3, 10), 'Use Python 3.10 or newer, not the legacy chemicalmap environment'"
@@ -56,7 +57,7 @@ PAPER_FIG2 := $(VENV_PYTHON) -m chemgridmap.cli $(PAPER_FIG2_INPUT) \
 	--random-state 42 -k 10 --grid-occupancy 0.4 \
 	--assignment-method dense --render-detail overview \
 	--grid-refinement neighbors --core-min-coverage 0.8 \
-	--support-level 0.8 --offset-display uncertain \
+	--support-level 0.8 \
 	--offset-min-shared 3 --offset-min-difference 1 \
 	--offset-sign-agreement 0.8 \
 	--map-color-modes activity class_support neighbor_recall structure_group \
@@ -125,7 +126,7 @@ paper-e10: paper-e6
 paper-e11: paper-e5c
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e11_analysis.py
 
-paper-e12a: paper-e11 paper-e9
+paper-e12a: paper-e7 paper-e11 paper-e9
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e12a_rule_calibration.py
 
 paper-e12b: paper-e7 paper-e9
@@ -136,6 +137,9 @@ paper-e15: paper-e11 paper-e12a
 
 paper-e16: paper-e15
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e16_identity_sensitivity.py
+
+paper-e22: paper-e15
+	$(VENV_PYTHON) $(PAPER_SOURCE)/e22_class_reliability.py
 
 paper-posthoc: paper-e5 paper-e5b paper-e5c paper-e5d paper-e6 paper-e7 paper-e9 paper-e10 paper-e11 paper-e12a paper-e12b
 
@@ -158,7 +162,10 @@ paper-figure6-capture: check
 paper-figures: paper-figures-data paper-fig2-data
 	$(VENV_PYTHON) paper/figures/source/build_figures.py
 
+paper-figures-archived: check
+	$(VENV_PYTHON) paper/figures/source/build_figures.py
+
 paper-reproduce-tests: check
 	$(VENV_PYTHON) -m pytest paper/strengthening/source paper/figures/source
 
-paper-all: paper paper-e4 paper-e12c paper-posthoc paper-e16 paper-t1 paper-figure6-capture paper-figures paper-structure
+paper-all: paper paper-e4 paper-e12c paper-posthoc paper-e16 paper-e22 paper-t1 paper-figure6-capture paper-figures paper-structure

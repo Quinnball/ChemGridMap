@@ -48,6 +48,11 @@ def test_caii_default_reliability_values(caii_runs):
     assert fit["max_entry_sum_of_squares_share"] == pytest.approx(0.6308, abs=5e-4)
     assert fit["offset_display"] == "none"
     assert any("CHEMBL20" in warning for warning in fit["warnings"])
+    offsets = pd.read_csv(caii_runs["umap"].files["map_document_offsets.csv"])
+    assert len(offsets) == 4
+    assert not offsets.systematic_offset.any()
+    assert fit["document_offsets"] == []
+    assert len(fit["document_pair_offsets"]) == 4
     assert np.nanmean(data.neighbor_recall) == pytest.approx(0.585, abs=0.02)
     assert np.nanmean(data.neighbor_recall_fixed_k) == pytest.approx(0.536, abs=0.02)
 

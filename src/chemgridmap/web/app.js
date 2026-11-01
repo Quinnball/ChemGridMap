@@ -364,6 +364,7 @@ function renderLegend(mode) {
     if (mode === 'support') $('legend').append(legendItem(fadedColors[label], 'uncertain'));
   }
   if (mode === 'support') {
+    // Jobs created before 99b57ad always showed touched entries as uncertain.
     const offsetDisplay = job.options.offset_display || 'uncertain';
     const suffix = offsetDisplay === 'uncertain' ? ', or an offset document pair' : '';
     $('legend').append(document.createTextNode(`Pale: uncertain (class support below ${job.options.support_level ?? .8}${suffix}).`));

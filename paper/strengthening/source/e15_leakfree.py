@@ -613,7 +613,13 @@ def curate_e11(records_by_key: dict) -> tuple[dict, pd.DataFrame]:
             else np.nan
         )
         try:
-            result = curate_activity_table(raw, target, endpoint)
+            # E15 R5 checks the E11 execution under its sealed pre-0.5 rule.
+            result = curate_activity_table(
+                raw,
+                target,
+                endpoint,
+                identity_rule="normalized-structure",
+            )
             retained_records = result.retained_records
             records_by_key[(target, endpoint)] = retained_records
             curated[(target, endpoint)] = retained_records

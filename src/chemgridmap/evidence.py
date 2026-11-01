@@ -284,9 +284,52 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
                                  offset_sign_agreement: float = 0.8):
     """Add document-balanced estimates and class confidence to entry-level annotations.
 
-    Returns the annotated copy and the fit. Displayed classes, medians and
-    source records are unchanged; the added columns describe how strongly the
-    evidence units support the displayed class.
+    Displayed classes, medians and source records are unchanged. Added columns
+    describe how strongly the evidence units support the displayed class.
+
+    Parameters
+    ----------
+    molecules : pandas.DataFrame
+        One row per molecular entry, containing ``entry`` and ``displayed``.
+    records : pandas.DataFrame
+        Source records with entry, activity-value and document columns.
+    lower : float, default 6.0
+        Upper pActivity bound of the inactive class.
+    upper : float, default 7.0
+        Lower pActivity bound of the active class.
+    confidence_threshold : float, default 0.8
+        Minimum class support used for a supported display.
+    model : {"gaussian", "exclude-flagged", "moderated_t"}, default "gaussian"
+        Evidence model. ``exclude-flagged`` removes units containing documents
+        in systematic offset pairs; ``moderated_t`` is available to Python callers.
+    fit : dict, optional
+        Precomputed variance fit to reuse.
+    entry : str, default "molecule_identity_key"
+        Entry identifier column in ``molecules`` and ``records``.
+    value : str, default "pchembl_value"
+        Activity-value column in ``records``.
+    document : str, default "document_chembl_id"
+        Source-document column in ``records``.
+    displayed : str, default "activity_pchembl"
+        Displayed activity column whose class receives support values.
+    merge_identical : bool, default True
+        Merge documents reporting the same entry value into one evidence unit.
+    offset_display : {"none", "uncertain"}, default "none"
+        Keep support-only display or show touched entries as uncertain.
+    offset_min_shared : int, default 3
+        Minimum shared entries for an evaluated document pair.
+    offset_threshold : float, default 1.0
+        Minimum absolute median offset in log units.
+    offset_sign_agreement : float, default 0.8
+        Minimum fraction of paired differences sharing the median sign.
+
+    Returns
+    -------
+    annotated : pandas.DataFrame
+        Copy of ``molecules`` with evidence, support and offset columns.
+    fit : dict
+        Sigma-document estimate, thresholds, diagnostics, evaluated document
+        pairs and warnings.
     """
     if not 0.5 < confidence_threshold < 1.0:
         raise ValueError("confidence_threshold must lie between 0.5 and 1.")
@@ -433,7 +476,9 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
                 "observed_document_pair_count": offsets.attrs["observed_document_pair_count"],
                 "document_pair_possible_count": offsets.attrs["document_pair_possible_count"],
                 "discordant_document_pair_count": len(flagged), "document_offsets_top10": flagged[:10],
-                "document_offsets": flagged, "document_offset_min_shared": offsets.attrs["min_shared"],
+                "document_offsets": flagged,
+                "document_pair_offsets": offsets.to_dict("records"),
+                "document_offset_min_shared": offsets.attrs["min_shared"],
                 "document_offset_threshold": offsets.attrs["offset_threshold"],
                 "document_offset_sign_agreement": offsets.attrs["sign_agreement"],
                 "offset_display": offset_display,
@@ -445,7 +490,12 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
     max_df_share = fit.get("max_entry_degrees_of_freedom_share")
     max_sumsq_share = fit.get("max_entry_sum_of_squares_share")
     warnings = list(fit.get("warnings", []))
-    if max(max_df_share or 0.0, max_sumsq_share or 0.0) > 0.3:
+    if fit.get("method") == "literature_fallback":
+        warnings.append(
+            "σ_doc was not estimated: fewer than 5 entries have two or more "
+            "evidence units; the literature value 0.64 is used"
+        )
+    elif max(max_df_share or 0.0, max_sumsq_share or 0.0) > 0.3:
         warnings.append(
             f"Entry {fit.get('max_entry_id')} supplies "
             f"{float(max_df_share or 0.0):.1%} of σ_doc degrees of freedom and "
@@ -485,6 +535,54 @@ def prepare_generic_activity_records(
     Each compound ID is one entry. Values must already be pActivity values
     (-log10 M). If a document column is supplied, class support is calculated
     by default with the same evidence functions used by the ChEMBL path.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        Generic activity-record table.
+    compound_column : str
+        Compound identifier column.
+    value_column : str
+        pActivity value column.
+    document_column : str, optional
+        Source-document column; required when ``confidence`` is true.
+    smiles_column : str
+        Molecular structure column.
+    relation_column : str, optional
+        Relation column; only exact ``=`` records are retained.
+    lower : float, default 6.0
+        Upper pActivity bound of the inactive class.
+    upper : float, default 7.0
+        Lower pActivity bound of the active class.
+    conflict_range_threshold : float, default 1.0
+        Activity range above which repeated records are marked as wide.
+    confidence : bool, default True
+        Estimate evidence-unit class support.
+    confidence_threshold : float, default 0.8
+        Minimum class support for a supported display.
+    merge_identical : bool, default True
+        Merge documents reporting the same entry value into one evidence unit.
+    evidence_model : {"gaussian", "exclude-flagged"}, default "gaussian"
+        Activity-support model.
+    offset_display : {"none", "uncertain"}, default "none"
+        Keep support-only display or show touched entries as uncertain.
+    offset_min_shared : int, default 3
+        Minimum shared entries for an evaluated document pair.
+    offset_threshold : float, default 1.0
+        Minimum absolute median offset in log units.
+    offset_sign_agreement : float, default 0.8
+        Minimum sign agreement for a systematic offset.
+
+    Returns
+    -------
+    molecules : pandas.DataFrame
+        One curated row per compound.
+    records : pandas.DataFrame
+        Retained source records with normalized activity fields.
+    fit : dict or None
+        Activity-confidence diagnostics, or ``None`` when disabled.
+    report : dict
+        Input counts, excluded records and warnings.
     """
     required = [compound_column, value_column, smiles_column]
     if confidence:

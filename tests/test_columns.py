@@ -35,6 +35,21 @@ def test_generated_schema_documents_match():
     assert (ROOT / "docs" / "API.md").read_text(encoding="utf-8") == api_markdown()
 
 
+def test_api_reference_contains_full_parameter_docs():
+    generated = api_markdown()
+    for name in (
+        "build_grid_map",
+        "curate_chembl_activity_data",
+        "prepare_generic_activity_records",
+        "annotate_activity_confidence",
+        "inspect_entry",
+        "structural_groups",
+    ):
+        section = generated.split(f"## `{name}`", 1)[1].split("\n## `", 1)[0]
+        assert "Parameters\n----------" in section
+        assert "Returns\n-------" in section
+
+
 def chembl_row(parent_id, smiles, pchembl=6.5):
     return {
         "Molecule ChEMBL ID": f"{parent_id}_record",

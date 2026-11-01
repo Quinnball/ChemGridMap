@@ -108,6 +108,29 @@ class IdentityVariantTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             curate_chembl_activity_data(data, identity_conflicts="error")
 
+    def test_identity_rule_selects_writing_variant_or_normalized_structure(self):
+        data = pd.DataFrame([
+            chembl_row("CHEMBL_RULE", "O=c1cccc[nH]1", 6.4),
+            chembl_row("CHEMBL_RULE", "Oc1ccccn1", 6.6),
+        ])
+
+        current = curate_chembl_activity_data(data, identity_rule="inchikey")
+        self.assertEqual(len(current.molecules), 1)
+        self.assertEqual(len(current.structure_variants), 2)
+        self.assertEqual(current.report["parameters"]["identity_rule"], "inchikey")
+
+        with self.assertRaises(ValueError) as context:
+            curate_chembl_activity_data(
+                data,
+                identity_rule="normalized-structure",
+            )
+        self.assertEqual(
+            str(context.exception),
+            "Molecule identities map to multiple normalized parent structures: "
+            "CHEMBL_RULE. Review the records, use identity_conflicts='exclude', "
+            "or explicitly use canonical-smiles identity.",
+        )
+
     def test_variant_csv_is_written_only_when_present(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)

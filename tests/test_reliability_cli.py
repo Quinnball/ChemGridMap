@@ -70,9 +70,11 @@ def test_cli_evidence_policy_offsets_layers_and_archive(
         assert set(data.status_reason) <= {"supported", "low_support"}
     assert data.wide_record_range.equals(data.is_conflicted)
     offsets = pd.read_csv(tmp_path / "check_document_offsets.csv")
-    assert len(offsets) == 2
+    assert len(offsets) == 3
     assert offsets.shared_entries.eq(6).all()
-    assert offsets.median_offset.eq(2).all()
+    assert offsets.systematic_offset.sum() == 2
+    assert (offsets.loc[~offsets.systematic_offset, "median_offset"] == 0).all()
+    assert (offsets.loc[offsets.systematic_offset, "median_offset"] == 2).all()
     assert offsets.total_evaluated_pairs.eq(3).all()
     manifest = json.loads(
         (tmp_path / "check_run_manifest.json").read_text(encoding="utf-8")
@@ -89,12 +91,15 @@ def test_cli_evidence_policy_offsets_layers_and_archive(
     assert params["offset_min_shared"] == 3
     assert params["offset_threshold"] == 1.0
     assert params["offset_sign_agreement"] == 0.8
+    assert manifest["source"]["curation_parameters"]["identity_rule"] == "inchikey"
     assert params["activity_confidence"] is True
     assert params["grid_refinement"] == "neighbors"
     assert params["core_rule"] == "coverage"
     assert params["map_color_modes"] == modes
     assert params["map_color_formats"] is None
     assert manifest["activity_confidence"]["discordant_document_pair_count"] == 2
+    assert len(manifest["activity_confidence"]["document_offsets"]) == 2
+    assert len(manifest["activity_confidence"]["document_pair_offsets"]) == 3
     assert manifest["activity_confidence"]["offset_pair_touched_entry_count"] == 6
     assert manifest["activity_confidence"]["sigma_doc"] == manifest["activity_confidence"]["tau"]
     assert manifest["activity_confidence"]["max_entry_id"]
@@ -135,7 +140,7 @@ def test_cli_reliability_help_and_legacy_switches():
                    "--document-column", "--relation-column", "--smiles-column", "--value-column",
                    "--support-level", "--offset-display", "--offset-min-shared",
                    "--offset-min-difference", "--offset-sign-agreement",
-                   "--identity-conflicts"):
+                   "--identity-conflicts", "--identity-rule"):
         assert option in help_text
     normalized_help = " ".join(help_text.split())
     assert "Coverage target for coverage/FMCS rules; range: 0.5–1." in normalized_help
@@ -144,6 +149,7 @@ def test_cli_reliability_help_and_legacy_switches():
     assert defaults.grid_refinement == "neighbors"
     assert defaults.core_rule == "coverage"
     assert defaults.evidence_model == "gaussian"
+    assert defaults.identity_rule == "inchikey"
     assert defaults.fmcs_timeout == 1
     args = parser.parse_args(["input.csv", "--grid-refinement", "none", "--core-rule", "most_frequent",
                               "--no-activity-confidence"])
@@ -159,11 +165,51 @@ def test_bundled_caii_quick_start_command_parses():
     readme = (root / "README.md").read_text(encoding="utf-8")
     command = next(
         line.strip() for line in readme.splitlines()
-        if line.startswith("chemgridmap src/chemgridmap/data/chembl205_ic50.csv")
+        if line.startswith("chemgridmap --example caii")
     )
     args = build_parser().parse_args(shlex.split(command)[1:])
-    assert args.input == Path("src/chemgridmap/data/chembl205_ic50.csv")
-    assert args.input_format == "chembl" and args.target_id == "CHEMBL205"
+    assert args.input is None and args.example == "caii"
+
+
+def test_cli_example_rejects_an_input_file(tmp_path):
+    source = tmp_path / "input.csv"
+    source.write_text("smiles\nCCO\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as error:
+        main([str(source), "--example", "caii"])
+    assert error.value.code == 2
+
+
+def test_cli_example_matches_source_path_values(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    source = root / "src/chemgridmap/data/chembl205_ic50.csv"
+    common = [
+        "--projection", "pca", "--grouping", "none", "--grid-padding", "2",
+        "--render-detail", "overview", "--output-formats", "svg",
+    ]
+    source_dir = tmp_path / "source"
+    example_dir = tmp_path / "example"
+    assert main([
+        str(source), "--input-format", "chembl", "--target-id", "CHEMBL205",
+        "--output-dir", str(source_dir), "--name", "caii", *common,
+    ]) == 0
+    assert main([
+        "--example", "caii", "--output-dir", str(example_dir), "--name", "caii",
+        *common,
+    ]) == 0
+    source_map = pd.read_csv(source_dir / "caii_grid_coordinates.csv")
+    example_map = pd.read_csv(example_dir / "caii_grid_coordinates.csv")
+    pd.testing.assert_series_equal(
+        source_map.set_index("molecule_identity_key").class_status,
+        example_map.set_index("molecule_identity_key").class_status,
+    )
+    source_fit = json.loads(
+        (source_dir / "caii_run_manifest.json").read_text(encoding="utf-8")
+    )["activity_confidence"]
+    example_fit = json.loads(
+        (example_dir / "caii_run_manifest.json").read_text(encoding="utf-8")
+    )["activity_confidence"]
+    assert source_fit["sigma_doc"] == example_fit["sigma_doc"]
+    assert example_map.class_status.eq("supported").sum() == 506
 
 
 @pytest.mark.parametrize("arguments", [
@@ -262,6 +308,44 @@ def test_generic_activity_records_match_chembl_annotation_numerically(tmp_path):
         rtol=0.0,
         atol=1e-12,
     )
+
+
+def test_generic_record_fallback_warning_reaches_cli_and_manifest(tmp_path, capsys):
+    rows = []
+    for compound, smiles, value in (
+        ("CMP1", "CCO", 5.5),
+        ("CMP2", "c1ccccc1", 6.5),
+        ("CMP3", "CC(=O)O", 7.5),
+    ):
+        rows.extend([
+            {"compound": compound, "smiles": smiles, "activity": value,
+             "document": "DOC_A"},
+            {"compound": compound, "smiles": smiles, "activity": value + 2.0,
+             "document": "DOC_B"},
+        ])
+    source = tmp_path / "generic.csv"
+    pd.DataFrame(rows).to_csv(source, index=False)
+    assert main([
+        str(source), "--compound-column", "compound",
+        "--smiles-column", "smiles", "--value-column", "activity",
+        "--document-column", "document",
+        "--projection", "pca", "--grouping", "none", "--grid-padding", "2",
+        "--render-detail", "overview", "--output-formats", "svg",
+        "--output-dir", str(tmp_path), "--name", "fallback",
+    ]) == 0
+    output = capsys.readouterr().out
+    expected = (
+        "σ_doc was not estimated: fewer than 5 entries have two or more "
+        "evidence units; the literature value 0.64 is used"
+    )
+    assert expected in output
+    assert "Largest sigma_doc contribution:" not in output
+    manifest = json.loads(
+        (tmp_path / "fallback_run_manifest.json").read_text(encoding="utf-8")
+    )
+    assert expected in manifest["warnings"]
+    assert expected in manifest["activity_confidence"]["warnings"]
+    assert manifest["activity_confidence"]["method"] == "literature_fallback"
 
 
 def test_cli_fmcs_core_end_to_end_records_timeout(tmp_path):

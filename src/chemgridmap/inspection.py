@@ -80,7 +80,34 @@ def verify_annotations(row, evidence, values, parameters):
 
 def inspect_entry(coordinates, records, *, molecule_id=None, cell=None, parameters=None,
                   activity_confidence=None, k=None):
-    """Select one entry by exact ID or zero-based (row, column), then verify its records."""
+    """Select one entry by exact ID or zero-based (row, column), then verify its records.
+
+    Parameters
+    ----------
+    coordinates : pandas.DataFrame
+        Grid-coordinate table from one completed run.
+    records : pandas.DataFrame
+        Retained source-record table from the same run.
+    molecule_id : str, optional
+        Exact molecule identity or source identifier to select.
+    cell : tuple of int, optional
+        Zero-based ``(row, column)`` cell to select.
+    parameters : dict, optional
+        Curation annotation thresholds for verification.
+    activity_confidence : dict, optional
+        Activity-confidence fit from the run manifest or curation report.
+    k : int, optional
+        Neighbour count used to label the kth-neighbour diagnostics.
+
+    Returns
+    -------
+    selected : pandas.DataFrame
+        One-row coordinate subset for the selected entry.
+    evidence : pandas.DataFrame
+        Source records linked to the selected map row.
+    summary : dict
+        Verified annotations, confidence diagnostics, offset pairs and warnings.
+    """
     if (molecule_id is None) == (cell is None):
         raise ValueError("Select either molecule_id or cell=(row, column).")
     if cell is not None:

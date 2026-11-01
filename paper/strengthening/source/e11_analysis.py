@@ -402,7 +402,12 @@ def curate_validation_targets() -> tuple[
         raw = None
         try:
             raw = read_activity(path)
-            curated = curate_activity_table(raw, target, endpoint)
+            curated = curate_activity_table(
+                raw,
+                target,
+                endpoint,
+                identity_rule="normalized-structure",
+            )
             records = curated.retained_records
             context = prepare_target(records)
             entry_counts = context["doc"].groupby("entry").size()

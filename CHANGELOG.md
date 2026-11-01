@@ -9,6 +9,14 @@
   held-out re-evaluation that kept held-out documents out of flag construction,
   the downgrade did not increase the agreement of supported cells with the
   held-out literature.
+- Export every evaluated document pair to `document_offsets.csv`, including
+  unflagged pairs with `systematic_offset=false`; the manifest and inspector
+  continue to use only flagged pairs for offset diagnostics and display.
+- Emit an explicit warning when fewer than five multi-unit entries require the
+  literature fallback for σ_doc, and omit the inapplicable dominant-entry
+  proportion warning in that case.
+- Add `chemgridmap --example caii`, which runs the packaged CHEMBL205 dataset
+  without a source-tree path and is now the README quick-start command.
 - Report the activity evidence entry that contributes the largest share of
   σ_doc degrees of freedom and pooled sum of squares in fits, run manifests and
   CLI summaries, with a warning above 30%. The σ_doc estimate is unchanged.

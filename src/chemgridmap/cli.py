@@ -54,7 +54,7 @@ def _offset_sign_agreement(value: str) -> float:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="chemgridmap",
-        usage="%(prog)s [inspect | compare] [options] input",
+        usage="%(prog)s [inspect | compare] [options] [input]",
         description=(
             "Convert molecular representations or existing 2D coordinates into "
             "a one-molecule-per-cell grid chemical map. Use 'chemgridmap inspect' "
@@ -63,7 +63,15 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         epilog="To retrieve measurements behind an existing cell, run: chemgridmap inspect --help",
     )
-    parser.add_argument("input", type=Path, help="Input CSV file.")
+    parser.add_argument("input", type=Path, nargs="?", help="Input CSV file.")
+    parser.add_argument(
+        "--example",
+        choices=["caii"],
+        help=(
+            "Use a packaged example instead of an input file. 'caii' selects the "
+            "CA II export and automatically uses ChEMBL input mode with CHEMBL205."
+        ),
+    )
     parser.add_argument(
         "--input-format",
         choices=["molecule", "chembl"],
@@ -302,6 +310,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--identity-conflicts", choices=["error", "exclude"], default="error",
         help="Stop on parent identities with multiple structures, or exclude and report them.")
     parser.add_argument(
+        "--identity-rule",
+        choices=["inchikey", "normalized-structure"],
+        default="inchikey",
+        help=(
+            "Identity-conflict rule. Use normalized-structure to reproduce "
+            "analyses that predate version 0.5."
+        ),
+    )
+    parser.add_argument(
         "--map-color-modes", nargs="+", default=[],
         choices=["activity", "class_support", "neighbor_recall", "structure_group"],
         help="Additional map layers to export as SVG and, when requested in --output-formats, PNG.")
@@ -316,7 +333,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if argv and argv[0] == "inspect":
         from .inspection import main as inspect_main
         return inspect_main(argv[1:])
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.example:
+        if args.input is not None:
+            parser.error("--example cannot be combined with an input file.")
+        args.input = Path(__file__).with_name("data") / "chembl205_ic50.csv"
+        args.input_format = "chembl"
+        args.target_id = "CHEMBL205"
+    elif args.input is None:
+        parser.error("an input file or --example is required.")
     data = pd.read_csv(args.input, sep=None, engine="python", encoding="utf-8-sig")
     source = {"input_file": args.input.name,
               "input_file_sha256": hashlib.sha256(args.input.read_bytes()).hexdigest(),
@@ -342,6 +368,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             structure_policy=args.structure_policy,
             assay_types=args.assay_types,
             identity_conflicts=args.identity_conflicts,
+            identity_rule=args.identity_rule,
         )
         curation.report["input_file"] = str(args.input.resolve())
         curation.report["input_file_sha256"] = source["input_file_sha256"]
@@ -493,7 +520,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         max_df_share = fit.get("max_entry_degrees_of_freedom_share")
         max_sumsq_share = fit.get("max_entry_sum_of_squares_share")
         max_entry = fit.get("max_entry_id")
-        if max_entry is not None:
+        if max_entry is not None and fit.get("method") != "literature_fallback":
             print(
                 "Largest sigma_doc contribution: {} (degrees of freedom {:.1%}; "
                 "pooled sum of squares {:.1%}).".format(

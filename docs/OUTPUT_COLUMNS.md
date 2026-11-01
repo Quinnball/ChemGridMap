@@ -167,7 +167,7 @@
 | `comparison_id` | Identifier used in structure comparisons. | text |
 | `structure_group` | Structure-group identifier. | text |
 | `structure_group_color` | Group layer color. | hex RGB |
-| `scaffold_smiles` | Bemis–Murcko scaffold SMILES. | SMILES |
+| `scaffold_smiles` | Bemis–Murcko scaffold SMILES. Charge-separated groups can leave representation artifacts after removal of the negative oxygen: sulfoxides may appear as `[SH+]` and N-oxides as `[nH+]`. These scaffold strings are not neutral structures. Sulfones retain `S(=O)(=O)`, so sulfoxides and sulfones yield different scaffolds. | SMILES |
 
 ## `identity_conflicts.csv`
 
@@ -303,7 +303,7 @@
 | `comparison_id` | Identifier used in structure comparisons. | text |
 | `structure_group` | Structure-group identifier. | text |
 | `structure_group_color` | Group layer color. | hex RGB |
-| `scaffold_smiles` | Bemis–Murcko scaffold SMILES. | SMILES |
+| `scaffold_smiles` | Bemis–Murcko scaffold SMILES. Charge-separated groups can leave representation artifacts after removal of the negative oxygen: sulfoxides may appear as `[SH+]` and N-oxides as `[nH+]`. These scaffold strings are not neutral structures. Sulfones retain `S(=O)(=O)`, so sulfoxides and sulfones yield different scaffolds. | SMILES |
 
 ## `retained_records.csv`
 
@@ -392,11 +392,11 @@
 | `comparison_id` | Identifier used in structure comparisons. | text |
 | `structure_group` | Structure-group identifier. | text |
 | `structure_group_color` | Group layer color. | hex RGB |
-| `scaffold_smiles` | Bemis–Murcko scaffold SMILES. | SMILES |
+| `scaffold_smiles` | Bemis–Murcko scaffold SMILES. Charge-separated groups can leave representation artifacts after removal of the negative oxygen: sulfoxides may appear as `[SH+]` and N-oxides as `[nH+]`. These scaffold strings are not neutral structures. Sulfones retain `S(=O)(=O)`, so sulfoxides and sulfones yield different scaffolds. | SMILES |
 | `name` | Supplied molecule name when present. | text |
 | `core_member` | Whether the member is covered by the group core. | boolean |
 | `core_rule` | Core-selection rule. | coverage, most_frequent or fmcs |
-| `core_smiles` | Selected group core SMILES. | SMILES |
+| `core_smiles` | Selected group core SMILES. Charge-separated groups can leave representation artifacts after removal of the negative oxygen: sulfoxides may appear as `[SH+]` and N-oxides as `[nH+]`. These core strings are not neutral structures. Sulfones retain `S(=O)(=O)`, so sulfoxides and sulfones yield different cores. | SMILES |
 | `core_smarts` | FMCS core SMARTS when available. | SMARTS |
 | `core_coverage_target` | Requested core-coverage target. | fraction 0–1 |
 
