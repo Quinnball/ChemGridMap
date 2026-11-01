@@ -10,8 +10,18 @@ from . import __all__
 import chemgridmap
 
 
-def _entry(files, description, unit="text"):
-    return {"files": tuple(files), "description": description, "unit_or_values": unit}
+def _entry(files, description, unit="text", by_file=None):
+    return {
+        "files": tuple(files),
+        "description": description,
+        "unit_or_values": unit,
+        "by_file": by_file or {},
+    }
+
+
+def _description(entry, filename):
+    """Use a file-specific meaning when a column has multiple definitions."""
+    return entry["by_file"].get(filename, entry["description"])
 
 
 MAP_FILES = ("grid_coordinates.csv", "molecule_level.csv")
@@ -20,10 +30,15 @@ RECORD_FILES = ("retained_records.csv", "excluded_records.csv")
 
 # Exact names and class-expanded patterns form the authoritative output schema.
 COLUMNS: Dict[str, dict] = {
-    "molecule_identity_key": _entry(MAP_FILES + RECORD_FILES + ("structure_members.csv", "identity_conflicts.csv"), "Stable entry key used for map rows and evidence joins."),
+    "molecule_identity_key": _entry(MAP_FILES + RECORD_FILES + ("structure_members.csv", "identity_conflicts.csv", "structure_variants.csv"), "Stable entry key used for map rows and evidence joins."),
     "molecule_identity_source": _entry(MAP_FILES + RECORD_FILES, "How the entry identifier was obtained.", "parent ID or canonical SMILES fallback"),
     "canonical_smiles": _entry(MAP_FILES + RECORD_FILES + ("structure_members.csv",), "Canonical isomeric SMILES.", "SMILES"),
-    "smiles": _entry(MAP_FILES + ("structure_members.csv",), "SMILES column consumed by the map workflow.", "SMILES"),
+    "smiles": _entry(
+        MAP_FILES + ("structure_members.csv", "structure_variants.csv"),
+        "SMILES column consumed by the map workflow.",
+        "SMILES",
+        {"structure_variants.csv": "Parent-structure SMILES writing observed for this identity."},
+    ),
     "representation_smiles": _entry(MAP_FILES + RECORD_FILES + ("structure_members.csv",), "Structure used for fingerprint representation after the selected policy.", "SMILES"),
     "record_canonical_smiles": _entry(MAP_FILES + RECORD_FILES, "Unique canonical record structures joined with semicolons.", "SMILES list"),
     "structure_policy": _entry(MAP_FILES + RECORD_FILES, "Selected parent/as-recorded normalization policy."),
@@ -212,7 +227,32 @@ COLUMNS: Dict[str, dict] = {
     "action_type_description": _entry(RECORD_FILES, "Action-type description."),
     "action_type_parent_type": _entry(RECORD_FILES, "Parent action type."),
     "structures": _entry(("identity_conflicts.csv",), "Normalized structures for the conflicting parent.", "semicolon-separated SMILES"),
-    "record_count": _entry(("identity_conflicts.csv",), "Records associated with one conflicting identity.", "count"),
+    "record_count": _entry(
+        ("identity_conflicts.csv", "structure_variants.csv"),
+        "Records associated with one conflicting identity.",
+        "count",
+        {"structure_variants.csv": "Total retained records for this identity."},
+    ),
+    "normalized_smiles": _entry(
+        ("structure_variants.csv",),
+        "Standardized structure form for this SMILES writing.",
+        "SMILES",
+    ),
+    "structure_record_count": _entry(
+        ("structure_variants.csv",),
+        "Retained records using this SMILES writing.",
+        "count",
+    ),
+    "standard_inchikey": _entry(
+        ("structure_variants.csv",),
+        "Standard InChIKey shared by the writing variants for this identity.",
+        "InChIKey",
+    ),
+    "selected": _entry(
+        ("structure_variants.csv",),
+        "Whether this writing normalizes to the map's selected structure (the normalized form with the most records).",
+        "boolean",
+    ),
 }
 
 
@@ -233,7 +273,8 @@ def describe(columns, files):
         rows.append({
             "file": files,
             "column": column,
-            **{name: item[name] for name in ("description", "unit_or_values")},
+            "description": _description(item, files),
+            "unit_or_values": item["unit_or_values"],
         })
     return rows
 
@@ -242,12 +283,12 @@ def output_columns_markdown(frames=None) -> str:
     """Render the schema; when frames are supplied, validate them first."""
     rows = []
     for files, entry in COLUMNS.items():
-        if files in {"structures", "record_count"}:
+        if files == "structures":
             listed_files = ("identity_conflicts.csv",)
         else:
             listed_files = entry["files"]
         for filename in listed_files:
-            rows.append((filename, files, entry["description"], entry["unit_or_values"]))
+            rows.append((filename, files, _description(entry, filename), entry["unit_or_values"]))
     if frames:
         for filename, frame in frames.items():
             describe(frame.columns, filename)

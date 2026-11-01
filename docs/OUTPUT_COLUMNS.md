@@ -400,6 +400,18 @@
 | `core_smarts` | FMCS core SMARTS when available. | SMARTS |
 | `core_coverage_target` | Requested core-coverage target. | fraction 0–1 |
 
+## `structure_variants.csv`
+
+| Column | Meaning | Unit or values |
+|---|---|---|
+| `molecule_identity_key` | Stable entry key used for map rows and evidence joins. | text |
+| `smiles` | Parent-structure SMILES writing observed for this identity. | SMILES |
+| `record_count` | Total retained records for this identity. | count |
+| `normalized_smiles` | Standardized structure form for this SMILES writing. | SMILES |
+| `structure_record_count` | Retained records using this SMILES writing. | count |
+| `standard_inchikey` | Standard InChIKey shared by the writing variants for this identity. | InChIKey |
+| `selected` | Whether this writing normalizes to the map's selected structure (the normalized form with the most records). | boolean |
+
 ## Offset display default
 
 `offset_display` defaults to `none`: `offset_pair_touched` and
@@ -407,3 +419,12 @@
 support-layer marker, but `class_status` and `status_reason` follow support
 alone. Use `offset_display="uncertain"` or `--offset-display uncertain` to
 show touched entries as uncertain.
+
+## Audit export subsets
+
+`selected_molecule.csv` contains one row from `grid_coordinates.csv` with exactly the same columns.
+
+`source_records.csv` contains filtered rows from `retained_records.csv` with exactly the same columns.
+
+`comparison_members.csv` contains up to 12 rows from `grid_coordinates.csv` for the selected
+structure group, with exactly the same columns.
