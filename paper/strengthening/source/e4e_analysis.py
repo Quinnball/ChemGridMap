@@ -25,8 +25,8 @@ from chemgridmap.representations import morgan_fingerprints
 SOURCE = Path(__file__).resolve().parent
 STRENGTHENING = SOURCE.parent
 REV = STRENGTHENING.parent
-WORKSPACE = REV.parents[1]
-CGM = WORKSPACE / "chemgridmap"
+WORKSPACE = REV.parent
+CGM = WORKSPACE
 
 OUT = STRENGTHENING / "output" / "E4"
 QA = STRENGTHENING / "qa" / "E4"

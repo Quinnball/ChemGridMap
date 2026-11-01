@@ -262,6 +262,8 @@ def test_time_split_includes_original_ic50_dataset():
         (target, "IC50") for target in ORIGINAL_IC50_TARGETS
     }
 
+    if not (E2_OUTPUT / "time_split_by_target.csv").is_file():
+        pytest.skip("Run paper/strengthening/source/e2_analysis.py first.")
     by_target = pd.read_csv(E2_OUTPUT / "time_split_by_target.csv")
     original = by_target.loc[
         (by_target.endpoint == "IC50")

@@ -124,6 +124,10 @@ def write_manifest(negative=None):
                ROOT / "paper/reliability_activity.py", ROOT / "src/chemgridmap/evidence.py",
                ROOT / "src/chemgridmap/activity.py", ROOT / "paper/reliability_analysis.py",
                S / "data/flagged_pairs_metadata.json", S / "SELECTION_RULES.md"]
+    historical_archive = QA / "negative_control_R0_misspecified.csv"
+    qa_inputs = [QA / "regression.json", QA / "negative_control.csv"]
+    if historical_archive.exists():
+        qa_inputs.append(historical_archive)
     def hashes(paths):
         return {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(paths)}
     parameters = {
@@ -162,7 +166,9 @@ def write_manifest(negative=None):
         "inputs_sha256": hashes(inputs),
         "source_sha256": hashes(list((S / "source").glob("e1a_*.py")) + [S / "source/test_e1a.py"]),
         "outputs_sha256": hashes([p for p in OUT.iterdir() if p.is_file() and p.name != "manifest.json"]),
-        "qa_sha256": hashes([QA / "regression.json", QA / "negative_control.csv", QA / "negative_control_R0_misspecified.csv"]),
+        "qa_sha256": hashes(qa_inputs),
+        "historical_qa_files": ([str(historical_archive.relative_to(ROOT))]
+                                if historical_archive.exists() else []),
         "manifest_self_hash": "omitted to avoid a self-referential hash",
         "software_versions": {"python": platform.python_version(), **{name: importlib.metadata.version(name)
             for name in ("numpy", "pandas", "scipy", "pytest")}},

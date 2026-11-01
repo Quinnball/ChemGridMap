@@ -26,7 +26,7 @@ E6 = S / "output/E6"
 E7 = S / "output/E7"
 E9 = S / "output/E9"
 E1B = S / "output/E1B"
-FIGURE_DATA = ROOT / "paper/figures/data_final"
+FIGURE_DATA = S / "output/F0"
 API = S / "data/chembl37_api"
 
 sys.path[:0] = [str(S / "source"), str(CGM / "src"), str(CGM / "paper")]

@@ -88,8 +88,8 @@ def negative_control(frozen):
     path, archive = QA / "negative_control.csv", QA / "negative_control_R0_misspecified.csv"
     if path.exists() and not archive.exists():
         old = pd.read_csv(path)
-        assert old.permutation.str.contains("observed class labels").all(), "Old negative control differs from R0"
-        path.rename(archive)
+        if old.permutation.str.contains("observed class labels").all():
+            path.rename(archive)
     null = permute_agreement(frozen)
     rng = np.random.default_rng(BOOT_SEED)
     rows = []

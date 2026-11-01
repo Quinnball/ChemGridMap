@@ -63,7 +63,7 @@ PAPER_FIG2 := $(VENV_PYTHON) -m chemgridmap.cli $(PAPER_FIG2_INPUT) \
 	--map-color-modes activity class_support neighbor_recall structure_group \
 	--output-formats svg png pdf --name caii_seed42
 
-paper-f0: check
+paper-f0: check paper-e4 paper-e2c
 	$(VENV_PYTHON) $(PAPER_SOURCE)/f0_build.py
 
 paper-e1a: check
@@ -105,7 +105,7 @@ paper-e5d: paper-e5c
 paper-e2c: check
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e2c_analysis.py
 
-paper-e6-prepare: paper-e2c
+paper-e6-prepare: paper-e2c paper-e4
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e6_prepare.py
 
 paper-e6-regression: paper-e6-prepare
@@ -129,7 +129,7 @@ paper-e11: paper-e5c
 paper-e12a: paper-e7 paper-e11 paper-e9
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e12a_rule_calibration.py
 
-paper-e12b: paper-e7 paper-e9
+paper-e12b: paper-e7 paper-e9 paper-e6 paper-f0
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e12b_analysis.py
 
 paper-e15: paper-e11 paper-e12a
@@ -159,7 +159,7 @@ paper-figure6-capture: check
 	node paper/figures/source/fig6_capture.cjs \
 		--output-dir paper/figures/data_fig6
 
-paper-figures: paper-figures-data paper-fig2-data
+paper-figures: paper-figures-data paper-fig2-data paper-figure6-capture
 	$(VENV_PYTHON) paper/figures/source/build_figures.py
 
 paper-figures-archived: check

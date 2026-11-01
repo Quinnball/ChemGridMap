@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from e4e_analysis import OUT, RESULT, SOURCE, WORKSPACE
+from e4e_analysis import CGM, OUT, RESULT, SOURCE
 
 
 IS_REPOSITORY_COPY = SOURCE.parents[1].name == "paper"
@@ -56,9 +56,9 @@ def test_regression_output_has_complete_scope_and_posthoc_role():
 
 
 def test_repository_source_copy_is_complete_and_portable():
-    target = WORKSPACE / "chemgridmap/paper/strengthening/source"
+    target = CGM / "paper/strengthening/source"
     if not target.is_dir():
-        pytest.skip("Run from the research workspace that contains chemgridmap/paper/strengthening.")
+        pytest.skip("Run from a checkout that contains paper/strengthening.")
     assert REQUIRED_SOURCE <= {path.name for path in target.glob("*.py")}
     for name in REQUIRED_SOURCE:
         text = (target / name).read_text(encoding="utf-8")
