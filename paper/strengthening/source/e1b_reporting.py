@@ -1,4 +1,4 @@
-"""根据 E1-B 已生成的表格写事实说明和可核验清单；不重跑计时。"""
+"""Build fact notes and a verifiable manifest from E1-B tables without rerunning timing."""
 from datetime import datetime, timezone
 import hashlib
 from importlib.metadata import version
@@ -19,7 +19,7 @@ def sha256(path):
 
 
 def markdown_table(frame):
-    """不增加 tabulate 依赖；CSV 中保留完整精度。"""
+    """Avoid a tabulate dependency and preserve full precision in CSV."""
     def cell(value):
         if pd.isna(value):
             return "NA"

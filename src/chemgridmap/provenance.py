@@ -15,10 +15,15 @@ def file_digests(files):
 
 
 def environment_versions():
+    from . import __version__
+
     packages = {}
     for name in ("chemgridmap", "rdkit", "chembl_structure_pipeline", "numpy",
                  "pandas", "scipy", "scikit-learn", "umap-learn", "matplotlib",
                  "numba", "pynndescent", "llvmlite"):
+        if name == "chemgridmap":
+            packages[name] = __version__
+            continue
         try:
             packages[name] = metadata.version(name)
         except metadata.PackageNotFoundError:

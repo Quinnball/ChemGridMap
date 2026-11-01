@@ -1,4 +1,4 @@
-"""核对 R1 写入范围；禁止进入后台下载子目录。"""
+"""Check the R1 write scope and do not enter background download directories."""
 from pathlib import Path
 import hashlib
 import json
@@ -39,7 +39,7 @@ def main():
                 path in [REV + "/source/test_e1a.py",
                          REV + "/output/E1A/E1A_REPORT.md"])
     unallowed = [p for names in changes.values() for p in names if not allowed(p)]
-    # 不自动豁免范围外变更；保留实际证据供报告说明。
+    # Do not exempt out-of-scope changes automatically; retain evidence for the report.
     metadata = ROOT / REV / "data/flagged_pairs_metadata.json"
     changes.update({"unexpected_changes": unallowed,
         "all_observed_workspace_changes_within_allowlist": not unallowed,
@@ -52,7 +52,7 @@ def main():
         "snapshot_method": "size and mtime_ns; independent guard and input SHA-256 checks also required"})
     result_path.write_text(json.dumps(changes, indent=2, ensure_ascii=False) + "\n")
     print(json.dumps(changes, indent=2, ensure_ascii=False))
-    assert not unallowed, "存在范围外变化，需如实调查报告"
+    assert not unallowed, "Out-of-scope changes exist and must be reported"
     assert changes["cgm_status_identical"]
     assert changes["metadata_sha256_unchanged"]
     print("SCOPE PASS: allowed paths only; workspace status identical; non-download data unchanged")

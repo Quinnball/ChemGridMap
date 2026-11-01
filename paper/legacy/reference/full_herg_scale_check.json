@@ -1,0 +1,12 @@
+{
+ "n": 9581,
+ "side": 155,
+ "fingerprint_neighbor_seconds": 2.5762793333269656,
+ "refinement_seconds": 96.76286129234359,
+ "recall_minimum_displacement": 0.4284383413962789,
+ "recall_neighbor_refined": 0.546897730526788,
+ "moved_molecules": 7935,
+ "sweeps": 22,
+ "mean_displacement_cells_before": 9.831827108826866,
+ "mean_displacement_cells_after": 9.860539309095476
+}

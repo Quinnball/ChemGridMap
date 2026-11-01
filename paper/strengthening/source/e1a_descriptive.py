@@ -1,4 +1,4 @@
-"""E1-A 3.5–3.9：保持预定定义的描述分析，不修改冻结输入。"""
+"""E1-A sections 3.5-3.9: planned descriptive analyses without changing frozen inputs."""
 from __future__ import annotations
 
 import json
@@ -28,13 +28,13 @@ def _shown_probability(center, scale, shown):
 
 
 def _tau_bootstrap(doc, rng):
-    """所有条目（含单单元）均被抽样；重复抽中的条目分别贡献自由度。"""
+    """Sample all entries, including single-unit entries; repeated draws contribute separately."""
     moments = doc.groupby("entry", sort=True).document_value.agg(["size", "var"])
     degrees = moments["size"].to_numpy(int) - 1
     sumsquares = degrees * moments["var"].fillna(0).to_numpy(float)
     repeated = (degrees > 0).astype(int)
     result = np.empty(BOOT_N)
-    # 分批仅限制内存；随机整数流与一次生成全部抽样一致。
+    # Batching limits memory while preserving the random integer stream.
     for start in range(0, BOOT_N, 100):
         end = min(start + 100, BOOT_N)
         draws = rng.integers(0, len(moments), size=(end - start, len(moments)))
@@ -43,7 +43,7 @@ def _tau_bootstrap(doc, rng):
         multi_count = repeated[draws].sum(axis=1)
         pooled = np.sqrt(np.divide(numerator, denominator,
             out=np.zeros(end - start), where=denominator > 0))
-        # 与冻结 fit_between_unit_sd 默认的至少五个重复条目规则一致。
+        # Match the frozen fit_between_unit_sd rule requiring at least five repeated entries.
         result[start:end] = np.where(multi_count >= 5, pooled, LITERATURE_BETWEEN_UNIT_SD)
     return result
 
@@ -150,7 +150,7 @@ def count_flips(records, documents, mapped):
             shown = CLASSES.index(item.activity_class)
             p_document = float(_shown_probability([item.document_balanced_pchembl],
                 tau / np.sqrt(unit_n.loc[entry]), shown)[0])
-            assert abs(p_document - item.class_confidence) <= 1e-12, "完整 G 支持度与冻结注释不一致"
+            assert abs(p_document - item.class_confidence) <= 1e-12, "Full G support disagrees with frozen annotations"
             p_record = float(_shown_probability([moment["mean"]],
                 tau_rec / np.sqrt(moment["size"]), shown)[0])
             supported_document = bool(item.class_confidence >= SUPPORT)
@@ -195,7 +195,7 @@ def flagged_pairs_profile(records, predictions, flagged_entries):
         offsets = document_pair_offsets(records[target])
         for pair in offsets[offsets.systematic_offset].itertuples(index=False):
             actual.add((target, pair.document_a, pair.document_b))
-    assert expected == actual, "元数据标记文献对与默认诊断不一致"
+    assert expected == actual, "Metadata document-pair flags disagree with default diagnostics"
     for pair in metadata["pairs"]:
         target, a, b = pair["target"], pair["document_a"], pair["document_b"]
         source = records[target]
@@ -242,7 +242,7 @@ def flagged_pairs_profile(records, predictions, flagged_entries):
                 "retained_values_a": raw_values.loc[(entry, a)],
                 "retained_values_b": raw_values.loc[(entry, b)],
                 "n_predictions": len(entry_predictions), "n_agree": int(entry_predictions.agree.sum())})
-    # 并集单独去重；同一条目若属于两对文献，不在这里重复计算。
+    # Deduplicate the union so entries in two document pairs contribute once.
     for target in TARGETS:
         for scope, entries in [("union of shared entries", shared_union[target]),
                                ("all entries touched by flagged documents", flagged_entries[target])]:
@@ -261,8 +261,8 @@ def single_unit_thresholds(documents, mapped):
         tau = fit_between_unit_sd(documents[target])["tau"]
         high, low = UPPER + z * tau, LOWER - z * tau
         medium_max = float(2 * stats.norm.cdf((UPPER - LOWER) / (2 * tau)) - 1)
-        # 本任务三个数据集均满足此条件，因而中间类别无 0.8 支持区间。
-        assert medium_max < SUPPORT, "出现中间类别可达 0.8 的 τ，需报告任务定义范围"
+        # All three datasets meet this condition, so the medium class has no 0.8 support interval.
+        assert medium_max < SUPPORT, "A tau makes medium-class support reach 0.8; report the task-defined range"
         selected = mapped[(mapped.target == target) & (mapped.n_evidence_units == 1)]
         target_checks = []
         for item in selected.itertuples(index=False):
@@ -290,7 +290,7 @@ def single_unit_thresholds(documents, mapped):
 
 
 def run_descriptive(records, predictions, mapped, flagged_entries, out, qa):
-    """计算并写出预定描述输出；输入预测不能有 population 复制行。"""
+    """Compute the planned descriptive outputs; input predictions must not duplicate populations."""
     out, qa = Path(out), Path(qa)
     mapped = mapped[(mapped.model == "G") & (mapped.evidence_policy == "merged")].copy()
     assert not mapped.duplicated(["target", "molecule_identity_key"]).any()
@@ -310,7 +310,7 @@ def run_descriptive(records, predictions, mapped, flagged_entries, out, qa):
         for name, frame in tables.items():
             frame["sensitivity_note"] = NOTE
             frame.to_csv(directory / f"{name}.csv", index=False)
-    # 先保存核对明细，再严格验证，便于失败时追溯实际差异。
-    assert threshold_checks.status_matches.all(), "单单元支持度阈值与冻结映射不一致"
+    # Save verification details before strict checks for failure diagnosis.
+    assert threshold_checks.status_matches.all(), "Single-unit support thresholds disagree with frozen mappings"
     assert threshold_checks.absolute_probability_error.max() <= 1e-12
     return {**outputs, **quality}

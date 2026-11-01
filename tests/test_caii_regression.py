@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from chemgridmap import annotate_activity_confidence, curate_chembl_activity_data
 from chemgridmap.app import AppSession, DEMO
 from chemgridmap.columns import describe
 
@@ -42,8 +43,41 @@ def test_caii_default_reliability_values(caii_runs):
     assert fit["sigma_doc"] == pytest.approx(0.796, abs=5e-4)
     assert fit["sigma_doc_degrees_of_freedom"] == 64
     assert fit["multi_unit_entry_count"] == 29
+    assert fit["max_entry_id"] == "CHEMBL20"
+    assert fit["max_entry_degrees_of_freedom_share"] == pytest.approx(26 / 64)
+    assert fit["max_entry_sum_of_squares_share"] == pytest.approx(0.6308, abs=5e-4)
+    assert fit["offset_display"] == "none"
+    assert any("CHEMBL20" in warning for warning in fit["warnings"])
     assert np.nanmean(data.neighbor_recall) == pytest.approx(0.585, abs=0.02)
     assert np.nanmean(data.neighbor_recall_fixed_k) == pytest.approx(0.536, abs=0.02)
+
+
+def test_caii_offset_display_settings_match_when_no_entry_is_touched():
+    curated = curate_chembl_activity_data(
+        pd.read_csv(DEMO), target_id="CHEMBL205", activity_type="IC50"
+    )
+    document_column = curated.report["detected_columns"]["document_id"]
+    runs = {}
+    for setting in ("none", "uncertain"):
+        molecules, fit = annotate_activity_confidence(
+            curated.molecules,
+            curated.retained_records,
+            value="activity_pchembl_raw",
+            document=document_column,
+            offset_display=setting,
+        )
+        runs[setting] = (molecules, fit)
+
+    first, first_fit = runs["none"]
+    second, second_fit = runs["uncertain"]
+    assert first_fit["offset_display"] == "none"
+    assert second_fit["offset_display"] == "uncertain"
+    assert first.offset_pair_touched.sum() == 0
+    assert second.offset_pair_touched.sum() == 0
+    pd.testing.assert_series_equal(first.class_confidence, second.class_confidence)
+    pd.testing.assert_series_equal(first.class_status, second.class_status)
+    assert first.class_status.eq("supported").sum() == 506
+    assert second.class_status.eq("supported").sum() == 506
 
 
 def test_caii_pca_projection_coordinates_match_seed42_expectation(caii_runs):

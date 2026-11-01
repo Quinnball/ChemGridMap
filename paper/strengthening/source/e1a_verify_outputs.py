@@ -1,4 +1,4 @@
-"""只读独立核对 E1-A 产物；展开整群样本复核合计 CI，不重拟合模型。"""
+"""Independently verify E1-A outputs by expanding cluster draws without refitting."""
 from __future__ import annotations
 
 import hashlib
@@ -51,7 +51,7 @@ def literal_auc(labels, scores):
 
 
 def scores_from_arrays(p, observed, displayed):
-    """对展开后的行直接取均值，不调用 e1a_statistics 的重数实现。"""
+    """Average expanded rows directly without using the multiplicity implementation."""
     confidence, predicted = p.max(axis=1), p.argmax(axis=1)
     correct, agree = predicted == observed, displayed == observed
     shown = p[np.arange(len(p)), displayed]
@@ -72,7 +72,7 @@ def scores_from_arrays(p, observed, displayed):
 
 
 def literal_cluster_samples(frame, rng, collect):
-    """按靶点抽取原有条目数；直接拼接被抽到的整条目原始行。"""
+    """Sample original entry counts per target and concatenate complete sampled entries."""
     samples = [[] for _ in range(2000)] if collect else None
     for target in sorted(frame.target.unique()):
         groups = [group.index.to_numpy() for _, group in
@@ -105,7 +105,7 @@ def verify_negative_control():
         finite = aucs[np.isfinite(aucs)]
         same([literal_auc(labels, probabilities), *np.percentile(finite, [2.5, 97.5]), len(finite)],
              qa.loc[target, ["auc", "ci_low", "ci_high", "n_bootstrap_valid"]].to_numpy(float))
-    # H(a,b)=1[a>b]+0.5*1[a=b]。靶点内贡献 n1_t*n0_t/2；跨靶点贡献 q_t*(1-q_u)*sum H。
+    # H(a,b)=1[a>b]+0.5*1[a=b]. Within-target and cross-target contributions follow the stated formulae.
     numerator = 0.
     for t, a in original.groupby("target"):
         n1, n0 = int(a.agree.sum()), int((~a.agree).sum())
@@ -122,7 +122,7 @@ def verify_negative_control():
 
 def main():
     assert all((OUT / name).is_file() for name in REQUIRED)
-    # AUC 的同分判断需要保留输出浮点数的全部位数，默认解析会改变少量末位。
+    # Preserve full output float precision when testing AUC ties.
     tables = {name: pd.read_csv(OUT / name, float_precision="round_trip")
               for name in REQUIRED if name.endswith(".csv")}
     for name, frame in tables.items():

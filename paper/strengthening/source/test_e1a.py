@@ -1,4 +1,4 @@
-"""E1-A 的统计等价性、无折内泄漏与 R1 负控约束。"""
+"""E1-A statistical equivalence, fold leakage, and R1 negative-control constraints."""
 import numpy as np
 import pandas as pd
 import pytest
@@ -56,11 +56,11 @@ def test_bootstrap_reproducible_and_target_entry_clusters_preserved():
     np.testing.assert_array_equal(first[:, 4], first[:, 5])
     np.testing.assert_array_equal(first[:, [0, 2, 3]].sum(axis=1), np.full(50, 3))
     np.testing.assert_array_equal(first[:, 4], np.ones(50))
-    assert np.any(first[:, 0] != first[:, 4])  # 跨靶点同名条目不共用重数。
+    assert np.any(first[:, 0] != first[:, 4])  # Same-named entries across targets do not share multiplicities.
 
 
 def test_g_record_tau_manual_example():
-    # 五条目各三条记录 [0,0,3]：SSE=6、df=2，所以 pooled SD=sqrt(3)。
+    # Five entries with records [0,0,3] give SSE=6, df=2, and pooled SD=sqrt(3).
     records = pd.DataFrame([{"molecule_identity_key": f"e{e}", "activity_id": e * 3 + r,
         "document_chembl_id": "same_document", "pchembl_value": value}
         for e in range(5) for r, value in enumerate([0., 0., 3.])])
@@ -70,7 +70,7 @@ def test_g_record_tau_manual_example():
 
 
 def test_capped_df_formula():
-    # a 的 df=1、s2=2；b 的 df=5、s2=3.5。封顶后权重是 1 与 4。
+    # a has df=1 and s2=2; b has df=5 and s2=3.5; capped weights are 1 and 4.
     doc = pd.DataFrame({"entry": ["a"] * 2 + ["b"] * 6,
                         "document_value": [0., 2., 0., 1., 2., 3., 4., 5.]})
     assert capped_tau(doc, cap=4) == pytest.approx(np.sqrt((2 + 4 * 3.5) / 5))
@@ -79,7 +79,7 @@ def test_capped_df_formula():
 def test_b1_excludes_current_fold_and_other_targets():
     from e1a_models import b1_confidence
 
-    # 训练条目的预测数不同，必须按全部预测求一致率，不能先算条目均值。
+    # Training entries have different prediction counts; compute agreement over all predictions.
     b0 = pd.DataFrame({
         "target": ["a"] * 6 + ["b"] * 3,
         "entry": ["held", "held", "train1", "train1", "train1", "train2",
@@ -100,7 +100,7 @@ def test_b1_excludes_current_fold_and_other_targets():
 def test_g_record_excludes_every_record_of_merged_held_documents():
     from e1a_models import record_prediction
 
-    # a、b 的中位数同为 3，合并留出时两篇文献的全部五条记录都必须排除。
+    # a and b both have median 3, so all five records from both held-out documents are excluded.
     source = pd.DataFrame({
         "document_chembl_id": ["a", "a", "b", "b", "b", "c", "c", "d"],
         "pchembl_value": [2., 4., 1., 3., 5., 7., 9., 10.],
@@ -156,7 +156,7 @@ def test_agree_override_only_changes_binary_agreement_metrics():
         shown = sampled[["p0", "p1", "p2"]].to_numpy()[
             np.arange(len(sampled)), sampled.displayed.to_numpy()]
         labels = sampled.agree.to_numpy(bool)
-        # 直接枚举正负配对作独立核验，避免与秩和实现共用计算路径。
+        # Enumerate positive-negative pairs independently of the rank-sum implementation.
         pair_scores = [float(a > b) + .5 * (a == b)
                        for a in shown[labels] for b in shown[~labels]]
         assert actual["auc"][i] == pytest.approx(np.mean(pair_scores))

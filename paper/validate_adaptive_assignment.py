@@ -13,7 +13,7 @@ from chemgridmap.core import assign_to_grid, compute_metrics
 from chemgridmap.projection import project_2d
 from chemgridmap.representations import morgan_fingerprints
 from chemgridmap.provenance import environment_versions
-from run_revision_validation import coordinates, evaluate, dump, ROOT
+from legacy.run_revision_validation import coordinates, evaluate, dump, ROOT
 
 
 def main():

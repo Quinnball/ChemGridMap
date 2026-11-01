@@ -20,7 +20,8 @@ from chemgridmap.provenance import environment_versions
 from reliability_analysis import ROOT, FROZEN, OUTPUT, TARGETS, SEEDS, dump_json, sha256
 from reliability_figure_data import markdown_table
 
-REFERENCE = ROOT.parent / "project1/JCIM_review_innovation_20261024/results/headline_numbers.json"
+REFERENCE = ROOT / "paper/legacy/reference/headline_numbers.json"
+LEGACY_REFERENCE = ROOT / "paper/legacy/reference"
 RESULT_MARKER = "<!-- T2b generated results -->"
 README_MARKER = "<!-- T2b generated column definitions -->"
 
@@ -606,7 +607,7 @@ def run_results(output_root=OUTPUT):
         "- T2a remains the source for ten-seed recall/stability, LAS/FLAS/DPQ and the 9,581-entry full hERG run; see section 1.", "",
         "## Item-by-item working-copy reconciliation", "",
         f"`activity/headline_comparison.csv` covers all {len(comparison)} leaves of "
-        "`project1/JCIM_review_innovation_20261024/results/headline_numbers.json`, with old/current values, differences, "
+        "`paper/legacy/reference/headline_numbers.json`, with old/current values, differences, "
         "status, reasons and source paths. Status counts:", "",
         markdown_table(comparison.groupby("status").size().rename("items").reset_index()), "",
         "Activity values and core counts reproduce the prior population; tiny differences arise from the reference's "
@@ -633,7 +634,7 @@ def refresh_manifests(root=OUTPUT):
             parameters = old.get("parameters", {})
         else:
             inputs = [FROZEN / target / "map_molecules.csv" for target in TARGETS]
-            inputs += [ROOT.parent / "project1/JCIM_review_innovation_20261024/results/core_selection/group_core_comparison.csv"]
+            inputs += [LEGACY_REFERENCE / "group_core_comparison.csv"]
             parameters = {"scope": "T2b cores", "coverage_targets": [.6, .7, .8, .9, 1.], "fmcs_sample_seed": 20261024,
                           "fmcs_sample_size": 20, "fmcs_threshold": .8, "fmcs_complete_rings_only": True,
                           "fmcs_timeout_seconds": 10}
@@ -642,11 +643,6 @@ def refresh_manifests(root=OUTPUT):
     previous = load_json(root / "manifest.json")
     first_hash = previous.get("t2b", {}).get("previous_collection_sha256", sha256(root / "manifest.json"))
     inputs = {str(REFERENCE): sha256(REFERENCE)}
-    task_root = ROOT.parent / "project1/JCIM_reliability_revision_20261024/codex_tasks"
-    for path in (ROOT.parent / "docs/task.md", ROOT.parent / "AGENTS.md",
-                 task_root / "00_方案与验收标准.md", task_root / "T2/T2_brief.md",
-                 task_root / "T2/T2a_ACCEPTANCE.md", task_root / "T2/T2a_REWORK_REPORT.md"):
-        inputs[str(path)] = sha256(path)
     for manifest_path in root.rglob("*manifest.json"):
         if manifest_path == root / "manifest.json":
             continue
@@ -654,14 +650,13 @@ def refresh_manifests(root=OUTPUT):
         for path, digest in manifest.get("inputs_sha256", {}).items():
             p = Path(path)
             if not p.is_absolute():
-                p = ROOT.parent / path if path.startswith(("chemgridmap/", "project1/")) else ROOT / path
-            if p.is_file() and p.resolve() != (root / "manifest.json").resolve():
+                p = ROOT / path
+            if p.is_file() and p.resolve().is_relative_to(ROOT) and p.resolve() != (root / "manifest.json").resolve():
                 inputs[str(p.resolve())] = sha256(p)
     sources = sorted(p for directory in (ROOT / "src", ROOT / "paper", ROOT / "tests")
                      for p in directory.rglob("*") if p.is_file() and "output" not in p.parts
                      and "__pycache__" not in p.parts and p.suffix in {".py", ".js", ".cjs", ".html"})
     diff = subprocess.check_output(["git", "diff", "release-v0.4.0"], cwd=ROOT)
-    reports = ROOT.parent / "project1/JCIM_reliability_revision_20261024/codex_tasks/T2"
     previous["t2b"] = {"collected_at_utc": datetime.now(timezone.utc).isoformat(),
         "previous_collection_sha256": first_hash, "scope": "T2b final collection; T1 and T2a sections retained",
         "inputs_sha256": inputs,
@@ -678,7 +673,7 @@ def refresh_manifests(root=OUTPUT):
                         "chemgridmap.__version__": chemgridmap.__version__, "chemgridmap.__file__": chemgridmap.__file__},
         "code": {"git_diff_release_v0.4.0_sha256": hashlib.sha256(diff).hexdigest(),
                  "source_sha256": {str(p.resolve()): sha256(p) for p in sources}},
-        "reports_sha256": {str(p): sha256(p) for p in (reports / "T2b_REPORT.md", reports / "T2_REPORT.md") if p.exists()},
+        "reports_sha256": {},
         "historical_manifests": "Frozen T1/T2a run manifests retain original execution provenance. Current output hashes are below."}
     previous["outputs_sha256"] = {str(p.relative_to(root)): sha256(p) for p in sorted(root.rglob("*"))
                                   if p.is_file() and p != root / "manifest.json" and "__pycache__" not in p.parts
@@ -818,9 +813,9 @@ def refresh_rework_manifests(root=OUTPUT):
     root = Path(root)
     inputs = [root / "activity/model_fits.json", root / "activity/lodo_scores.csv",
               root / "activity/mapped_entry_confidence.csv", root / "cores/core_size_tradeoff.csv",
-              ROOT.parent / "project1/JCIM_review_innovation_20261024/results/core_selection/group_core_comparison.csv",
-              ROOT.parent / "project1/JCIM_review_innovation_20261024/software/chemgridmap/src/chemgridmap/cores.py",
-              ROOT.parent / "project1/JCIM_review_innovation_20261024/analysis/evaluate_core_selection.py",
+              LEGACY_REFERENCE / "group_core_comparison.csv",
+              LEGACY_REFERENCE / "historical_cores.py",
+              LEGACY_REFERENCE / "evaluate_core_selection.py",
               ROOT / "validation_data/chembl37_chembl204/download_manifest.json",
               ROOT / "validation_data/chembl37_chembl204/target_metadata.json",
               *[FROZEN / target / "map_molecules.csv" for target in TARGETS]]
@@ -838,19 +833,17 @@ def refresh_rework_manifests(root=OUTPUT):
         dump_json(path, current)
     manifest = load_json(root / "manifest.json")
     prior_digest = manifest.get("t2b_rework", {}).get("previous_collection_sha256", sha256(root / "manifest.json"))
-    reports = ROOT.parent / "project1/JCIM_reliability_revision_20261024/codex_tasks/T2"
-    task_inputs = [ROOT.parent / "docs/task.md", ROOT.parent / "AGENTS.md", reports / "T2b_ACCEPTANCE.md"]
     sources = sorted(p for directory in (ROOT / "src", ROOT / "paper", ROOT / "tests")
                      for p in directory.rglob("*") if p.is_file() and "output" not in p.parts
                      and "__pycache__" not in p.parts and p.suffix in {".py", ".js", ".cjs", ".html"})
     diff = subprocess.check_output(["git", "diff", "release-v0.4.0"], cwd=ROOT)
     manifest["t2b_rework"] = {"collected_at_utc": datetime.now(timezone.utc).isoformat(),
         "previous_collection_sha256": prior_digest, "parameters": parameters,
-        "inputs_sha256": {str(p.resolve()): sha256(p) for p in [*inputs, *task_inputs]},
+        "inputs_sha256": {str(p.resolve()): sha256(p) for p in inputs},
         "environment": {**environment_versions(), "python_executable": sys.executable},
         "code": {"git_diff_release_v0.4.0_sha256": hashlib.sha256(diff).hexdigest(),
                  "source_sha256": {str(p.resolve()): sha256(p) for p in sources}},
-        "reports_sha256": {str(p): sha256(p) for p in (reports / "T2b_REWORK_REPORT.md", reports / "T2_REPORT.md") if p.exists()},
+        "reports_sha256": {},
         "historical_provenance": "Existing T1/T2a/T2b root sections and frozen subdirectory manifests are retained; this section records the current rework."}
     manifest["outputs_sha256"] = {str(p.relative_to(root)): sha256(p) for p in sorted(root.rglob("*"))
         if p.is_file() and p != root / "manifest.json" and "__pycache__" not in p.parts and p.name != ".DS_Store"}

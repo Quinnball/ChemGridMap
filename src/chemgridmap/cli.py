@@ -54,10 +54,13 @@ def _offset_sign_agreement(value: str) -> float:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="chemgridmap",
+        usage="%(prog)s [inspect | compare] [options] input",
         description=(
             "Convert molecular representations or existing 2D coordinates into "
-            "a one-molecule-per-cell grid chemical map."
+            "a one-molecule-per-cell grid chemical map. Use 'chemgridmap inspect' "
+            "to retrieve the records behind an existing cell."
         ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         epilog="To retrieve measurements behind an existing cell, run: chemgridmap inspect --help",
     )
     parser.add_argument("input", type=Path, help="Input CSV file.")
@@ -71,12 +74,22 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "-o", "--output-dir", type=Path, default=Path("gridmap_output")
+        "-o", "--output-dir", type=Path, default=Path("gridmap_output"),
+        help="Directory for the map, audit tables and run manifest.",
     )
     parser.add_argument("--name", default="grid_map", help="Output file prefix.")
-    parser.add_argument("--smiles-col", "--smiles-column", dest="smiles_col", default="smiles")
-    parser.add_argument("--value-col", "--value-column", dest="value_col")
-    parser.add_argument("--label-col")
+    parser.add_argument(
+        "--smiles-col", "--smiles-column", dest="smiles_col", default="smiles",
+        help="SMILES column in molecule-table input.",
+    )
+    parser.add_argument(
+        "--value-col", "--value-column", dest="value_col",
+        help="Activity value column in molecule-table input.",
+    )
+    parser.add_argument(
+        "--label-col",
+        help="Optional activity-class label column in molecule-table input.",
+    )
     parser.add_argument(
         "--compound-column",
         help="Compound identifier column for a generic activity-record CSV.",
@@ -93,9 +106,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--representation",
         choices=["morgan", "descriptors", "embedding"],
         default="morgan",
+        help="Molecular representation used for projection and neighbour recall.",
     )
     parser.add_argument(
-        "--projection", choices=["pca", "tsne", "umap"], default="umap"
+        "--projection", choices=["pca", "tsne", "umap"], default="umap",
+        help="Two-dimensional projection method.",
     )
     parser.add_argument(
         "--umap-metric",
@@ -108,16 +123,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--x-col", help="Existing 2D x-coordinate column.")
     parser.add_argument("--y-col", help="Existing 2D y-coordinate column.")
-    parser.add_argument("--embedding-prefix", default="emb_")
-    parser.add_argument("--radius", type=int, default=2)
-    parser.add_argument("--n-bits", type=int, default=2048)
-    parser.add_argument("--grouping", choices=["butina", "external", "none"], default="butina")
+    parser.add_argument(
+        "--embedding-prefix", default="emb_",
+        help="Column prefix for embedding representation input.",
+    )
+    parser.add_argument(
+        "--radius", type=int, default=2,
+        help="Morgan fingerprint radius.",
+    )
+    parser.add_argument(
+        "--n-bits", type=int, default=2048,
+        help="Morgan fingerprint bit-vector length.",
+    )
+    parser.add_argument(
+        "--grouping", choices=["butina", "external", "none"], default="butina",
+        help="Structure-grouping method.",
+    )
     parser.add_argument("--group-similarity", type=float, default=.6,
                         help="Morgan Tanimoto threshold to a Butina center; not an all-pairs bound.")
     parser.add_argument("--cluster-col", help="Existing group column in molecule-table input.")
     parser.add_argument("--cluster-source", help="Provenance of external group assignments.")
-    parser.add_argument("--lower-threshold", type=float, default=6.0)
-    parser.add_argument("--upper-threshold", type=float, default=7.0)
+    parser.add_argument(
+        "--lower-threshold", type=float, default=6.0,
+        help="Upper pActivity bound of the inactive class.",
+    )
+    parser.add_argument(
+        "--upper-threshold", type=float, default=7.0,
+        help="Lower pActivity bound of the active class.",
+    )
     parser.add_argument(
         "--target-id",
         help="Expected Target ChEMBL ID, for example CHEMBL205.",
@@ -156,8 +189,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--structure-policy", choices=["auto", "parent", "as-recorded"],
                         default="auto", help="Normalize parent structures, or explicitly retain record forms.")
     parser.add_argument("--assay-types", nargs="+", help="Optional ChEMBL assay-type filter; not a reliability score.")
-    parser.add_argument("--random-state", type=int, default=42)
-    parser.add_argument("-k", type=int, default=10)
+    parser.add_argument(
+        "--random-state", type=int, default=42,
+        help="Random seed for projection and tie-breaking.",
+    )
+    parser.add_argument(
+        "-k", type=int, default=10,
+        help="Number of representation neighbours used for reliability.",
+    )
     parser.add_argument(
         "--trustworthiness-sample-size",
         type=int,
@@ -176,7 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--grid-occupancy",
         type=float,
         default=0.40,
-        help="Target fraction of occupied candidate cells (default: 0.40).",
+        help="Target fraction of occupied candidate cells.",
     )
     parser.add_argument(
         "--coordinate-scaling",
@@ -198,12 +237,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=128,
         help=(
-            "Initial nearest candidate cells per molecule in adaptive sparse assignment "
-            "(default: 128)."
+            "Initial nearest candidate cells per molecule in adaptive sparse assignment."
         ),
     )
     parser.add_argument("--sparse-max-neighbors", type=int, default=1024,
-                        help="Candidate cap for adaptive sparse matching (default: 1024).")
+                        help="Candidate cap for adaptive sparse matching.")
     parser.add_argument("--fixed-sparse-candidates", action="store_true",
                         help="Disable candidate expansion, for explicit calibration only.")
     parser.add_argument(
@@ -232,34 +270,34 @@ def build_parser() -> argparse.ArgumentParser:
              "the most frequent scaffold (0.4.0 rule), or FMCS.")
     parser.add_argument(
         "--fmcs-timeout", type=int, default=1,
-        help="FMCS search budget in seconds (default: 1). Timeout may make results machine-dependent.")
+        help="FMCS search budget in seconds. Timeout may make results machine-dependent.")
     parser.add_argument(
         "--core-min-coverage", type=_core_min_coverage, default=0.8,
-        help="Coverage target for coverage/FMCS rules; range: 0.5–1 (default: 0.8).")
+        help="Coverage target for coverage/FMCS rules; range: 0.5–1.")
     parser.add_argument(
         "--no-activity-confidence", action="store_true",
         help="Skip document-level class-support estimation.")
     parser.add_argument(
         "--evidence-model", choices=["gaussian", "exclude-flagged"], default="gaussian",
-        help="Activity evidence model (default: gaussian).")
+        help="Activity evidence model.")
     parser.add_argument(
         "--support-level", type=_support_level, default=0.8,
-        help="Minimum class support for a supported display (default: 0.8).")
+        help="Minimum class support for a supported display.")
     parser.add_argument(
-        "--offset-display", choices=["uncertain", "none"], default="uncertain",
-        help="Show entries touched by systematic document offsets as uncertain, or leave display unchanged.")
+        "--offset-display", choices=["uncertain", "none"], default="none",
+        help="Leave display unchanged, or show entries touched by systematic document offsets as uncertain.")
     parser.add_argument(
         "--offset-min-shared", type=_offset_min_shared, default=3,
-        help="Minimum shared entries for a document-offset comparison (default: 3).")
+        help="Minimum shared entries for a document-offset comparison.")
     parser.add_argument(
         "--offset-min-difference", type=_positive_float, default=1.0,
-        help="Minimum absolute median offset in log units (default: 1.0).")
+        help="Minimum absolute median offset in log units.")
     parser.add_argument(
         "--offset-sign-agreement", type=_offset_sign_agreement, default=0.8,
-        help="Minimum fraction of differences sharing the median sign (default: 0.8).")
+        help="Minimum fraction of differences sharing the median sign.")
     parser.add_argument(
         "--no-merge-identical-documents", action="store_true",
-        help="Keep documents with identical entry medians as separate evidence units (default: merge).")
+        help="Keep documents with identical entry medians as separate evidence units.")
     parser.add_argument(
         "--identity-conflicts", choices=["error", "exclude"], default="error",
         help="Stop on parent identities with multiple structures, or exclude and report them.")
@@ -323,6 +361,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     offset_sign_agreement=args.offset_sign_agreement)
                 curation.report["activity_confidence"] = fit
                 source["activity_confidence"] = fit
+                curation.report["warnings"].extend(fit.get("warnings", []))
             except ValueError as exc:
                 curation.report["warnings"].append(f"Activity class support was not estimated: {exc}")
         elif not args.no_activity_confidence:
@@ -342,6 +381,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         duplicate_policy = "error"
     else:
         curation = None
+        generic_audit = None
         smiles_col = args.smiles_col
         value_col = args.value_col
         label_col = args.label_col
@@ -370,6 +410,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 offset_sign_agreement=args.offset_sign_agreement,
             )
             source["generic_activity"] = generic_report
+            generic_audit = generic_report
             if fit is not None:
                 source["activity_confidence"] = fit
             smiles_col = "canonical_smiles"
@@ -444,6 +485,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
         for warning in audit["warnings"]:
             print("Warning: {}".format(warning))
+    elif generic_audit is not None:
+        for warning in generic_audit.get("warnings", []):
+            print("Warning: {}".format(warning))
+    fit = source.get("activity_confidence")
+    if fit is not None:
+        max_df_share = fit.get("max_entry_degrees_of_freedom_share")
+        max_sumsq_share = fit.get("max_entry_sum_of_squares_share")
+        max_entry = fit.get("max_entry_id")
+        if max_entry is not None:
+            print(
+                "Largest sigma_doc contribution: {} (degrees of freedom {:.1%}; "
+                "pooled sum of squares {:.1%}).".format(
+                    max_entry, max_df_share, max_sumsq_share
+                )
+            )
     print("Saved files:")
     for key, path in result.output_files.items():
         print("  {:12s} {}".format(key, path))

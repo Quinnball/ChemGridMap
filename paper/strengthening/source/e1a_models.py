@@ -1,4 +1,4 @@
-"""E1-A 的六个模型与事后 flag-clean 总体；冻结预测只复制、不改写。"""
+"""E1-A six models and the post hoc flag-clean population; frozen predictions are copied unchanged."""
 from __future__ import annotations
 
 import json
@@ -26,7 +26,7 @@ FOLD_SEED = 20261024
 
 
 def b1_confidence(b0, target, fold):
-    """同靶点折外条目的全部 B0 预测一致率，不按条目再平均。"""
+    """Compute agreement over all out-of-fold B0 predictions from same-target entries without entry averaging."""
     selected = b0[b0.target == target]
     if "method" in selected:
         selected = selected[selected.method == "B0"]
@@ -35,25 +35,25 @@ def b1_confidence(b0, target, fold):
     held_entries = set(selected.loc[selected.fold == fold, "entry"])
     train = selected[~selected.entry.isin(held_entries)]
     if train.empty:
-        raise ValueError(f"B1 没有折外预测：target={target}, fold={fold}")
+        raise ValueError(f"B1 has no out-of-fold prediction: target={target}, fold={fold}")
     return float((train.observed == train.displayed).mean())
 
 
 def record_prediction(source_records, held_documents, tau):
-    """去除留出单元的全部文献记录，以剩余原始记录预测文献单元。"""
+    """Remove all records from held-out documents and predict from remaining records."""
     held = set(str(held_documents).split(";"))
     remaining = source_records.loc[
         ~source_records.document_chembl_id.astype(str).isin(held), "pchembl_value"
     ].to_numpy(float)
     if not len(remaining):
-        raise ValueError("G-record 留出文献后没有剩余记录")
+        raise ValueError("No records remain after holding out G-record documents")
     scale = float(tau) * np.sqrt(1.0 + 1.0 / len(remaining))
     probabilities = class_probabilities([remaining.mean()], [scale], [np.inf], 6.0, 7.0)[0]
     return probabilities, len(remaining)
 
 
 def _fit_row(target, fold, method, fit, train, test):
-    """保留实际拟合样本与固定折，供后续输出和审计复核。"""
+    """Retain fitted samples and fixed folds for outputs and audit checks."""
     return {
         "target": target, "fold": fold, "method": method,
         "tau": fit["tau"], "prior_df": fit["prior_df"],
@@ -67,17 +67,17 @@ def _fit_row(target, fold, method, fit, train, test):
 
 
 def build_predictions(records, frozen):
-    """返回无 population 重复的预测、标记条目集合、折拟合表及剔除统计。"""
+    """Return predictions without duplicate populations, flagged entries, fold fits, and exclusion counts."""
     frozen = frozen[frozen.evaluation_set == "merged"].copy()
     base = frozen[frozen.method.isin(["B0", "G", "X"])].copy()
     if base.duplicated(["method", *ROW_KEY]).any():
-        raise ValueError("冻结预测的模型与留出键重复")
+        raise ValueError("Frozen prediction models and held-out keys are duplicated")
     b0 = base[base.method == "B0"]
     expected_keys = pd.MultiIndex.from_frame(b0[ROW_KEY]).sort_values()
     for method in ("G", "X"):
         actual_keys = pd.MultiIndex.from_frame(base.loc[base.method == method, ROW_KEY]).sort_values()
         if not actual_keys.equals(expected_keys):
-            raise ValueError(f"冻结 {method} 与 B0 的留出键不一致")
+            raise ValueError(f"Frozen {method} held-out keys disagree with B0")
 
     additions, fit_rows, flag_rows = [], [], []
     flagged_entries, row_metadata, fold_tau = {}, {}, {}
@@ -88,7 +88,7 @@ def build_predictions(records, frozen):
         source_by_entry = dict(tuple(source.groupby("molecule_identity_key")))
         units_by_entry = dict(tuple(doc.groupby("entry")))
 
-        # flag-clean 用完整数据识别文献对，并剔除触及任一构成文献的整个条目。
+        # Flag-clean identifies document pairs in full data and removes affected complete entries.
         pairs = document_pair_offsets(source)
         pairs = pairs[pairs.systematic_offset.astype(bool)]
         flagged = set(pairs.document_a) | set(pairs.document_b)
@@ -141,11 +141,11 @@ def build_predictions(records, frozen):
             for held in fold_b0.to_dict("records"):
                 entry = held["entry"]
                 if assignments[entry] != fold:
-                    raise ValueError("冻结预测与 seed 20261024 的文献条目折不一致")
+                    raise ValueError("Frozen predictions disagree with seed 20261024 entry folds")
                 units = units_by_entry[entry]
                 remaining_units = units[units.documents != held["held_out_unit"]]
                 if len(remaining_units) != int(held["remaining_units"]):
-                    raise ValueError("冻结留出单元与当前文献合并结果不一致")
+                    raise ValueError("Frozen held-out units disagree with current document merging")
                 source_records = source_by_entry[entry]
                 held_documents = set(held["held_out_unit"].split(";"))
                 remaining_records = source_records.loc[
@@ -153,7 +153,7 @@ def build_predictions(records, frozen):
                 ].to_numpy(float)
                 displayed = CLASSES.index(activity_class(float(np.median(remaining_records)), 6.0, 7.0))
                 if displayed != int(held["displayed"]):
-                    raise ValueError("显示类别不等于剩余原始记录中位数的类别")
+                    raise ValueError("Displayed class differs from the remaining-record median class")
                 row_metadata[(target, fold, entry, held["held_out_unit"])] = len(remaining_records)
 
                 b1_p = np.full(3, (1.0 - confidence) / 2.0)
@@ -176,7 +176,7 @@ def build_predictions(records, frozen):
                         **{f"p{k}": float(probabilities[k]) for k in range(3)},
                     })
 
-    # B0/G/X 的冻结字段原样沿用；tau 只添加溯源信息，X 回退时标注实际 G 的 tau。
+    # Preserve frozen B0/G/X fields; tau adds provenance and records the fallback G tau.
     base["tau"] = [
         np.nan if row.method == "B0" else fold_tau[
             (row.target, row.fold, "G" if row.method == "X" and row.fallback_to_G else row.method)
@@ -200,9 +200,9 @@ def build_predictions(records, frozen):
     predictions["sensitivity_note"] = NOTE
     predictions = predictions.sort_values(["target", "method", "fold", "entry", "held_out_unit"]).reset_index(drop=True)
     if not np.allclose(probabilities.sum(axis=1), 1.0, atol=1e-12, rtol=0):
-        raise ValueError("模型概率之和不为 1")
+        raise ValueError("Model probabilities do not sum to 1")
     for method in MODELS:
         keys = pd.MultiIndex.from_frame(predictions.loc[predictions.method == method, ROW_KEY]).sort_values()
         if not keys.equals(expected_keys):
-            raise ValueError(f"{method} 与冻结 B0 的留出键不一致")
+            raise ValueError(f"{method} held-out keys disagree with frozen B0")
     return predictions, flagged_entries, pd.DataFrame(fit_rows), pd.DataFrame(flag_rows)

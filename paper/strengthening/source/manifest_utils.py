@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import subprocess
 from typing import Iterable, Mapping
 
 import numpy as np
@@ -79,6 +80,29 @@ def _software_versions() -> dict[str, str]:
     return {"python": platform.python_version(), **versions}
 
 
+def _git_state() -> dict[str, str | bool]:
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        dirty = bool(
+            subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return {}
+    return {"git_commit": commit, "git_dirty": dirty}
+
+
 def write_manifest(
     out_dir: Path | str,
     *,
@@ -104,6 +128,7 @@ def write_manifest(
     manifest = {
         "stage": stage,
         "analysis_role": analysis_role,
+        **_git_state(),
         "started_at": started_at,
         "finished_at": finished_at,
         "elapsed_seconds": float((finish - start).total_seconds()),

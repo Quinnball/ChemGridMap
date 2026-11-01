@@ -2,7 +2,7 @@
 
 import hashlib
 
-from relabel_chembl204 import file_hash
+from legacy.relabel_chembl204 import file_hash
 
 
 def test_file_hash_matches_standard_sha256(tmp_path):

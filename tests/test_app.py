@@ -1,5 +1,6 @@
 import hashlib
 import io
+from inspect import signature
 import json
 from html.parser import HTMLParser
 import re
@@ -13,6 +14,8 @@ import pytest
 
 from chemgridmap.app import ASSETS, AppSession, DEMO, LocalServer, point_rows, validate_options
 from chemgridmap import build_grid_map, curate_chembl_activity_data
+from chemgridmap.cli import build_parser
+from chemgridmap.evidence import annotate_activity_confidence, prepare_generic_activity_records
 
 
 RAW = b'Smiles,pChEMBL Value,Molecule ChEMBL ID\nCCO,5.2,CHEMBL20\nCCO,7.2,CHEMBL20\nCCO,8,CHEMBL20\nCCN,5,CHEMBL200\nCCC,6.4,CHEMBL300\nCCCC,8,CHEMBL400\n'
@@ -46,7 +49,7 @@ def test_app_uses_the_same_curation_and_grid_as_library(tmp_path):
         assert params["map_color_modes"] == ["neighbor_recall", "structure_group"]
         assert params["map_color_formats"] == ["svg"]
         assert params["confidence_threshold"] == 0.8
-        assert params["offset_display"] == "uncertain"
+        assert params["offset_display"] == "none"
         assert params["offset_min_shared"] == 3
         assert params["offset_threshold"] == 1.0
         assert params["offset_sign_agreement"] == 0.8
@@ -280,6 +283,20 @@ def test_number_input_defaults_satisfy_html_constraints():
                     f'{input_id}: value {value} is not on step {step} from min {minimum}'
                 )
     assert not failures, '\n'.join(failures)
+
+
+def test_offset_display_default_is_none_across_api_cli_and_browser():
+    assert signature(annotate_activity_confidence).parameters["offset_display"].default == "none"
+    assert signature(prepare_generic_activity_records).parameters["offset_display"].default == "none"
+    assert signature(build_grid_map).parameters["offset_display"].default == "none"
+    assert build_parser().parse_args(["input.csv"]).offset_display == "none"
+    assert validate_options({})["offset_display"] == "none"
+
+    html = (ASSETS / "index.html").read_text(encoding="utf-8")
+    script = (ASSETS / "app.js").read_text(encoding="utf-8")
+    assert '<select id="offset-display"><option value="none" selected>' in html
+    assert "$('offset-display').value = config.offset_display || 'none';" in script
+    assert "const offsetDisplay = job.options.offset_display || 'uncertain';" in script
 
 
 def test_map_outlines_stay_fixed_in_screen_space_and_offset_legend_is_conditional():

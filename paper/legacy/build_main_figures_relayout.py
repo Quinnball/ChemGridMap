@@ -23,10 +23,13 @@ from rdkit.Chem import rdDepictor
 from rdkit.Chem.Draw import rdMolDraw2D
 from rdkit.Chem.Scaffolds import MurckoScaffold
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_merged_figures as previous
 from build_revision_figures import text, rect, document, export, embed_svg, chart_svg, COLORS
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SOURCE, ARCHIVE, AUDIT = previous.SOURCE, previous.ARCHIVE, previous.AUDIT
 PREVIOUS_OUT = ROOT.parent / 'project1/JCIM_main_figures_redesign_20260916'
 DEFAULT_OUT = ROOT.parent / 'project1/JCIM_main_figures_redesign_20260916_review_v2'

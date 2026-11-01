@@ -56,7 +56,6 @@ API = S / "data/chembl37_api"
 SEALED_PLAN = S / "plans/E2_task_draft_sealed.md"
 SEALED_PLAN_SHA256 = "92e5ac5c920ae4d14f106d1286b5a7310f1291e62d3d29c9b32a20344b3a827d"
 REPORT = OUT / "E2b_REPORT.md"
-BRIEF = ROOT / "docs/codex-result.md"
 NULL_SEED = 20261030
 BOOT_N = 2000
 SIGMA_BOOT_N = 1000
@@ -92,6 +91,28 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def verify_cache(path: Path) -> str:
+    """Verify the cached curation records against the E2 manifest."""
+    manifest = json.loads(E2A_MANIFEST.read_text())
+    suffix = path.relative_to(S).as_posix()
+    expected = None
+    for section in ("qa_sha256", "outputs_sha256", "inputs_sha256"):
+        for name, digest in manifest.get(section, {}).items():
+            if Path(name).as_posix().endswith(suffix):
+                expected = digest
+                break
+        if expected is not None:
+            break
+    if expected is None:
+        raise RuntimeError(f"Manifest has no SHA-256 for {suffix}")
+    actual = sha256(path)
+    if actual != expected:
+        raise RuntimeError(
+            f"Cached curated records SHA-256 mismatch: {actual} != {expected}"
+        )
+    return actual
+
+
 def json_safe(value):
     if isinstance(value, dict):
         return {str(key): json_safe(item) for key, item in value.items()}
@@ -119,6 +140,12 @@ def read_predictions() -> pd.DataFrame:
 
 def load_records() -> dict[tuple[str, str], pd.DataFrame]:
     path = QA / "curated_records.pkl.gz"
+    digest = verify_cache(path)
+    print(
+        f"using cached curated records {path.relative_to(ROOT)} "
+        f"sha256={digest}",
+        flush=True,
+    )
     return pickle.loads(gzip.decompress(path.read_bytes()))
 
 
@@ -1917,7 +1944,7 @@ def run_r1_outputs() -> None:
     """Regenerate only the R1 files without rerunning accepted E2b analyses."""
     started = datetime.now().astimezone().isoformat()
     if sha256(SEALED_PLAN) != SEALED_PLAN_SHA256:
-        raise RuntimeError("封存计划 SHA-256 与任务单不一致，停止执行。")
+        raise RuntimeError("Sealed-plan SHA-256 differs from the task; stopping.")
     archived = archive_r0_time_split()
     old_pooled = pd.read_csv(
         archived["pooled"], float_precision="round_trip"
@@ -2468,31 +2495,12 @@ def write_report(
         "",
     ]
     REPORT.write_text("\n".join(sections))
-    negative_passed = bool(negative_h3.passed.all())
-    brief = [
-        "# E2b 简要结果",
-        "",
-        "- 封存计划 SHA-256 核对通过。",
-        f"- H3–H8：{len(tests)} 个预定义检验结果已写入 `hypothesis_tests.csv`；"
-        "主分析总体为 `all`。",
-        f"- H7 决策：默认模型为 `{decision['default_model']}`。",
-        f"- 负控：四个端点×总体分析格的 200 次 H3 置换拒绝率均 ≤ 0.10，"
-        f"整体通过={negative_passed}。",
-        f"- 时间切分：输出 {len(time_by_target)} 个靶点×截止年份行，"
-        "缺失年份单元已排除并计数。",
-        f"- 描述分析：σ_doc {len(sigma)} 行；标记文献对普查 {len(pairs)} 行；"
-        f"显示状态一致率 {len(agreement)} 行。",
-        "- 测试：`test_e2.py` 9 项通过；E2a 五个只读输出哈希未变。",
-        "- CA II Ki 数据缺少通讯作者字段；按计划执行贡献最高的 5 篇文献移除分析。",
-        "",
-    ]
-    BRIEF.write_text("\n".join(brief))
 
 
 def run() -> None:
     started = datetime.now().astimezone().isoformat()
     if sha256(SEALED_PLAN) != SEALED_PLAN_SHA256:
-        raise RuntimeError("封存计划 SHA-256 与任务单不一致，停止执行。")
+        raise RuntimeError("Sealed-plan SHA-256 differs from the task; stopping.")
     OUT.mkdir(parents=True, exist_ok=True)
     QA.mkdir(parents=True, exist_ok=True)
     baseline_hashes = e2a_hashes()

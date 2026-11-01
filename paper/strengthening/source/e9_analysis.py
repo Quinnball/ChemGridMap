@@ -604,7 +604,7 @@ def old_dl_diagnostic(designs: dict[str, pd.DataFrame]) -> pd.DataFrame:
                 )
     result = pd.DataFrame(rows)
     if result.absolute_error.max() > 1e-9:
-        raise RuntimeError("E9 第1节旧 DerSimonian-Laird 回归失败")
+        raise RuntimeError("E9 section 1 old DerSimonian-Laird regression failed")
     return result
 
 
@@ -768,7 +768,7 @@ def time_split_tests(
             result.n_datasets.to_numpy()
             == result.e5d_reference_n_datasets.to_numpy()
         ).all() or result.reference_max_absolute_error.max() > 1e-9 or not result.reference_counts_match.all():
-            raise RuntimeError("E9 时间切分检验与 E5d 回归失败")
+            raise RuntimeError("E9 time-split tests and E5d regression failed")
     return result
 
 
@@ -844,7 +844,7 @@ def orexin_sensitivity(
         (designs["time_2015"].target == OREXIN_TARGET)
         & (designs["time_2015"].endpoint == "Ki")
     ).any():
-        raise RuntimeError("CHEMBL5113 / Ki 不在 2015 时间切分中")
+        raise RuntimeError("CHEMBL5113 / Ki is absent from the 2015 time split")
 
     calibration_without = calibration_summary(
         designs,
@@ -1168,7 +1168,7 @@ def rule2_recomputed(
                     ]
                     if len(ref_rows) > 1:
                         raise RuntimeError(
-                            f"旧随机效应参考行不唯一：{task} {model} "
+                            f"Old random-effects reference row is not unique: {task} {model} "
                             f"{design} {endpoint} {display_class}"
                         )
                     reference_value = (
@@ -1227,7 +1227,7 @@ def rule2_recomputed(
             "old_dl_absolute_error", ascending=False
         ).head(8)
         raise RuntimeError(
-            "E9 第4节旧随机效应回归失败；"
+            "E9 section 4 old random-effects regression failed; "
             + worst[
                 [
                     "task",
@@ -1409,7 +1409,7 @@ def detailed_maps() -> pd.DataFrame:
         rows.append(row)
     result = pd.DataFrame(rows)
     if not result.assertion_passed.all():
-        raise RuntimeError("E9 三个详细靶点断言失败")
+        raise RuntimeError("E9 assertions failed for the three detailed targets")
     return result
 
 

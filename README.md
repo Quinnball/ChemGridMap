@@ -52,7 +52,15 @@ minimum bounds and have not been tested separately.
 
 ## Quick start
 
-Download the activities for ChEMBL target CA II (`CHEMBL205`), include
+The source tree includes a CA II export. Generate a map from it without a
+download:
+
+```bash
+chemgridmap src/chemgridmap/data/chembl205_ic50.csv --input-format chembl --target-id CHEMBL205 --output-dir caii_map
+```
+
+To use your own export, download the activities for ChEMBL target CA II
+(`CHEMBL205`), include
 `pChEMBL Value`, `Standard Relation`, `Standard Units`, document and
 quality-flag fields, then run:
 
@@ -88,14 +96,13 @@ source records and median pChEMBL value.
 **Activity evidence.** The main activity layer keeps the observed
 molecule-level median and class. In the separate class-support layer, a pale
 (`uncertain`) cell means that document-balanced evidence does not reach the
-configured support level. With the default `--offset-display uncertain`, it
-also means that the entry occurs in a document from a flagged offset pair. A
-document pair is flagged when it meets the configured minimum shared-entry,
-median-difference and sign-agreement criteria (defaults: 3, 1 log unit and
-80%). A pale cell is not a missing measurement, and its class is not changed.
-With `--offset-display none`, touched entries remain visible with a bottom-left
-marker but `class_status` depends only on support. Their model probabilities
-are unchanged in either mode.
+configured support level. A document pair is flagged when it meets the
+configured minimum shared-entry, median-difference and sign-agreement criteria
+(defaults: 3, 1 log unit and 80%). In the default `--offset-display none` mode,
+touched entries remain visible with a bottom-left marker, but `class_status`
+depends only on support. Use `--offset-display uncertain` to also display a
+touched entry as uncertain. A pale cell is not a missing measurement, and its
+class is not changed. Model probabilities are unchanged in either mode.
 
 All five settings are available in `annotate_activity_confidence`,
 `prepare_generic_activity_records`, the CLI and the browser:
@@ -104,6 +111,9 @@ All five settings are available in `annotate_activity_confidence`,
 record the settings. Inspect a cell to compare document counts, evidence units,
 σ_doc and its degrees of freedom, class probabilities, all touching offset
 pairs and the number of entries each pair touches.
+Fits and manifests also report the entry with the largest share of σ_doc
+degrees of freedom and pooled sum of squares; a warning is emitted when either
+share exceeds 30%.
 
 **Neighbor recall.** The neighbor-recall layer reports how many
 fingerprint-space neighbors also appear among the selected cell's tie-aware

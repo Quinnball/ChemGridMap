@@ -5,10 +5,12 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 import pandas as pd
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from reliability_analysis import ROOT, OUTPUT, sha256, dump_json
 from reliability_t2b import RESULT_MARKER, README_MARKER, REFERENCE, flatten
 

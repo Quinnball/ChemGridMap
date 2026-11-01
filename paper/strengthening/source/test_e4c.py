@@ -1,4 +1,4 @@
-"""E4c 的范围限定单元测试。"""
+"""Scoped unit tests for E4c."""
 from __future__ import annotations
 
 import numpy as np

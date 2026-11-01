@@ -30,7 +30,7 @@ from chemgridmap.projection import project_2d
 from chemgridmap.provenance import environment_versions
 from chemgridmap.representations import morgan_fingerprints, rdkit_descriptors
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 PROTOCOL = {
     "targets": ["CHEMBL205", "CHEMBL204", "CHEMBL240"],
     "main_seeds": [7, 21, 42, 84, 126], "external_seeds": [7, 21, 42],

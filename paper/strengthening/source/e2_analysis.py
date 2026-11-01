@@ -1,4 +1,4 @@
-"""E2a 多靶点整理、折外模型、指标、bootstrap 与事实报告。"""
+"""E2a multi-target curation, out-of-fold models, metrics, bootstrap, and factual report."""
 from __future__ import annotations
 
 import argparse
@@ -68,6 +68,31 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def verify_cache(cache_path: Path) -> str:
+    """Verify a pickled cache against the hash recorded by E2."""
+    manifest_path = OUT / "manifest.json"
+    if not manifest_path.is_file():
+        raise RuntimeError(f"Cannot verify {cache_path}: {manifest_path} is missing")
+    manifest = json.loads(manifest_path.read_text())
+    suffix = cache_path.relative_to(S).as_posix()
+    expected = None
+    for section in ("qa_sha256", "outputs_sha256", "inputs_sha256"):
+        for name, digest in manifest.get(section, {}).items():
+            if Path(name).as_posix().endswith(suffix):
+                expected = digest
+                break
+        if expected is not None:
+            break
+    if expected is None:
+        raise RuntimeError(f"Manifest has no SHA-256 for {suffix}")
+    actual = sha256(cache_path)
+    if actual != expected:
+        raise RuntimeError(
+            f"Cached curated records SHA-256 mismatch: {actual} != {expected}"
+        )
+    return actual
+
+
 def json_safe(value):
     if isinstance(value, dict):
         return {str(key): json_safe(item) for key, item in value.items()}
@@ -95,7 +120,7 @@ def point_scores(frame: pd.DataFrame) -> dict:
 
 
 def regression_check() -> dict:
-    """API 整理后的保留记录必须逐 activity_id 复现冻结记录。"""
+    """Curated API records must reproduce frozen records by activity_id."""
     rows = []
     for target in ORIGINAL_TARGETS:
         lower = target.lower()
@@ -130,7 +155,7 @@ def regression_check() -> dict:
             len(api_ids - frozen_ids) + len(frozen_ids - api_ids)
         ) / len(frozen_ids)
         if difference_fraction > 0.005 or max_error > 1e-12:
-            raise RuntimeError(f"API 回归检查失败：{target}")
+            raise RuntimeError(f"API regression check failed: {target}")
         rows.append(row)
     result = {
         "checks": rows,
@@ -157,11 +182,18 @@ def load_and_curate_selected():
     records_by_key = {}
     contexts_by_key = {}
     cache_path = QA / "curated_records.pkl.gz"
+    cache_digest = verify_cache(cache_path) if cache_path.exists() else None
     cached = (
         pickle.loads(gzip.decompress(cache_path.read_bytes()))
         if cache_path.exists()
         else {}
     )
+    if cache_digest is not None:
+        print(
+            f"using cached curated records {cache_path.relative_to(ROOT)} "
+            f"sha256={cache_digest}",
+            flush=True,
+        )
     for index, item in selected.iterrows():
         target = str(item.target_chembl_id)
         endpoint = str(item.standard_type)
@@ -196,7 +228,7 @@ def load_and_curate_selected():
             })
             records_by_key[(target, endpoint)] = records
             contexts_by_key[(target, endpoint)] = context
-        except Exception as error:  # 封存计划要求逐靶点记录失败并继续。
+        except Exception as error:  # Record target-level failures and continue, as required by the sealed plan.
             inclusion_rows.append({
                 "target": target,
                 "endpoint": endpoint,

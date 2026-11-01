@@ -4,8 +4,16 @@ from pathlib import Path
 
 import pytest
 
-from relabel_chembl204 import (assert_csv_preserved, assert_json_preserved, csv_rows,
-                             latest_source_record, relabel_csv, relabel_json_value, run, verify)
+from legacy.relabel_chembl204 import (
+    assert_csv_preserved,
+    assert_json_preserved,
+    csv_rows,
+    latest_source_record,
+    relabel_csv,
+    relabel_json_value,
+    run,
+    verify,
+)
 
 
 def test_csv_preserves_numeric_spelling_free_text_and_rule_flags():

@@ -1,5 +1,7 @@
 import json
+import shlex
 import zipfile
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -33,7 +35,9 @@ KEKULE_FALLBACK_CASES = [
 
 
 @pytest.mark.parametrize("merge_identical", [True, False])
-def test_cli_evidence_policy_offsets_layers_and_archive(tmp_path, merge_identical):
+@pytest.mark.parametrize("offset_display", [None, "uncertain"])
+def test_cli_evidence_policy_offsets_layers_and_archive(
+        tmp_path, merge_identical, offset_display, capsys):
     rows = []
     for i, smiles in enumerate(["CCO", "c1ccccc1", "Cc1ccccc1", "Oc1ccccc1", "Nc1ccccc1", "n1ccccc1"]):
         for document, offset in [("DOC_A", 0), ("DOC_B", 0), ("DOC_C", 2)]:
@@ -48,6 +52,8 @@ def test_cli_evidence_policy_offsets_layers_and_archive(tmp_path, merge_identica
     args = [str(source), "--input-format", "chembl", "--projection", "pca",
             "--output-dir", str(tmp_path), "--name", "check", "--render-detail", "overview",
             "--output-formats", "svg", "png", "--map-color-modes", *modes]
+    if offset_display:
+        args.extend(["--offset-display", offset_display])
     if not merge_identical:
         args.append("--no-merge-identical-documents")
     assert main(args) == 0
@@ -55,7 +61,13 @@ def test_cli_evidence_policy_offsets_layers_and_archive(tmp_path, merge_identica
     assert data.n_evidence_units.eq(2 if merge_identical else 3).all()
     assert data.discordant_document_pairs.eq(2).all()
     assert data.offset_pair_touched.all()
-    assert data.status_reason.eq("offset_pair").all()
+    if offset_display == "uncertain":
+        assert data.status_reason.eq("offset_pair").all()
+        assert data.class_status.eq("uncertain").all()
+    else:
+        expected_status = np.where(data.class_confidence >= 0.8, "supported", "uncertain")
+        assert data.class_status.tolist() == expected_status.tolist()
+        assert set(data.status_reason) <= {"supported", "low_support"}
     assert data.wide_record_range.equals(data.is_conflicted)
     offsets = pd.read_csv(tmp_path / "check_document_offsets.csv")
     assert len(offsets) == 2
@@ -73,7 +85,7 @@ def test_cli_evidence_policy_offsets_layers_and_archive(tmp_path, merge_identica
     params = manifest["parameters"]
     assert params["merge_identical_documents"] is merge_identical
     assert params["confidence_threshold"] == 0.8
-    assert params["offset_display"] == "uncertain"
+    assert params["offset_display"] == (offset_display or "none")
     assert params["offset_min_shared"] == 3
     assert params["offset_threshold"] == 1.0
     assert params["offset_sign_agreement"] == 0.8
@@ -85,8 +97,20 @@ def test_cli_evidence_policy_offsets_layers_and_archive(tmp_path, merge_identica
     assert manifest["activity_confidence"]["discordant_document_pair_count"] == 2
     assert manifest["activity_confidence"]["offset_pair_touched_entry_count"] == 6
     assert manifest["activity_confidence"]["sigma_doc"] == manifest["activity_confidence"]["tau"]
+    assert manifest["activity_confidence"]["max_entry_id"]
+    assert 0 <= manifest["activity_confidence"]["max_entry_degrees_of_freedom_share"] <= 1
+    assert 0 <= manifest["activity_confidence"]["max_entry_sum_of_squares_share"] <= 1
+    assert "Largest sigma_doc contribution:" in capsys.readouterr().out
     assert (tmp_path / "check.svg").read_bytes() == (tmp_path / "check_activity.svg").read_bytes()
     assert (tmp_path / "check.png").read_bytes() == (tmp_path / "check_activity.png").read_bytes()
+    support_svg = (tmp_path / "check_class_support.svg").read_text(encoding="utf-8")
+    assert 'data-offset-pair-marker="true"' in support_svg
+    expected_legend = (
+        "◣ offset document pair"
+        if offset_display == "uncertain"
+        else "◣ offset document pair (display unchanged)"
+    )
+    assert expected_legend in support_svg
     with zipfile.ZipFile(tmp_path / "check_results.zip") as archive:
         assert "check_document_offsets.csv" in archive.namelist()
         for mode in modes:
@@ -98,6 +122,13 @@ def test_cli_evidence_policy_offsets_layers_and_archive(tmp_path, merge_identica
 def test_cli_reliability_help_and_legacy_switches():
     parser = build_parser()
     help_text = parser.format_help()
+    assert "inspect" in parser.format_usage()
+    formatter = parser._get_formatter()
+    for action in parser._actions:
+        if not action.option_strings or action.dest == "help":
+            continue
+        assert action.help
+        assert "(default:" in formatter._get_help_string(action)
     for option in ("--no-merge-identical-documents", "--map-color-modes", "--grid-refinement",
                    "--core-rule", "--core-min-coverage", "--fmcs-timeout",
                    "--no-activity-confidence", "--evidence-model", "--compound-column",
@@ -107,7 +138,7 @@ def test_cli_reliability_help_and_legacy_switches():
                    "--identity-conflicts"):
         assert option in help_text
     normalized_help = " ".join(help_text.split())
-    assert "Coverage target for coverage/FMCS rules; range: 0.5–1 (default: 0.8)." in normalized_help
+    assert "Coverage target for coverage/FMCS rules; range: 0.5–1." in normalized_help
     defaults = parser.parse_args(["input.csv"])
     assert defaults.projection == "umap"
     assert defaults.grid_refinement == "neighbors"
@@ -119,6 +150,20 @@ def test_cli_reliability_help_and_legacy_switches():
     assert args.grid_refinement == "none" and args.core_rule == "most_frequent"
     assert args.core_min_coverage == 0.8
     assert args.no_activity_confidence
+
+
+def test_bundled_caii_quick_start_command_parses():
+    root = Path(__file__).resolve().parents[1]
+    data_path = root / "src/chemgridmap/data/chembl205_ic50.csv"
+    assert data_path.is_file()
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    command = next(
+        line.strip() for line in readme.splitlines()
+        if line.startswith("chemgridmap src/chemgridmap/data/chembl205_ic50.csv")
+    )
+    args = build_parser().parse_args(shlex.split(command)[1:])
+    assert args.input == Path("src/chemgridmap/data/chembl205_ic50.csv")
+    assert args.input_format == "chembl" and args.target_id == "CHEMBL205"
 
 
 @pytest.mark.parametrize("arguments", [

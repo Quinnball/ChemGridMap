@@ -1,4 +1,4 @@
-"""只读复核 E1-A 模型输出；不调用待验的模型构建函数。"""
+"""Read-only verification of E1-A model outputs without calling model builders."""
 from pathlib import Path
 import sys
 
@@ -57,7 +57,7 @@ def main():
         pairs = document_pair_offsets(source)
         flagged = pairs[pairs.systematic_offset]
         documents = set(flagged.document_a) | set(flagged.document_b)
-        # 从原始记录直接识别整条目剔除集合，独立于合并单元的构成文献实现。
+        # Identify removed complete entries directly from raw records, independent of merged units.
         excluded = set(source.loc[source.document_chembl_id.isin(documents), "molecule_identity_key"])
         selected = base[base.target == target]
         assert np.array_equal(selected.flag_clean, ~selected.entry.isin(excluded))

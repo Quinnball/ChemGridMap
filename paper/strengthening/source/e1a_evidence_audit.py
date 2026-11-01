@@ -1,4 +1,4 @@
-"""E1-A：按任务单固定规则审计三个靶点；冻结模块仅导入。"""
+"""E1-A: audit three targets with fixed task rules and import frozen modules only."""
 from __future__ import annotations
 
 import argparse
@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import sys
 
-# 禁止导入时在冻结目录产生字节码。
+# Do not create bytecode in frozen directories during import.
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[3]
 CGM = ROOT
@@ -47,7 +47,7 @@ def load_inputs():
 
 
 def regression_check(records, frozen):
-    """首先逐条重算；任何不一致都抛出异常，不执行后续分析。"""
+    """Recompute every row first and stop on any mismatch."""
     regenerated = []
     for target in TARGETS:
         predictions, _, _, _ = lodo_models(target, records[target])
@@ -55,11 +55,11 @@ def regression_check(records, frozen):
     actual = pd.concat(regenerated).set_index(KEY).sort_index()
     expected = frozen[frozen.method.isin(["B0", "G"])].set_index(KEY).sort_index()
     assert actual.index.is_unique and expected.index.is_unique
-    assert actual.index.equals(expected.index), "冻结预测键不一致"
+    assert actual.index.equals(expected.index), "Frozen prediction keys are inconsistent"
     errors = np.abs(actual[["p0", "p1", "p2"]].to_numpy() - expected[["p0", "p1", "p2"]].to_numpy())
-    assert errors.max() <= 1e-12, f"概率回归失败：{errors.max()}"
+    assert errors.max() <= 1e-12, f"Probability regression failed: {errors.max()}"
     for name in ["observed", "displayed"]:
-        assert np.array_equal(actual[name], expected[name]), f"{name} 回归失败"
+        assert np.array_equal(actual[name], expected[name]), f"{name} regression failed"
     g = actual.reset_index().query("method == 'G'")
     score = probability_scores(g)
     assert score["n_predictions"] == 820 and score["n_entries"] == 289
@@ -73,7 +73,7 @@ def regression_check(records, frozen):
 
 
 def permute_agreement(frozen):
-    """R1：在靶点的全部 G 预测内置换一致指标，概率与类别保持不变。"""
+    """R1: permute agreement within all G predictions without changing probabilities or classes."""
     null = frozen[frozen.method == "G"].copy().reset_index(drop=True)
     null["agree"] = null.observed == null.displayed
     shuffle = np.random.default_rng(NULL_SEED)
@@ -84,11 +84,11 @@ def permute_agreement(frozen):
 
 
 def negative_control(frozen):
-    """负控仅用于 QA；无论结果如何，都不阻止后续分析。"""
+    """Negative controls are QA diagnostics and do not block later analyses."""
     path, archive = QA / "negative_control.csv", QA / "negative_control_R0_misspecified.csv"
     if path.exists() and not archive.exists():
         old = pd.read_csv(path)
-        assert old.permutation.str.contains("observed class labels").all(), "旧负控内容与 R0 不符"
+        assert old.permutation.str.contains("observed class labels").all(), "Old negative control differs from R0"
         path.rename(archive)
     null = permute_agreement(frozen)
     rng = np.random.default_rng(BOOT_SEED)
@@ -112,7 +112,7 @@ def negative_control(frozen):
 
 
 def evaluate_all(predictions):
-    """每个评价总体单独抽样；同一抽样矩阵用于全部模型及成对差异。"""
+    """Sample each population separately and share multiplicities across models and paired differences."""
     metrics, intervals, paired = [], [], []
     rng = np.random.default_rng(BOOT_SEED)
     align_key = ["target", "fold", "entry", "held_out_unit"]
@@ -125,7 +125,7 @@ def evaluate_all(predictions):
                 base = {"population": population, "target": target, "stratum": stratum,
                         "sensitivity_note": NOTE}
                 reference = frame[frame.method == "B0"].sort_values(align_key).reset_index(drop=True)
-                assert len(reference), f"空评价组合：{base}"
+                assert len(reference), f"Empty evaluation combination: {base}"
                 weights = cluster_weights(reference, rng, BOOT_N)
                 point, draws = {}, {}
                 for method in MODELS:
@@ -171,7 +171,7 @@ def main():
         predictions, flagged_entries, fits, flags = build_predictions(records, frozen)
         fits.assign(sensitivity_note=NOTE).to_csv(QA / "fold_fits.csv", index=False)
         flags.assign(sensitivity_note=NOTE).to_csv(QA / "flag_clean_selection.csv", index=False)
-        # population 为长表：flag-clean 是 all 的子集，不是额外的独立预测。
+        # Population is a long table: flag-clean is a subset of all, not additional predictions.
         marked = pd.concat([predictions.assign(population="all"),
                             predictions[predictions.flag_clean].assign(population="flag-clean")], ignore_index=True)
         marked["sensitivity_note"] = NOTE

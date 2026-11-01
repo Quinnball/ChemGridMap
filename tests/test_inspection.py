@@ -88,6 +88,33 @@ def test_inspector_reports_each_touching_offset_pair_with_present_documents(
     assert "Offset document pair details are unavailable for this map." in unavailable["warnings"]
 
 
+def test_inspector_uses_uncertain_fallback_for_legacy_maps():
+    records = pd.DataFrame({
+        "source_row": [0],
+        "molecule_identity_key": ["CHEMBL4"],
+        "activity_pchembl_raw": [6.5],
+        "document_chembl_id": ["DOC_A"],
+    })
+    grid = pd.DataFrame({
+        "molecule_identity_key": ["CHEMBL4"], "source_rows": ["0"],
+        "n_records": [1], "activity_pchembl": [6.5],
+        "grid_row": [0], "grid_col": [0],
+        "offset_pair_touched": [True], "status_reason": ["offset_pair"],
+    })
+    confidence = {
+        "confidence_threshold": 0.8,
+        "document_offsets": [{
+            "document_a": "DOC_A", "document_b": "DOC_B",
+            "median_offset": 3.0, "shared_entries": 3, "touched_entry_count": 7,
+        }],
+    }
+    _, _, summary = inspect_entry(
+        grid, records, molecule_id="CHEMBL4", activity_confidence=confidence
+    )
+    assert summary["offset_display"] is None
+    assert any("so it is shown as uncertain." in warning for warning in summary["warnings"])
+
+
 def test_id_is_exact_not_substring(case):
     with pytest.raises(ValueError, match="0 entries"):
         inspect_entry(*case, molecule_id="CHEMBL2")

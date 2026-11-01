@@ -13,6 +13,8 @@ import pandas as pd
 import pymupdf
 from PIL import Image
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import build_submission_figures as base
 from build_revision_figures import document, text, rect, embed_svg, chart_svg
 from chemgridmap.neighborhoods import neighborhood_evidence

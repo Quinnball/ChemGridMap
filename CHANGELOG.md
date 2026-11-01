@@ -2,6 +2,24 @@
 
 ## 0.5.0 — 2026-10-29
 
+- Make `offset_display="none"` the default in the Python API, CLI and browser.
+  Offset document pairs are still reported, exported and marked in the support
+  layer, while display status follows support alone; use
+  `--offset-display uncertain` to opt into the previous downgrade. In the
+  held-out re-evaluation that kept held-out documents out of flag construction,
+  the downgrade did not increase the agreement of supported cells with the
+  held-out literature.
+- Report the activity evidence entry that contributes the largest share of
+  σ_doc degrees of freedom and pooled sum of squares in fits, run manifests and
+  CLI summaries, with a warning above 30%. The σ_doc estimate is unchanged.
+- Show every CLI option default in help, mention the `inspect` subcommand in
+  usage, add the bundled CA II quick-start command, and export
+  `prepare_generic_activity_records` as documented public API.
+- Compare parent identities by the standard InChIKey after removing explicit
+  hydrogens. Keep same-key tautomer, resonance and de-deuterated writing
+  variants as one deterministic entry, warn about them, and export
+  `structure_variants.csv`; reserve identity errors for different constitutions
+  or stereochemistry. Report the package's own version in manifests.
 - Make the support level and offset display rule configurable in the Python
   API, CLI and browser. Add configurable minimum shared entries, median
   log-unit difference and sign agreement; validate each value and record all
@@ -35,8 +53,8 @@
 - Keep selected-cell and neighbor outlines at a fixed on-screen width while
   zooming in the browser, and list the offset marker in the legend only when an
   offset document pair touches a displayed entry.
-- Apply the offset-aware display rule: an entry touched by a flagged document
-  pair is uncertain and pale, with `status_reason=offset_pair`, while all model
+- When `offset_display=uncertain`, an entry touched by a flagged document pair
+  is uncertain and pale, with `status_reason=offset_pair`, while all model
   probabilities remain unchanged. Record touched-entry counts in fits and
   manifests, show document-pair details and a distinct bottom-left map marker.
 - Rename the user-facing "conflict" flag to "wide record range", retain

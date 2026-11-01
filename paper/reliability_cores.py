@@ -21,8 +21,8 @@ from chemgridmap.cores import mcs_core, select_core
 
 ROOT = Path(__file__).resolve().parents[1]
 FROZEN = ROOT / "paper/output/revision_v6"
-CACHE = ROOT.parent / "project1/JCIM_review_innovation_20261024/results/core_selection/group_core_comparison.csv"
-HISTORY_ROOT = ROOT.parent / "project1/JCIM_review_innovation_20261024"
+LEGACY_REFERENCE = ROOT / "paper/legacy/reference"
+CACHE = LEGACY_REFERENCE / "group_core_comparison.csv"
 TARGETS = {"chembl205": "CA II", "chembl204": "Thrombin", "chembl240": "hERG"}
 EXPECTED_GROUPS = {"chembl205": 125, "chembl204": 152, "chembl240": 203}
 THRESHOLDS = (0.6, 0.7, 0.8, 0.9, 1.0)
@@ -350,8 +350,8 @@ def run_cores_timing(output_root, *, input_root=FROZEN, cache_path=CACHE):
     if not cached.index.is_unique:
         raise ValueError("The historical FMCS cache contains duplicate target/group keys.")
     metadata = core_timing_metadata()
-    inputs = [cache_path, HISTORY_ROOT / "software/chemgridmap/src/chemgridmap/cores.py",
-              HISTORY_ROOT / "analysis/evaluate_core_selection.py"]
+    inputs = [cache_path, LEGACY_REFERENCE / "historical_cores.py",
+              LEGACY_REFERENCE / "evaluate_core_selection.py"]
     rows, audit_rows, protocols, counts = [], [], {}, {}
     for target, label in TARGETS.items():
         path = input_root / target / "map_molecules.csv"

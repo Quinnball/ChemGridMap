@@ -1,4 +1,4 @@
-"""E1-B: 冻结核心规则分层，以及顺序单进程 FMCS 时间预算扫描。"""
+"""E1-B: stratified frozen core rules and sequential single-process FMCS budgets."""
 from __future__ import annotations
 
 import argparse
@@ -32,14 +32,14 @@ STRATA = ("2", "3-4", "5-9", ">=10")
 
 
 def size_stratum(size):
-    """分组规则在任务单中预先指定；单分子组不属于分析总体。"""
+    """Task rules define grouping; singleton groups are outside the analysis population."""
     if size < 2:
         raise ValueError("Only nonsingleton groups are eligible.")
     return "2" if size == 2 else "3-4" if size <= 4 else "5-9" if size <= 9 else ">=10"
 
 
 def stratify_cores(table):
-    """No core 是分类状态，覆盖率与核心大小均排除缺失核心。"""
+    """No core is a categorical state; coverage and core-size summaries exclude missing cores."""
     rows = []
     groups = [(target, label, table.loc[table.target.eq(target)]) for target, label in TARGETS.items()]
     groups.append(("overall", "Overall", table))
@@ -80,7 +80,7 @@ def member_ids(value):
 
 
 def prepare_groups(comparison, timing, audit):
-    """重建固定分组，核对每组完整成员以及三条冻结规则的匹配证据。"""
+    """Rebuild fixed groups and check members plus evidence for all three frozen rules."""
     prepared, evidence, protocols = [], [], {}
     keys = ["target", "group"]
     frozen = comparison.set_index(keys + ["rule"])
@@ -179,12 +179,12 @@ def run(output=OUTPUT):
                          "source": "E1B_sequential_recomputation"})
             if index % 25 == 0 or index == 480:
                 print(f"FMCS timeout={timeout}: {index}/480 groups", flush=True)
-        # 每个预算结束保存，方便明确识别已完成的原始计算。
+        # Save after each budget to identify completed original computations.
         pd.DataFrame(rows).to_csv(output / "fmcs_budget_by_group.csv", index=False, na_rep="NA")
         print(f"END timeout={timeout} total_seconds={sum(row['seconds'] for row in rows if row['timeout_seconds'] == timeout):.6f}", flush=True)
     metadata["finished_at_utc"] = datetime.now(timezone.utc).isoformat()
     metadata["load_average_finish"] = list(os.getloadavg())
-    # 10 s 的覆盖和计时来自同一次冻结全量重算；不将历史缓存覆盖与新计时拼接。
+    # Ten-second coverage and timing come from one frozen recomputation; do not mix cache and new timing.
     merged = timing.merge(audit, on=["target", "target_label", "group", "size"], validate="one_to_one")
     assert np.allclose(merged.fmcs_seconds, merged.recomputed_seconds, rtol=0, atol=1e-12)
     assert (merged.fmcs_timed_out == merged.recomputed_timed_out).all()

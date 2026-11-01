@@ -17,12 +17,11 @@ import sys
 import tempfile
 import time
 
-ROOT = Path(__file__).resolve().parents[1]
-PROJECT = ROOT.parent
+ROOT = Path(__file__).resolve().parents[2]
 FROZEN = ROOT / "paper/output/revision_v6"
-REVIEW = PROJECT / "project1/JCIM_review_innovation_20261024"
+REFERENCE = ROOT / "paper/legacy/reference"
 CHECKS_ROOT = ROOT / "paper/output/reliability_v1/t1_checks"
-FIGURE = PROJECT / "project1/JCIM_molecular_figure_revision_20261014_v2/figures/source_data/Figure_3_core_coverage.csv"
+FIGURE = REFERENCE / "v2_source_data/Figure_3_core_coverage.csv"
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / "src"))
 os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "chemgridmap_t1_mpl"))
@@ -231,13 +230,13 @@ def probability_scores(frame):
 def headline(output):
     folder = output / "headline"
     folder.mkdir(parents=True, exist_ok=True)
-    reference = json.loads(source(REVIEW / "results/headline_numbers.json").read_text())
+    reference = json.loads(source(REFERENCE / "headline_numbers.json").read_text())
     # The read-only historical reference retains the legacy target key.
     reference["grid_refinement"] = {"Thrombin" if label == "D3" else label: section
                                     for label, section in reference["grid_refinement"].items()}
     for name in ("common.py", "evaluate_grid_refinement.py", "evaluate_core_selection.py",
                  "evaluate_activity_confidence.py"):
-        source(REVIEW / "analysis" / name)
+        source(REFERENCE / name)
     rows, core_rows, validation, diagnostics, checks = [], [], [], {}, []
     for target, (label, seeds) in TARGETS.items():
         data = layout(target, 42)

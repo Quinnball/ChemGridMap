@@ -1,4 +1,4 @@
-"""E4a 事后分析：比较对象、显示类别校准和类别支持度。"""
+"""E4a post hoc comparators, displayed-class calibration, and class support."""
 from __future__ import annotations
 
 import gzip
@@ -55,7 +55,7 @@ def displayed_ece(
     agree,
     weights: np.ndarray | None = None,
 ) -> float:
-    """显示类别的 10 箱 ECE；权重无需对每行归一。"""
+    """Ten-bin ECE for displayed classes; row weights need not be normalized."""
     score = np.asarray(score, dtype=float)
     agree = np.asarray(agree, dtype=float)
     if weights is None:
@@ -78,7 +78,7 @@ def displayed_ece(
 
 
 def bootstrap_binary_auc(agree, score, frame, weights) -> np.ndarray:
-    """在固定目标条目重数下计算二分类 AUC。"""
+    """Compute binary AUC under fixed target-entry multiplicities."""
     agree = np.asarray(agree, dtype=bool)
     score = np.asarray(score, dtype=float)
     order = np.argsort(score, kind="stable")
@@ -136,14 +136,14 @@ def one_sided_wilcoxon(values) -> tuple[float, float, int]:
 
 
 def distance_score(center: float, displayed: int) -> float:
-    """离显示类别边界的距离；越大表示类别内位置越深。"""
+    """Distance to the displayed-class boundary; larger values are deeper inside a class."""
     if displayed == 0:
         return float(6.0 - center)
     if displayed == 2:
         return float(center - 7.0)
     if displayed == 1:
         return float(min(center - 6.0, 7.0 - center))
-    raise ValueError(f"未知显示类别：{displayed}")
+    raise ValueError(f"Unknown displayed class: {displayed}")
 
 
 def distance_scores(center, displayed) -> np.ndarray:
@@ -172,7 +172,7 @@ def g_with_support(
     predictions: pd.DataFrame,
     records_by_key: dict[tuple[str, str], pd.DataFrame],
 ) -> pd.DataFrame:
-    """从同一组剩余单元重建 G 中心和显示类别支持度。"""
+    """Rebuild the G centre and displayed support from the same remaining units."""
     g = predictions.loc[
         (predictions.population == POPULATION) & (predictions.method == "G")
     ].copy()
@@ -194,7 +194,7 @@ def g_with_support(
             ]
             if len(remaining) != int(row.m):
                 raise ValueError(
-                    f"剩余单元数不一致：{target}/{endpoint}/{row.entry}"
+                    f"Remaining-unit counts are inconsistent: {target}/{endpoint}/{row.entry}"
                 )
             g.at[index, "remaining_center"] = float(
                 remaining.document_value.mean()
@@ -231,7 +231,7 @@ def comparator_table(
             & (predictions.method == "G-fixed")
         ].sort_values(ALIGN).reset_index(drop=True)
         if not target_g[ALIGN].equals(fixed[ALIGN]):
-            raise ValueError(f"G-fixed 留出键不一致：{target}/{endpoint}")
+            raise ValueError(f"G-fixed held-out keys are inconsistent: {target}/{endpoint}")
 
         b_sd = b0.loc[b0.remaining_records >= 2].reset_index(drop=True)
         archived = comparators.loc[
@@ -241,7 +241,7 @@ def comparator_table(
             & (comparators.model == "B-sd")
         ]
         if len(archived) != 1:
-            raise ValueError(f"缺少比较对象：{target}/{endpoint}/B-sd")
+            raise ValueError(f"Missing comparator: {target}/{endpoint}/B-sd")
         archived = archived.iloc[0]
         scores = {
             "G": (target_g.agree, target_g.p_displayed, target_g),
@@ -264,7 +264,7 @@ def comparator_table(
                     point, archived.auc, rtol=0, atol=1e-12
                 )
                 if not (both_missing or same_value):
-                    raise ValueError(f"B-sd AUC 未复现：{target}/{endpoint}")
+                    raise ValueError(f"B-sd AUC did not reproduce: {target}/{endpoint}")
             rows.append({
                 "target": target,
                 "endpoint": endpoint,
@@ -300,12 +300,12 @@ def comparator_table(
         validate="one_to_one",
     )
     if len(check) != len(expected):
-        raise ValueError("G/G-fixed 与 metrics_by_target.csv 的键不一致")
+        raise ValueError("G/G-fixed keys disagree with metrics_by_target.csv")
     error = float(
         (check.auc_archive - check.auc_recomputed).abs().max()
     )
     if error > 1e-12:
-        raise ValueError(f"G/G-fixed AUC 未复现，最大误差 {error}")
+        raise ValueError(f"G/G-fixed AUC did not reproduce; maximum error {error}")
     result.attrs["maximum_metric_auc_error"] = error
     return result
 
@@ -396,7 +396,7 @@ def comparison_summary(
         )
         if computed != archived_count:
             raise ValueError(
-                f"G AUC CI 计数未与 forest 一致：{endpoint}"
+                f"G AUC CI counts disagree with the forest table: {endpoint}"
             )
         forest_counts[endpoint] = {
             "n_datasets": len(archived),
@@ -631,7 +631,7 @@ def write_outputs() -> dict:
     inclusion = read_csv(E2 / "target_inclusion.csv")
     included = inclusion.loc[inclusion.included.astype(bool)]
     if len(included) != 52:
-        raise ValueError(f"纳入数据集不是 52 个，而是 {len(included)} 个")
+        raise ValueError(f"Included dataset count is not 52 but {len(included)}")
 
     records = load_records()
     g = g_with_support(predictions, records)
@@ -661,7 +661,7 @@ def write_outputs() -> dict:
     observed_forest = summary_checks["forest_g_ci_counts"]
     if observed_forest != expected_forest:
         raise ValueError(
-            f"forest CI 计数不符合任务书：{observed_forest}"
+            f"Forest CI counts do not match the task: {observed_forest}"
         )
     ki = summary.loc[summary.row_type == "ki_excluding_original_targets_h3"].iloc[0]
     if len(ki) and (
@@ -669,7 +669,7 @@ def write_outputs() -> dict:
         or float(ki.raw_p) > 5e-7
     ):
         raise ValueError(
-            f"Ki 去除原靶点结果不符：median={ki.median_auc}, p={ki.raw_p}"
+            f"Ki exclusion result differs: median={ki.median_auc}, p={ki.raw_p}"
         )
 
     checks = {

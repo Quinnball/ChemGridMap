@@ -1,4 +1,4 @@
-"""E2a 的 G-global、比较对象、flag-clean 与 E1-A 实现回归测试。"""
+"""Regression tests for E2a G-global, comparators, flag-clean, and E1-A implementations."""
 from __future__ import annotations
 
 from pathlib import Path

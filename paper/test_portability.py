@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-from check_t2b_outputs import latest_provenance
+from legacy.check_t2b_outputs import latest_provenance
 
 
 @pytest.mark.parametrize("newest", ["software_checks_050", "portability_fix", "label_correction",
@@ -25,7 +25,7 @@ def test_latest_provenance_prefers_newest_available_section(newest):
 
 @pytest.fixture
 def application_runner(tmp_path, monkeypatch):
-    runner = importlib.import_module("check_reliability_merge")
+    runner = importlib.import_module("legacy.check_reliability_merge")
     monkeypatch.setattr(runner, "CHECKS_ROOT", tmp_path / "checks")
     monkeypatch.setattr(runner, "INPUTS", {})
     output = tmp_path / "runner"

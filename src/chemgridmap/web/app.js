@@ -589,7 +589,7 @@ function restoreOptions(config) {
   $('activity-confidence').checked = config.activity_confidence ?? true; $('evidence-model').value = config.evidence_model || 'gaussian';
   $('merge-identical-documents').checked = config.merge_identical_documents ?? true;
   $('support-level').value = config.support_level ?? .8;
-  $('offset-display').value = config.offset_display || 'uncertain';
+  $('offset-display').value = config.offset_display || 'none';
   $('offset-min-shared').value = config.offset_min_shared ?? 3;
   $('offset-min-difference').value = config.offset_min_difference ?? 1;
   $('offset-sign-agreement').value = config.offset_sign_agreement ?? .8;

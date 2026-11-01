@@ -385,7 +385,7 @@ def validate_options(options):
                 "fmcs_timeout": 1, "compound_column": None, "document_column": None,
                 "relation_column": None, "activity_confidence": True,
                 "evidence_model": "gaussian", "merge_identical_documents": True,
-                "support_level": .8, "offset_display": "uncertain",
+                "support_level": .8, "offset_display": "none",
                 "offset_min_shared": 3, "offset_min_difference": 1.0,
                 "offset_sign_agreement": .8, "identity_conflicts": "error"}
     if not isinstance(options, dict) or set(options) - set(defaults):

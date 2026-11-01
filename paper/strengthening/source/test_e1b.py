@@ -1,4 +1,4 @@
-"""E1-B：并列邻居、手算指标、重抽样和冻结数据的一致性。"""
+"""E1-B tie handling, hand calculations, resampling, and frozen-data consistency."""
 from pathlib import Path
 
 import numpy as np
@@ -43,7 +43,7 @@ def test_recall_and_activity_error_hand_calculation():
     np.testing.assert_allclose(result["e_fp"], [2.5, 1., 2.5, 2.])
     np.testing.assert_allclose(result["e_grid"], [3.5, 2., 3.5, 5.])
     np.testing.assert_allclose(result["excess_error"], [1., 1., 1., 3.])
-    assert np.mean(result["e_grid"]) == 3.5  # 分子等权，而非把所有边混在一起平均。
+    assert np.mean(result["e_grid"]) == 3.5  # Weight molecules equally instead of pooling all edges.
 
 
 @pytest.mark.parametrize("size, expected", [(2, "2"), (3, "3-4"), (4, "3-4"),
@@ -154,7 +154,7 @@ def test_output_population_and_bootstrap_completeness():
     counts = bins.groupby(["target", "seed", "layout"]).n.sum()
     errors = pd.read_csv(OUTPUT / "layout_activity_error.csv")
     expected_rows = errors.loc[errors.row_type.eq("seed_layout")].copy()
-    # 汇总行的空 seed 使 CSV 读回为 float；核对整数值后统一标识类型。
+    # Empty seed in summary rows reads as float; verify and normalize the identifier type.
     assert expected_rows.seed.eq(expected_rows.seed.round()).all()
     expected_rows["seed"] = expected_rows.seed.astype(int)
     expected = expected_rows.set_index(["target", "seed", "layout"]).n

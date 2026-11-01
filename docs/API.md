@@ -3,7 +3,7 @@
 ## `ChemblCurationResult`
 
 ```python
-ChemblCurationResult(molecules: 'pd.DataFrame', retained_records: 'pd.DataFrame', excluded_records: 'pd.DataFrame', report: 'Dict[str, object]', identity_conflicts: 'pd.DataFrame' = <factory>) -> None
+ChemblCurationResult(molecules: 'pd.DataFrame', retained_records: 'pd.DataFrame', excluded_records: 'pd.DataFrame', report: 'Dict[str, object]', identity_conflicts: 'pd.DataFrame' = <factory>, structure_variants: 'pd.DataFrame' = <factory>) -> None
 ```
 
 Tables and audit information produced from a ChEMBL activity export.
@@ -19,7 +19,7 @@ Data and files produced by one grid-map run.
 ## `annotate_activity_confidence`
 
 ```python
-annotate_activity_confidence(molecules: 'pd.DataFrame', records: 'pd.DataFrame', *, lower: 'float' = 6.0, upper: 'float' = 7.0, confidence_threshold: 'float' = 0.8, model: 'str' = 'gaussian', fit: 'Optional[Dict[str, object]]' = None, entry: 'str' = 'molecule_identity_key', value: 'str' = 'pchembl_value', document: 'str' = 'document_chembl_id', displayed: 'str' = 'activity_pchembl', merge_identical: 'bool' = True, offset_display: 'str' = 'uncertain', offset_min_shared: 'int' = 3, offset_threshold: 'float' = 1.0, offset_sign_agreement: 'float' = 0.8)
+annotate_activity_confidence(molecules: 'pd.DataFrame', records: 'pd.DataFrame', *, lower: 'float' = 6.0, upper: 'float' = 7.0, confidence_threshold: 'float' = 0.8, model: 'str' = 'gaussian', fit: 'Optional[Dict[str, object]]' = None, entry: 'str' = 'molecule_identity_key', value: 'str' = 'pchembl_value', document: 'str' = 'document_chembl_id', displayed: 'str' = 'activity_pchembl', merge_identical: 'bool' = True, offset_display: 'str' = 'none', offset_min_shared: 'int' = 3, offset_threshold: 'float' = 1.0, offset_sign_agreement: 'float' = 0.8)
 ```
 
 Add document-balanced estimates and class confidence to entry-level annotations.
@@ -35,7 +35,7 @@ Assign each projected point to a unique dense- or sparse-matched cell.
 ## `build_grid_map`
 
 ```python
-build_grid_map(data: 'pd.DataFrame', output_dir: 'Optional[Path]' = None, name: 'str' = 'grid_map', smiles_col: 'str' = 'smiles', value_col: 'Optional[str]' = None, label_col: 'Optional[str]' = None, representation: 'str' = 'morgan', projection: 'str' = 'umap', umap_metric: 'str' = 'auto', x_col: 'Optional[str]' = None, y_col: 'Optional[str]' = None, embedding_prefix: 'str' = 'emb_', radius: 'int' = 2, n_bits: 'int' = 2048, lower_threshold: 'float' = 6.0, upper_threshold: 'float' = 7.0, duplicate_policy: 'str' = 'error', random_state: 'int' = 42, k: 'int' = 10, trustworthiness_sample_size: 'int' = 3000, grid_padding: 'Optional[int]' = None, grid_occupancy: 'float' = 0.4, coordinate_scaling: 'str' = 'isotropic', assignment_method: 'str' = 'auto', dense_max_pairs: 'int' = 20000000, sparse_neighbors: 'int' = 128, render_detail: 'str' = 'auto', output_formats: 'Optional[List[str]]' = None, color_map: 'Optional[Dict[str, str]]' = None, provenance: 'Optional[Dict]' = None, sparse_adaptive: 'bool' = True, sparse_max_neighbors: 'int' = 1024, grouping: 'str' = 'butina', group_similarity: 'float' = 0.6, cluster_col: 'Optional[str]' = None, cluster_source: 'Optional[str]' = None, grid_refinement: 'str' = 'neighbors', core_rule: 'str' = 'coverage', core_min_coverage: 'float' = 0.8, fmcs_timeout: 'int' = 1, compound_col: 'Optional[str]' = None, document_col: 'Optional[str]' = None, relation_col: 'Optional[str]' = None, evidence_model: 'str' = 'gaussian', merge_identical_documents: 'bool' = True, confidence_threshold: 'float' = 0.8, offset_display: 'str' = 'uncertain', offset_min_shared: 'int' = 3, offset_threshold: 'float' = 1.0, offset_sign_agreement: 'float' = 0.8, map_color_modes: 'Optional[List[str]]' = None, map_color_formats: 'Optional[Sequence[str]]' = None) -> 'GridMapResult'
+build_grid_map(data: 'pd.DataFrame', output_dir: 'Optional[Path]' = None, name: 'str' = 'grid_map', smiles_col: 'str' = 'smiles', value_col: 'Optional[str]' = None, label_col: 'Optional[str]' = None, representation: 'str' = 'morgan', projection: 'str' = 'umap', umap_metric: 'str' = 'auto', x_col: 'Optional[str]' = None, y_col: 'Optional[str]' = None, embedding_prefix: 'str' = 'emb_', radius: 'int' = 2, n_bits: 'int' = 2048, lower_threshold: 'float' = 6.0, upper_threshold: 'float' = 7.0, duplicate_policy: 'str' = 'error', random_state: 'int' = 42, k: 'int' = 10, trustworthiness_sample_size: 'int' = 3000, grid_padding: 'Optional[int]' = None, grid_occupancy: 'float' = 0.4, coordinate_scaling: 'str' = 'isotropic', assignment_method: 'str' = 'auto', dense_max_pairs: 'int' = 20000000, sparse_neighbors: 'int' = 128, render_detail: 'str' = 'auto', output_formats: 'Optional[List[str]]' = None, color_map: 'Optional[Dict[str, str]]' = None, provenance: 'Optional[Dict]' = None, sparse_adaptive: 'bool' = True, sparse_max_neighbors: 'int' = 1024, grouping: 'str' = 'butina', group_similarity: 'float' = 0.6, cluster_col: 'Optional[str]' = None, cluster_source: 'Optional[str]' = None, grid_refinement: 'str' = 'neighbors', core_rule: 'str' = 'coverage', core_min_coverage: 'float' = 0.8, fmcs_timeout: 'int' = 1, compound_col: 'Optional[str]' = None, document_col: 'Optional[str]' = None, relation_col: 'Optional[str]' = None, evidence_model: 'str' = 'gaussian', merge_identical_documents: 'bool' = True, confidence_threshold: 'float' = 0.8, offset_display: 'str' = 'none', offset_min_shared: 'int' = 3, offset_threshold: 'float' = 1.0, offset_sign_agreement: 'float' = 0.8, map_color_modes: 'Optional[List[str]]' = None, map_color_formats: 'Optional[Sequence[str]]' = None) -> 'GridMapResult'
 ```
 
 Build and optionally save a one-molecule-per-cell grid chemical map.
@@ -83,10 +83,18 @@ Collapse source records to evidence units: one median value per entry and docume
 ## `fit_between_unit_sd`
 
 ```python
-fit_between_unit_sd(doc: 'pd.DataFrame', *, min_entries: 'int' = 5, fallback_sd: 'Optional[float]' = 0.64) -> 'Dict[str, float]'
+fit_between_unit_sd(doc: 'pd.DataFrame', *, min_entries: 'int' = 5, fallback_sd: 'Optional[float]' = 0.64) -> 'Dict[str, object]'
 ```
 
 Pooled SD between evidence units of the same entry (Gaussian model).
+
+## `prepare_generic_activity_records`
+
+```python
+prepare_generic_activity_records(data: 'pd.DataFrame', *, compound_column: 'str', value_column: 'str', document_column: 'Optional[str]', smiles_column: 'str', relation_column: 'Optional[str]' = None, lower: 'float' = 6.0, upper: 'float' = 7.0, conflict_range_threshold: 'float' = 1.0, confidence: 'bool' = True, confidence_threshold: 'float' = 0.8, merge_identical: 'bool' = True, evidence_model: 'str' = 'gaussian', offset_display: 'str' = 'none', offset_min_shared: 'int' = 3, offset_threshold: 'float' = 1.0, offset_sign_agreement: 'float' = 0.8) -> 'Tuple[pd.DataFrame, pd.DataFrame, Optional[Dict[str, object]], Dict[str, object]]'
+```
+
+Curate a generic activity-record CSV into the molecule-level map schema.
 
 ## `grid_neighbor_sets`
 

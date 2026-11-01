@@ -11,6 +11,9 @@ import pymupdf
 from PIL import Image
 from rdkit import Chem
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_submission_figures as base
 from build_revision_figures import text, rect, embed_svg
 from build_story_figures import arrow

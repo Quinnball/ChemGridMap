@@ -399,3 +399,11 @@
 | `core_smiles` | Selected group core SMILES. | SMILES |
 | `core_smarts` | FMCS core SMARTS when available. | SMARTS |
 | `core_coverage_target` | Requested core-coverage target. | fraction 0–1 |
+
+## Offset display default
+
+`offset_display` defaults to `none`: `offset_pair_touched` and
+`document_offsets.csv` are still written, and touched entries retain the
+support-layer marker, but `class_status` and `status_reason` follow support
+alone. Use `offset_display="uncertain"` or `--offset-display uncertain` to
+show touched entries as uncertain.

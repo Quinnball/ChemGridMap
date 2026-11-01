@@ -1,4 +1,4 @@
-"""E2a 多靶点整理、折外预测与现有做法比较对象。"""
+"""E2a multi-target curation, out-of-fold prediction, and existing-practice comparators."""
 from __future__ import annotations
 
 import json
@@ -58,7 +58,7 @@ CURATION_DEFAULTS = {
 
 
 def curation_settings(target_id: str, endpoint: str) -> dict:
-    """原三靶点沿用冻结报告；其余靶点使用封存计划指定的默认整理。"""
+    """Reuse frozen reports for the original three targets and sealed defaults for others."""
     frozen = ROOT / f"paper/output/revision_v6/{target_id.lower()}"
     report_path = frozen / f"{target_id.lower()}_curation_report.json"
     if endpoint == "IC50" and report_path.exists():
@@ -77,7 +77,7 @@ def curation_settings(target_id: str, endpoint: str) -> dict:
 
 
 def curate_activity_table(raw: pd.DataFrame, target_id: str, endpoint: str):
-    """API 列由 CGM 的规范化列名检测直接识别，不在此处改写字段时间格式。"""
+    """Detect API columns with CGM normalization without rewriting assay-time formats here."""
     params = curation_settings(target_id, endpoint)
     return curate_chembl_activity_data(
         raw,
@@ -94,7 +94,7 @@ def curate_activity_table(raw: pd.DataFrame, target_id: str, endpoint: str):
 
 
 def clean_training(doc: pd.DataFrame, excluded_entries: set[str]) -> pd.DataFrame:
-    """flag-clean 拟合时整条移除完整数据中涉及标记文献的条目。"""
+    """For flag-clean fitting, remove complete entries that involve flagged documents."""
     return doc.loc[~doc.entry.isin(excluded_entries)].copy()
 
 
@@ -106,7 +106,7 @@ def touch_flagged_entries(doc: pd.DataFrame, flagged: set[str]) -> set[str]:
 
 
 def document_pair_observations(records: pd.DataFrame) -> pd.DataFrame:
-    """一次生成文献对共享条目观测，供每个训练折重新判定标记文献。"""
+    """Build shared-entry document-pair observations once for each training fold."""
     doc = document_values(records, merge_identical=False)
     rows = []
     for entry, group in doc.groupby("entry", sort=True):
@@ -121,7 +121,7 @@ def document_pair_observations(records: pd.DataFrame) -> pd.DataFrame:
 def flags_from_observations(
     observations: pd.DataFrame, training_entries: set[str] | None = None
 ) -> set[str]:
-    """按 CGM 默认阈值重新找出训练条目中的系统性偏移文献。"""
+    """Identify systematic offset documents with CGM default thresholds."""
     selected = observations
     if training_entries is not None:
         selected = selected.loc[selected.entry.isin(training_entries)]
@@ -138,11 +138,11 @@ def flags_from_observations(
 
 
 def assert_flag_helper_matches_cgm(records: pd.DataFrame) -> None:
-    """启动时核对快速文献对路径与原 CGM 默认输出一致。"""
+    """At startup, check the fast document-pair path against the original CGM output."""
     expected = flagged_documents(records)
     actual = flags_from_observations(document_pair_observations(records))
     if actual != expected:
-        raise RuntimeError("E2 文献对标记与 CGM 默认实现不一致。")
+        raise RuntimeError("E2 document-pair flags disagree with the CGM default implementation.")
 
 
 def pooled_global_fit(
@@ -151,7 +151,7 @@ def pooled_global_fit(
     target: str,
     population: str,
 ) -> dict:
-    """留一靶点合并其它纳入靶点的多单元条目，排除当前靶点全部数据。"""
+    """Leave one target out while pooling multi-unit entries from other included targets."""
     frames = []
     donors = []
     for donor, doc in docs_by_target.items():
@@ -199,13 +199,13 @@ def build_global_fits(
 
 
 def comparator_scores(records: pd.DataFrame, held_documents: str) -> tuple[float, float, int]:
-    """只使用剔除留出文献后的原始记录计算 range 与 SD 分数。"""
+    """Compute range and SD scores from remaining records only."""
     held = set(str(held_documents).split(";"))
     remaining = records.loc[
         ~records.document_chembl_id.astype(str).isin(held), "pchembl_value"
     ].to_numpy(float)
     if not len(remaining):
-        raise ValueError("留出文献后没有剩余原始记录。")
+        raise ValueError("No raw records remain after holding out documents.")
     range_score = float(float(np.max(remaining) - np.min(remaining)) <= 1.0)
     sd_score = (
         float(-np.std(remaining, ddof=1))
@@ -245,7 +245,7 @@ def _prediction_row(
 
 
 def prepare_target(records: pd.DataFrame) -> dict:
-    """缓存一个靶点不随折变化的文档单元、文献对与 flag-clean 条目。"""
+    """Cache fold-invariant document units, document pairs, and flag-clean entries."""
     doc = document_values(records, merge_identical=True)
     raw_units = document_values(
         records, document="activity_id", merge_identical=False
@@ -269,7 +269,7 @@ def build_target_predictions(
     models: tuple[str, ...] = MODELS,
     context: dict | None = None,
 ) -> tuple[pd.DataFrame, set[str]]:
-    """构造一个靶点的所有折外预测；总体长表稍后统一补齐 B1。"""
+    """Build all out-of-fold predictions for one target and add B1 to the long table later."""
     context = context or prepare_target(records)
     doc = context["doc"]
     raw_units = context["raw_units"]
@@ -318,7 +318,7 @@ def build_target_predictions(
                     "pchembl_value",
                 ].to_numpy(float)
                 if remaining_units.empty or not len(remaining_raw):
-                    raise ValueError("留出一个文献单元后没有剩余证据。")
+                    raise ValueError("No evidence remains after holding out a document unit.")
                 rest = remaining_units.document_value.to_numpy(float)
                 observed = CLASSES.index(
                     activity_class(float(held.document_value), *CLASS_BOUNDARIES)
@@ -374,7 +374,7 @@ def build_target_predictions(
                     if method == "B1":
                         continue
                     if method not in all_probabilities:
-                        raise ValueError(f"未知模型：{method}")
+                        raise ValueError(f"Unknown model: {method}")
                     tau_all = {
                         "G": g_fit["tau"],
                         "G-record": record_fit["tau"],
@@ -416,7 +416,7 @@ def build_target_predictions(
     if output.empty:
         return output, clean_entries
 
-    # B1 的同靶点折外一致率来自 B0 全部测试预测，不先按条目平均。
+    # B1 agreement uses all out-of-fold B0 predictions without entry averaging.
     if "B1" in models:
         b0 = output.loc[
             (output.population == "all") & (output.method == "B0")
@@ -468,7 +468,7 @@ def build_target_predictions(
     output["stratum"] = np.where(output.m == 1, "m=1", "m>=2")
     probabilities = output[["p0", "p1", "p2"]].to_numpy(float)
     if not np.allclose(probabilities.sum(axis=1), 1.0, atol=1e-12, rtol=0):
-        raise ValueError("E2 模型概率之和不为 1。")
+        raise ValueError("E2 Model probabilities do not sum to 1。")
     if "G-global" in models:
         expected = pd.MultiIndex.from_frame(
             output.loc[
@@ -484,7 +484,7 @@ def build_target_predictions(
                 ]
             ).sort_values()
             if not actual.equals(expected):
-                raise ValueError(f"{method} 的留出键与 B0 不一致。")
+                raise ValueError(f"{method} held-out keys disagree with B0.")
     return (
         output.sort_values(
             ["target", "endpoint", "population", "method", "fold", "entry",
@@ -495,7 +495,7 @@ def build_target_predictions(
 
 
 def comparator_aucs(predictions: pd.DataFrame) -> pd.DataFrame:
-    """按靶点、总体汇总 B-range、B-sd 与相同子集上的 G AUC。"""
+    """Summarize B-range, B-sd, and G AUC on matching target and population subsets."""
     rows = []
     for (target, endpoint, population), frame in predictions.groupby(
         ["target", "endpoint", "population"], sort=True

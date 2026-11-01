@@ -3,9 +3,11 @@ export MPLCONFIGDIR := $(CURDIR)/.cache/matplotlib
 VENV_PYTHON := .venv/bin/python
 
 .PHONY: setup check test paper paper-legacy paper-current paper-application paper-record-tasks paper-structure \
-	paper-f0 paper-e5 paper-e5b paper-e5c paper-e5d paper-e6-prepare \
+	paper-f0 paper-e1a paper-e1b paper-e2 paper-e2b paper-e4 paper-e12c \
+	paper-e5 paper-e5b paper-e5c paper-e5d paper-e6-prepare \
 	paper-e2c paper-e6-regression paper-e6 paper-e7 paper-e9 \
 	paper-e10 paper-e11 paper-e12a paper-e12b paper-posthoc paper-t1 \
+	paper-e15 paper-e16 paper-all \
 	paper-fig2-data paper-figures-data paper-figures paper-figure6-capture \
 	paper-reproduce-tests
 setup:
@@ -31,7 +33,7 @@ paper-current: check
 	$(VENV_PYTHON) -m pytest -q --junitxml=paper/output/current/pytest.xml
 
 paper-legacy: check
-	$(VENV_PYTHON) paper/run_revision_validation.py
+	$(VENV_PYTHON) paper/legacy/run_revision_validation.py
 	$(VENV_PYTHON) paper/validate_adaptive_assignment.py
 	$(VENV_PYTHON) paper/build_revision_figures.py
 	$(VENV_PYTHON) paper/audit_revision_outputs.py
@@ -63,7 +65,31 @@ PAPER_FIG2 := $(VENV_PYTHON) -m chemgridmap.cli $(PAPER_FIG2_INPUT) \
 paper-f0: check
 	$(VENV_PYTHON) $(PAPER_SOURCE)/f0_build.py
 
-paper-e5: check
+paper-e1a: check
+	$(VENV_PYTHON) $(PAPER_SOURCE)/e1a_evidence_audit.py
+
+paper-e1b: paper-e1a
+	$(VENV_PYTHON) $(PAPER_SOURCE)/e1b_neighbors.py
+	$(VENV_PYTHON) $(PAPER_SOURCE)/e1b_cores.py
+
+paper-e2: paper-e1a
+	$(VENV_PYTHON) $(PAPER_SOURCE)/e2_analysis.py
+
+paper-e2b: paper-e2
+	$(VENV_PYTHON) $(PAPER_SOURCE)/e2b_analysis.py
+	$(VENV_PYTHON) $(PAPER_SOURCE)/e2b_analysis.py --r1-outputs
+
+paper-e4: paper-e2 paper-e1b
+	$(VENV_PYTHON) $(PAPER_SOURCE)/e4a_analysis.py
+	$(VENV_PYTHON) $(PAPER_SOURCE)/e4b_analysis.py
+	$(VENV_PYTHON) $(PAPER_SOURCE)/e4c_analysis.py
+	$(VENV_PYTHON) $(PAPER_SOURCE)/e4d_analysis.py
+	$(VENV_PYTHON) $(PAPER_SOURCE)/e4e_analysis.py
+
+paper-e12c: paper-e1b paper-t1 paper-e12b
+	$(VENV_PYTHON) $(PAPER_SOURCE)/e12c_core_stereo.py
+
+paper-e5: paper-e2b
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e5_analysis.py
 
 paper-e5b: paper-e5 paper-fig2-data
@@ -84,10 +110,10 @@ paper-e6-prepare: paper-e2c
 paper-e6-regression: paper-e6-prepare
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e6_regression_diag.py
 
-paper-e6: paper-e6-prepare paper-e6-regression
+paper-e6: paper-e6-prepare paper-e6-regression paper-e4
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e6_analysis.py
 
-paper-e7: paper-e2c
+paper-e7: paper-e2c paper-e4
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e7_analysis.py
 
 paper-e9: paper-e5d
@@ -105,9 +131,15 @@ paper-e12a: paper-e11 paper-e9
 paper-e12b: paper-e7 paper-e9
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e12b_analysis.py
 
+paper-e15: paper-e11 paper-e12a
+	$(VENV_PYTHON) $(PAPER_SOURCE)/e15_leakfree.py
+
+paper-e16: paper-e15
+	$(VENV_PYTHON) $(PAPER_SOURCE)/e16_identity_sensitivity.py
+
 paper-posthoc: paper-e5 paper-e5b paper-e5c paper-e5d paper-e6 paper-e7 paper-e9 paper-e10 paper-e11 paper-e12a paper-e12b
 
-paper-t1: check
+paper-t1: paper-e1b
 	$(VENV_PYTHON) $(PAPER_SOURCE)/t1_scale.py --mode all
 
 paper-fig2-data: check
@@ -128,3 +160,5 @@ paper-figures: paper-figures-data paper-fig2-data
 
 paper-reproduce-tests: check
 	$(VENV_PYTHON) -m pytest paper/strengthening/source paper/figures/source
+
+paper-all: paper paper-e4 paper-e12c paper-posthoc paper-e16 paper-t1 paper-figure6-capture paper-figures paper-structure

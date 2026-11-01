@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 import zipfile
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "paper/output/reliability_v1"
 DIRECTORIES = {"activity", "baselines", "cases", "cores", "figure1_cli_run",
                "figure_data", "neighborhoods", "stability", "layouts", "scale"}

@@ -14,12 +14,15 @@ from rdkit.Chem import rdDepictor
 from rdkit.Chem.Draw import rdMolDraw2D
 from rdkit.Chem.Scaffolds import MurckoScaffold
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_submission_figures as base
 import build_story_figures as story
 from build_main_figure_infographic import line, heading
 from build_revision_figures import text, rect, document, export, embed_svg, chart_svg, COLORS
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SOURCE, ARCHIVE = base.SOURCE, base.ARCHIVE
 OUT = ROOT.parent/'project1/JCIM_final_polish/figures'
 AUDIT = ROOT/'paper/output/merge_20260915'

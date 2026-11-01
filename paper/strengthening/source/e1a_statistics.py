@@ -1,4 +1,4 @@
-"""E1-A 的秩统计与按条目整群抽样；不拟合或修改冻结模型。"""
+"""E1-A rank statistics and entry-cluster bootstrap without refitting frozen models."""
 from __future__ import annotations
 
 import numpy as np
@@ -16,7 +16,7 @@ def auc_mann_whitney(correct, probability):
 
 
 def cluster_weights(frame, rng, repetitions):
-    """每个靶点分别抽取其原有条目数；相同条目的各行使用相同重数。"""
+    """Sample each target's original entry count and apply the same multiplicity to rows of an entry."""
     weights = np.zeros((repetitions, len(frame)), dtype=float)
     for target in sorted(frame.target.unique()):
         positions = np.flatnonzero(frame.target.to_numpy() == target)
@@ -29,13 +29,13 @@ def cluster_weights(frame, rng, repetitions):
 
 
 def weighted_scores(frame, weights):
-    """冻结指标的重数加权形式；AUC 在重复观测的平均秩下等价。"""
+    """Multiplicity-weighted frozen metrics; average-rank AUC is equivalent under repetition."""
     p = frame[["p0", "p1", "p2"]].to_numpy(float)
     observed = frame.observed.to_numpy(int)
     displayed = frame.displayed.to_numpy(int)
     confidence = p.max(axis=1)
     correct = (p.argmax(axis=1) == observed).astype(float)
-    # R1 负控只置换二分类一致指标，不改动三分类 observed 或概率。
+    # The R1 negative control permutes binary agreement without changing classes or probabilities.
     agrees = (frame.agree.to_numpy(float) if "agree" in frame
               else (displayed == observed).astype(float))
     shown = p[np.arange(len(p)), displayed]
@@ -61,7 +61,7 @@ def weighted_scores(frame, weights):
     bins = np.minimum((confidence * 10).astype(int), 9)
     result["ece"] = sum(np.abs((weights[:, bins == b] * (correct - confidence)[bins == b]).sum(axis=1))
                         for b in range(10)) / total
-    # 同分块内每个正负配对贡献 1/2；块间贡献与 Mann–Whitney 秩和完全相同。
+    # Each tied positive-negative pair contributes 1/2, equivalent to the Mann-Whitney rank sum.
     order = np.argsort(shown, kind="stable")
     starts = np.r_[0, np.flatnonzero(np.diff(shown[order]) != 0) + 1]
     positives = np.add.reduceat(weights[:, order] * agrees[order], starts, axis=1)

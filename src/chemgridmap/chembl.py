@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from .core import canonicalize_smiles
-from .structures import parent_structure
+from .structures import parent_standard_identity, parent_structure
 from .activity import RULE_KEYS, activity_annotations
 
 
@@ -96,6 +96,7 @@ class ChemblCurationResult:
     excluded_records: pd.DataFrame
     report: Dict[str, object]
     identity_conflicts: pd.DataFrame = field(default_factory=pd.DataFrame)
+    structure_variants: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def _normalize_column_name(value: object) -> str:
@@ -316,6 +317,9 @@ def curate_chembl_activity_data(
         structures = retained["canonical_smiles"].map(parent_structure)
         retained["representation_smiles"] = structures.map(lambda item: item[0])
         retained["parent_extraction_excluded"] = structures.map(lambda item: int(item[1]))
+        identities = retained["representation_smiles"].map(parent_standard_identity)
+        retained["_identity_normalized_smiles"] = identities.map(lambda item: item[0])
+        retained["_parent_standard_inchikey"] = identities.map(lambda item: item[1])
     else:
         retained["representation_smiles"] = retained["canonical_smiles"]
         retained["parent_extraction_excluded"] = 0
@@ -369,25 +373,93 @@ def curate_chembl_activity_data(
 
     group_records = list(retained.groupby("molecule_identity_key", sort=True))
     conflict_rows = []
-    if effective_structure_policy == "parent":
+    variant_rows = []
+    representative_by_identity = {}
+    if use_parent_identity and effective_structure_policy == "parent":
         for identity_key, group in group_records:
-            structures = sorted(group["representation_smiles"].astype(str).unique())
-            if len(structures) > 1:
+            inchikeys = sorted(group["_parent_standard_inchikey"].astype(str).unique())
+            if len(inchikeys) > 1:
                 conflict_rows.append({
                     "molecule_identity_key": identity_key,
-                    "structures": ";".join(structures),
+                    "structures": ";".join(sorted(
+                        group["representation_smiles"].astype(str).unique()
+                    )),
                     "record_count": int(len(group)),
+                    "_standard_inchikeys": ";".join(inchikeys),
                 })
+                continue
+
+            writing_counts = group["representation_smiles"].value_counts()
+            if len(writing_counts) <= 1:
+                continue
+            normalized_by_writing = dict(zip(
+                group["representation_smiles"].astype(str),
+                group["_identity_normalized_smiles"].astype(str),
+            ))
+            normalized_counts = {}
+            for writing, structure_count in writing_counts.items():
+                normalized = normalized_by_writing[str(writing)]
+                normalized_counts[normalized] = (
+                    normalized_counts.get(normalized, 0) + int(structure_count)
+                )
+            selected = sorted(
+                normalized_counts.items(),
+                key=lambda item: (-int(item[1]), str(item[0])),
+            )[0][0]
+            representative_by_identity[identity_key] = selected
+            for writing, structure_count in sorted(writing_counts.items()):
+                variant_rows.append({
+                    "molecule_identity_key": identity_key,
+                    "smiles": writing,
+                    "normalized_smiles": normalized_by_writing[str(writing)],
+                    "structure_record_count": int(structure_count),
+                    "record_count": int(len(group)),
+                    "standard_inchikey": inchikeys[0],
+                    "selected": bool(
+                        normalized_by_writing[str(writing)] == selected
+                    ),
+                })
+            warnings.append(
+                f"Identity {identity_key} has {len(writing_counts)} parent structure "
+                f"writing variants with the same standard InChIKey "
+                f"({inchikeys[0]}); selected {selected!r} from "
+                f"{int(len(group))} retained records: "
+                + ", ".join(
+                    f"{int(count)} x {smiles!r}"
+                    for smiles, count in sorted(writing_counts.items())
+                )
+                + "."
+            )
+    conflict_keys = {
+        row["molecule_identity_key"]: row.pop("_standard_inchikeys")
+        for row in conflict_rows
+    }
     identity_conflict_table = pd.DataFrame(
         conflict_rows,
         columns=("molecule_identity_key", "structures", "record_count"),
     )
+    structure_variant_table = pd.DataFrame(
+        variant_rows,
+        columns=(
+            "molecule_identity_key",
+            "smiles",
+            "normalized_smiles",
+            "structure_record_count",
+            "record_count",
+            "standard_inchikey",
+            "selected",
+        ),
+    )
     if conflict_rows and identity_conflicts == "error":
         raise ValueError(
-            "Molecule identities map to multiple normalized parent structures: {}. "
+            "Molecule identities map to multiple normalized parent structures "
+            "with different standard InChIKeys: {}. "
             "Review the records, use identity_conflicts='exclude', or explicitly "
             "use canonical-smiles identity.".format(
-                ", ".join(row["molecule_identity_key"] for row in conflict_rows)
+                ", ".join(
+                    f"{key} [{conflict_keys[key]}]"
+                    for key in sorted(conflict_keys)
+                )
             )
         )
     if conflict_rows:
@@ -401,14 +473,16 @@ def curate_chembl_activity_data(
             raise ValueError("No ChEMBL activity records remained after excluding identity conflicts.")
         group_records = list(retained.groupby("molecule_identity_key", sort=True))
         warnings.append(
-            f"Excluded {len(conflict_rows)} parent identities with multiple normalized "
-            f"structures and {len(conflict_records)} associated records."
+            f"Excluded {len(conflict_rows)} parent identities with different "
+            f"standard InChIKeys and {len(conflict_records)} associated records."
         )
 
     molecule_rows = []
     for identity_key, group in group_records:
         structures = sorted(group["representation_smiles"].astype(str).unique())
-        canonical_smiles = structures[0]
+        canonical_smiles = representative_by_identity.get(
+            identity_key, structures[0]
+        )
         values = group["activity_pchembl_raw"].to_numpy(dtype=float)
         rules = dict(zip(RULE_KEYS, (lower_threshold, upper_threshold, conflict_range_threshold)))
         annotations = activity_annotations(values, **rules)
@@ -495,6 +569,17 @@ def curate_chembl_activity_data(
             int(identity_conflict_table["record_count"].sum())
             if len(identity_conflict_table) else 0
         ),
+        "structure_variant_count": int(
+            len(structure_variant_table["molecule_identity_key"].unique())
+            if len(structure_variant_table) else 0
+        ),
+        "structure_variant_record_count": (
+            int(structure_variant_table.drop_duplicates(
+                "molecule_identity_key"
+            )["record_count"].sum())
+            if len(structure_variant_table) else 0
+        ),
+        "structure_variants": structure_variant_table.to_dict("records"),
         "detected_columns": columns,
         "parameters": {
             "target_id": effective_target_id,
@@ -517,12 +602,17 @@ def curate_chembl_activity_data(
         },
         "warnings": warnings,
     }
+    retained = retained.drop(
+        columns=["_identity_normalized_smiles", "_parent_standard_inchikey"],
+        errors="ignore",
+    )
     return ChemblCurationResult(
         molecules=molecules,
         retained_records=retained,
         excluded_records=excluded.reset_index(drop=True),
         report=report,
         identity_conflicts=identity_conflict_table,
+        structure_variants=structure_variant_table,
     )
 
 
@@ -540,6 +630,8 @@ def save_chembl_curation(
         "excluded_records": output_dir / f"{name}_excluded_records.csv",
         "curation_report": output_dir / f"{name}_curation_report.json",
     }
+    if len(result.structure_variants):
+        paths["structure_variants"] = output_dir / f"{name}_structure_variants.csv"
     if result.report.get("parameters", {}).get("identity_conflicts") == "exclude":
         paths["identity_conflicts"] = output_dir / f"{name}_identity_conflicts.csv"
     result.molecules.to_csv(paths["molecule_level"], index=False,
@@ -548,6 +640,11 @@ def save_chembl_curation(
                                    encoding="utf-8", lineterminator="\n")
     result.excluded_records.to_csv(paths["excluded_records"], index=False,
                                    encoding="utf-8", lineterminator="\n")
+    if "structure_variants" in paths:
+        result.structure_variants.to_csv(
+            paths["structure_variants"], index=False,
+            encoding="utf-8", lineterminator="\n",
+        )
     if "identity_conflicts" in paths:
         result.identity_conflicts.to_csv(
             paths["identity_conflicts"], index=False, encoding="utf-8", lineterminator="\n"

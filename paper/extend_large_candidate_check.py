@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from chemgridmap.core import assign_to_grid, compute_metrics
-from run_revision_validation import coordinates, dump, ROOT
+from legacy.run_revision_validation import coordinates, dump, ROOT
 
 
 if __name__ == "__main__":

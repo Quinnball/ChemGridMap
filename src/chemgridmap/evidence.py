@@ -133,19 +133,38 @@ def _entry_moments(doc: pd.DataFrame) -> pd.DataFrame:
 
 
 def fit_between_unit_sd(doc: pd.DataFrame, *, min_entries: int = 5,
-                        fallback_sd: Optional[float] = LITERATURE_BETWEEN_UNIT_SD) -> Dict[str, float]:
+                        fallback_sd: Optional[float] = LITERATURE_BETWEEN_UNIT_SD) -> Dict[str, object]:
     """Pooled SD between evidence units of the same entry (Gaussian model)."""
     moments = _entry_moments(doc)
     multi = moments[moments.n_units >= 2]
+    dfs = multi.n_units.to_numpy(float) - 1.0
+    sum_of_squares = multi.variance.to_numpy(float) * dfs
+    total_df = float(np.sum(dfs))
+    total_sum_of_squares = float(np.sum(sum_of_squares))
+    df_shares = dfs / total_df if total_df else np.zeros_like(dfs)
+    sumsq_shares = (
+        sum_of_squares / total_sum_of_squares
+        if total_sum_of_squares else np.zeros_like(sum_of_squares)
+    )
+    # Keep both reported shares attached to the same entry: the one with the
+    # largest share in either diagnostic.
+    dominant_shares = np.maximum(df_shares, sumsq_shares)
+    max_entry = int(np.argmax(dominant_shares)) if len(dominant_shares) else None
     base = {"prior_df": float("inf"), "model": "gaussian", "n_entries": int(len(multi)),
-            "n_units": int(multi.n_units.sum())}
+            "n_units": int(multi.n_units.sum()),
+            "max_entry_id": str(multi.index[max_entry]) if max_entry is not None else None,
+            "max_entry_degrees_of_freedom_share": (
+                float(df_shares[max_entry]) if max_entry is not None else None
+            ),
+            "max_entry_sum_of_squares_share": (
+                float(sumsq_shares[max_entry]) if max_entry is not None else None
+            )}
     if len(multi) < min_entries:
         if fallback_sd is None:
             raise ValueError(f"At least {min_entries} entries with two or more evidence units are needed; "
                              f"found {len(multi)}.")
         return {**base, "tau": float(fallback_sd), "method": "literature_fallback"}
-    dfs = multi.n_units.to_numpy(float) - 1.0
-    pooled = float(np.sqrt(np.sum(multi.variance.to_numpy(float) * dfs) / np.sum(dfs)))
+    pooled = float(np.sqrt(total_sum_of_squares / total_df))
     return {**base, "tau": pooled, "method": "pooled_between_unit_sd", "degrees_of_freedom": int(dfs.sum())}
 
 
@@ -259,7 +278,7 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
                                  entry: str = "molecule_identity_key", value: str = "pchembl_value",
                                  document: str = "document_chembl_id", displayed: str = "activity_pchembl",
                                  merge_identical: bool = True,
-                                 offset_display: str = "uncertain",
+                                 offset_display: str = "none",
                                  offset_min_shared: int = 3,
                                  offset_threshold: float = 1.0,
                                  offset_sign_agreement: float = 0.8):
@@ -423,6 +442,16 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
                 "offset_sign_agreement": float(offset_sign_agreement),
                 "flagged_document_count": len(flagged_documents),
                 "offset_pair_touched_entry_count": int(out["offset_pair_touched"].sum())})
+    max_df_share = fit.get("max_entry_degrees_of_freedom_share")
+    max_sumsq_share = fit.get("max_entry_sum_of_squares_share")
+    warnings = list(fit.get("warnings", []))
+    if max(max_df_share or 0.0, max_sumsq_share or 0.0) > 0.3:
+        warnings.append(
+            f"Entry {fit.get('max_entry_id')} supplies "
+            f"{float(max_df_share or 0.0):.1%} of σ_doc degrees of freedom and "
+            f"{float(max_sumsq_share or 0.0):.1%} of the pooled sum of squares."
+        )
+    fit["warnings"] = warnings
     if model == "exclude-flagged":
         fit["flagged_documents"] = sorted(flagged_documents)
         fit["excluded_entry_count"] = len(excluded_entries)
@@ -446,7 +475,7 @@ def prepare_generic_activity_records(
     confidence_threshold: float = 0.8,
     merge_identical: bool = True,
     evidence_model: str = "gaussian",
-    offset_display: str = "uncertain",
+    offset_display: str = "none",
     offset_min_shared: int = 3,
     offset_threshold: float = 1.0,
     offset_sign_agreement: float = 0.8,
@@ -558,5 +587,6 @@ def prepare_generic_activity_records(
         "relation_column": relation_column,
         "aggregation": "median pActivity",
         "activity_confidence": fit,
+        "warnings": list(fit.get("warnings", [])) if fit is not None else [],
     }
     return molecules, records, fit, report

@@ -1,4 +1,4 @@
-"""E4a 的公式单元测试与冻结输出回归检查。"""
+"""Unit tests and frozen-output regressions for E4a formulas."""
 from __future__ import annotations
 
 import json
@@ -36,7 +36,7 @@ def test_distance_score_by_displayed_class():
 def test_displayed_ece_uses_shown_probability_and_agreement():
     score = np.array([0.1, 0.2, 0.8, 1.0])
     agree = np.array([0.0, 0.0, 1.0, 0.0])
-    # 每一箱贡献 0.1、0.2、0.2、1.0，按四条命中平均。
+    # Bins contribute 0.1, 0.2, 0.2, and 1.0, averaged over four hits.
     assert displayed_ece(score, agree)[0] == pytest.approx(1.5 / 4)
 
 

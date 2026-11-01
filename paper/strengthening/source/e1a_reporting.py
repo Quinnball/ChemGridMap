@@ -1,4 +1,4 @@
-"""E1-A 的英文事实表与可复现清单；不改动冻结材料。"""
+"""Build English fact tables and a reproducible manifest for E1-A without changing frozen material."""
 from __future__ import annotations
 
 import hashlib
@@ -18,7 +18,7 @@ NOTE = "post hoc sensitivity analysis motivated by the flagged hERG pair"
 
 
 def markdown_table(frame):
-    """不依赖额外排版库，NA 保持可见。"""
+    """Avoid extra layout dependencies while keeping NA visible."""
     def cell(value):
         if pd.isna(value):
             return "NA"
@@ -171,7 +171,7 @@ def write_manifest(negative=None):
 
 
 def append_report():
-    """保留 R0 原文，在末尾维护一节 R1；完整运行证据取自 QA 日志。"""
+    """Keep the R0 report and append the R1 section from QA logs."""
     load = lambda name: pd.read_csv(OUT / (name + ".csv"))
     metrics, intervals = load("metrics"), load("bootstrap_ci")
     tau, pseudo, pairs = load("tau_influence"), load("pseudo_consensus"), load("flagged_pairs_profile")
@@ -179,7 +179,7 @@ def append_report():
     ledger = json.loads((QA / "commands_R1.json").read_text())
     scope_path = QA / "workspace_R1_changes.json"
     scope = json.loads(scope_path.read_text()) if scope_path.exists() else {}
-    # 数值表按用途选列，CSV 保留全部元数据及逐条记录。
+    # Select report columns while retaining all metadata and record rows in CSV.
     tau_summary = tau[tau.row_type == "summary"][["target", "n_entries", "n_multi_unit_entries",
         "tau_full", "tau_flag_clean", "tau_cap", "tau_ci_low", "tau_ci_high"]]
     tau_top = tau[tau.row_type == "leave_one_entry"][["target", "entry", "n_units",
@@ -277,9 +277,3 @@ def append_report():
     report_path = OUT / "E1A_REPORT.md"
     prior = report_path.read_text().split("\n## 9. 返工 R1", 1)[0]
     report_path.write_text(prior + ("\n" if prior.endswith("\n") else "\n\n") + "\n\n".join(sections))
-    (ROOT / "docs/codex-result.md").write_text(
-        "# E1-A R1 简要结论\n\n"
-        "已完成 R1 负控修正、3.0–3.9 全部分析及第 4 节 12 个输出；旧负控原样保留为 negative_control_R0_misspecified.csv。\n\n"
-        "完整入口、回归、pytest（12 passed）、最终独立复核和冻结 guard 退出码均为 0；guard 六处 OK，CGM 状态保持 45 行。\n\n"
-        "负控验收命令退出码 1：all 和 hERG 的 95% CI 不含 0.5。范围检查退出码 1：发现外部并发新增 E2、prior_art、下载脚本及交接文件；未直接改写这些文件。按 R1 完成其余分析，未改 seed 或规则。未完成分析无；上述验收项待协调者处理。\n\n"
-        "详细报告：paper/strengthening/output/E1A/E1A_REPORT.md。\n")

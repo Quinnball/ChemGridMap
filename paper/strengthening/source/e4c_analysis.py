@@ -1,4 +1,4 @@
-"""E4c：文献对标记零分布、训练折 flag-clean 与近重复合并。"""
+"""E4c: document-pair null distribution, training-fold flag-clean analysis, and near-duplicate merging."""
 from __future__ import annotations
 
 import gzip
@@ -39,7 +39,7 @@ LOWER, UPPER = 6.0, 7.0
 
 
 def load_inputs() -> dict[str, object]:
-    """只读 E1/E2 已验收输出与整理记录缓存。"""
+    """Read accepted E1/E2 outputs and the curation cache only."""
     predictions = pd.read_csv(
         S / "output/E2/predictions.csv", float_precision="round_trip"
     )
@@ -82,7 +82,7 @@ def shared_entry_stratum(n_shared: int) -> str:
 
 
 def pair_structure(records: pd.DataFrame) -> dict[tuple[str, str], np.ndarray]:
-    """生成可重复模拟的文献对索引；仅保留至少有 3 个共享条目的文献对。"""
+    """Build a reproducible document-pair index with at least three shared entries."""
     units = document_values(records, merge_identical=False).sort_values(
         ["entry", "document"]
     )
@@ -108,7 +108,7 @@ def simulate_null_flags(
     rng: np.random.Generator,
     repetitions: int = NULL_REPETITIONS,
 ) -> dict[str, np.ndarray]:
-    """按原条目×文档结构模拟 Gaussian 单元值，并复用 CGM 默认标记规则。"""
+    """Simulate Gaussian unit values from the original entry-by-document structure and CGM flags."""
     values = rng.normal(0.0, float(sigma_doc), size=(repetitions, n_units))
     counts = {
         "total": np.zeros(repetitions, dtype=int),
@@ -234,12 +234,12 @@ def flag_null_analysis(
         for endpoint in ("IC50", "Ki")
     }
     if checks["IC50"]["actual"] != 39 or checks["Ki"]["actual"] != 36:
-        raise ValueError(f"E2 标记对总数与原验收结果不一致：{checks}")
+        raise ValueError(f"Total E2 flagged pairs differ from acceptance: {checks}")
     return result, checks
 
 
 def score_g(frame: pd.DataFrame) -> dict[str, float]:
-    """与 E2 一致的 G AUC 与高置信度准确率定义。"""
+    """Use the E2 G-AUC and high-confidence accuracy definitions."""
     probabilities = frame[["p0", "p1", "p2"]].to_numpy(float)
     observed = frame.observed.to_numpy(int)
     confidence = probabilities.max(axis=1)
@@ -264,7 +264,7 @@ def training_fold_g(
     endpoint: str,
     source: str,
 ) -> pd.DataFrame:
-    """只用当前折训练条目识别标记文献，并重算保留条目的 G 预测。"""
+    """Use current-fold training entries to identify flagged documents and recompute retained G predictions."""
     doc = document_values(records, merge_identical=True)
     observations = document_pair_observations(records)
     assignments = entry_folds(doc, seed=FOLD_SEED)
@@ -285,7 +285,7 @@ def training_fold_g(
         fold_predictions = b0.loc[b0.fold == fold]
         for held in fold_predictions.itertuples(index=False):
             if int(assignments[held.entry]) != fold:
-                raise ValueError("E4c 分折与 E1/E2 冻结分折不匹配。")
+                raise ValueError("E4c folds do not match frozen E1/E2 folds.")
             if held.entry in touched_entries:
                 continue
             held_documents = set(str(held.held_out_unit).split(";"))
@@ -298,7 +298,7 @@ def training_fold_g(
                 )
             ]
             if remaining.empty:
-                raise ValueError("训练折 flag-clean 留出后没有剩余证据单元。")
+                raise ValueError("No evidence units remain after training-fold flag cleaning.")
             probabilities = gaussian_prediction(
                 remaining.document_value.to_numpy(float), fit
             )
@@ -420,7 +420,7 @@ def flag_clean_trainfold_analysis(inputs: dict[str, object]) -> pd.DataFrame:
 
 
 def near_duplicate_units(records: pd.DataFrame) -> pd.DataFrame:
-    """把同一目中相邻值差不超过 0.1 的文献单元做单链接聚类。"""
+    """Single-link document units whose adjacent values differ by no more than 0.1."""
     units = document_values(records, merge_identical=False).sort_values(
         ["entry", "document_value", "document"]
     )
@@ -459,7 +459,7 @@ def near_duplicate_g(
     records_by_entry = dict(tuple(records.groupby("molecule_identity_key", sort=True)))
     entry_fold_rows = b0[["entry", "fold"]].drop_duplicates()
     if entry_fold_rows.entry.duplicated().any():
-        raise ValueError("一个条目被分配到了多个 E2 冻结折。")
+        raise ValueError("An entry was assigned to multiple frozen E2 folds.")
     rows = []
     for held_entry in entry_fold_rows.itertuples(index=False):
         available = units_by_entry[held_entry.entry]

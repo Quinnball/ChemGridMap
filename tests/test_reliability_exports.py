@@ -137,11 +137,27 @@ def test_pipeline_passes_support_threshold_to_static_layers(tmp_path, colored_gr
 
 def test_offset_touched_support_cell_has_distinct_marker_and_legend(tmp_path, colored_grid):
     touched = colored_grid.copy()
+    touched["class_status"] = ["supported", "supported", "uncertain"]
     touched["offset_pair_touched"] = [False, True, False]
+    touched.attrs["activity_confidence_fit"] = {"offset_display": "none"}
     files = render_grid_map(touched, tmp_path / "support", color_by="class_support", formats=["svg"])
     svg = Path(files["svg"]).read_text(encoding="utf-8")
     assert 'data-offset-pair-marker="true"' in svg
-    assert "◣ offset document pair" in svg
+    assert "◣ offset document pair (display unchanged)" in svg
+
+
+def test_offset_touched_support_cell_uses_legacy_uncertain_legend_fallback(
+        tmp_path, colored_grid):
+    touched = colored_grid.copy()
+    touched["class_status"] = ["supported", "supported", "uncertain"]
+    touched["offset_pair_touched"] = [False, True, False]
+    files = render_grid_map(
+        touched, tmp_path / "legacy-support", color_by="class_support", formats=["svg"]
+    )
+    svg = Path(files["svg"]).read_text(encoding="utf-8")
+    assert 'data-offset-pair-marker="true"' in svg
+    assert "◣ offset document pair</text>" in svg
+    assert "◣ offset document pair (display unchanged)" not in svg
 
 
 def test_png_molecule_positions_are_identical_across_modes(tmp_path, colored_grid):
@@ -182,10 +198,10 @@ def test_browser_exports_offsets_colors_and_evidence_policy(tmp_path, monkeypatc
     assert detail["molecule"]["n_evidence_units"] == (2 if merge_identical else 3)
     assert detail["molecule"]["discordant_document_pairs"] == 1
     assert detail["summary"]["offset_pair_touched"] is True
-    assert detail["summary"]["status_reason"] == "offset_pair"
+    assert detail["summary"]["status_reason"] in {"supported", "low_support"}
     assert any("Offset document pair: DOC_A vs DOC_B, median difference 3.5 log units, n shared 3; "
-                   "the pair touches 3 entries. This entry has records from DOC_A, DOC_B, "
-                   "so it is shown as uncertain." in warning
+                   "the pair touches 3 entries. This entry has records from DOC_A, DOC_B; "
+                   "the display is unchanged because the offset rule is off." in warning
                    for warning in detail["summary"]["warnings"])
     modes = ["neighbor_recall", "class_support"]
     if grouping != "none":

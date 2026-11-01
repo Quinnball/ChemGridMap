@@ -109,7 +109,7 @@ def test_activity_confidence_keeps_display_and_reports_support():
     assert 0 <= a.class_confidence.min() and a.class_confidence.max() <= 1
 
 
-def test_offset_pair_rule_keeps_probabilities_and_changes_only_display_status():
+def test_explicit_offset_uncertain_keeps_probabilities_and_changes_only_display_status():
     rows = []
     for index in range(5):
         rows.extend([
@@ -127,7 +127,9 @@ def test_offset_pair_rule_keeps_probabilities_and_changes_only_display_status():
         records.groupby("molecule_identity_key").pchembl_value.median()
         .rename("activity_pchembl").reset_index()
     )
-    out, fit = annotate_activity_confidence(molecules, records)
+    out, fit = annotate_activity_confidence(
+        molecules, records, offset_display="uncertain"
+    )
     indexed = out.set_index("molecule_identity_key")
     touched = indexed.loc[[f"TOUCHED{i}" for i in range(5)]]
     assert touched.offset_pair_touched.all()
@@ -140,25 +142,31 @@ def test_offset_pair_rule_keeps_probabilities_and_changes_only_display_status():
     assert indexed.loc["CLEAN", "status_reason"] in {"supported", "low_support"}
     assert {"class_confidence", "class_reproducibility"} <= set(out)
     assert fit["sigma_doc"] == fit["tau"]
+    assert fit["offset_display"] == "uncertain"
     assert fit["document_offsets"][0]["touched_entry_count"] == 6
 
 
-def test_offset_display_none_keeps_offsets_but_uses_support_only():
+def test_offset_display_defaults_to_none_and_uses_support_only():
     records = _records()
     molecules = records.groupby("molecule_identity_key").pchembl_value.median().rename("activity_pchembl").reset_index()
     default, _ = annotate_activity_confidence(molecules, records)
-    unchanged, fit = annotate_activity_confidence(
-        molecules, records, offset_display="none"
+    uncertain, fit = annotate_activity_confidence(
+        molecules, records, offset_display="uncertain"
     )
-    indexed = unchanged.set_index("molecule_identity_key")
+    indexed = default.set_index("molecule_identity_key")
+    uncertain_indexed = uncertain.set_index("molecule_identity_key")
     expected = np.where(
-        default.set_index("molecule_identity_key")["class_confidence"] >= 0.8,
+        indexed["class_confidence"] >= 0.8,
         "supported", "uncertain"
     )
-    assert indexed.loc[default.set_index("molecule_identity_key").index, "class_status"].tolist() == expected.tolist()
+    assert indexed["class_status"].tolist() == expected.tolist()
     assert set(indexed.status_reason) <= {"supported", "low_support"}
     assert indexed.offset_pair_touched.any()
-    assert fit["offset_display"] == "none"
+    pd.testing.assert_series_equal(
+        indexed["class_confidence"], uncertain_indexed["class_confidence"]
+    )
+    assert fit["offset_display"] == "uncertain"
+    assert default.attrs["activity_confidence_fit"]["offset_display"] == "none"
 
 
 def test_offset_min_shared_filters_pairs_and_support_is_monotone():
@@ -309,6 +317,7 @@ def test_umap_disconnected_graph_is_repeatable_with_same_seed():
 def test_public_api_exports_evidence_neighbors_and_cores():
     expected = {
         "document_values", "fit_between_unit_sd", "annotate_activity_confidence",
+        "prepare_generic_activity_records",
         "document_pair_offsets", "neighbor_recall", "neighbor_recall_fixed_k",
         "select_core", "mcs_core", "structural_groups",
     }

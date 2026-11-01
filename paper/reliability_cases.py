@@ -15,7 +15,7 @@ from chemgridmap.representations import morgan_fingerprints
 
 ROOT = Path(__file__).resolve().parents[1]
 FROZEN = ROOT / "paper/output/revision_v6"
-V2_SOURCE = ROOT.parent / "project1/JCIM_molecular_figure_revision_20261014_v2/figures/source_data"
+V2_SOURCE = ROOT / "paper/legacy/reference/v2_source_data"
 MARKERS = {"query": "Q", "shared": "S", "grid_only": "G", "representation_only": "F"}
 
 

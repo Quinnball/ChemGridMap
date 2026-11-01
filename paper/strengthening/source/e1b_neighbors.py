@@ -1,4 +1,4 @@
-"""E1-B 邻居 SAR：只读取冻结布局，按任务单的固定规则估计相关和误差。"""
+"""E1-B neighbourhood SAR: read frozen layouts and estimate correlations and errors with fixed rules."""
 from __future__ import annotations
 
 import argparse
@@ -34,12 +34,12 @@ FROZEN_RECALL = OUTPUT / "neighborhoods/per_molecule_recall_seed42.csv"
 
 
 def neighborhood_metrics(activity, reference, neighbors):
-    """以每个分子为单位；每组邻居等权，保留并列，不补齐或截断邻居。"""
+    """Use molecules as units, equal-weight groups, preserve ties, and do not pad or truncate neighbours."""
     activity = np.asarray(activity, dtype=float)
     if len(activity) != len(reference) or len(activity) != len(neighbors):
-        raise ValueError("活动值与邻居列表长度不同")
+        raise ValueError("Activity and neighbour-list lengths differ")
     if not np.isfinite(activity).all():
-        raise ValueError("显示活性包含缺失或非有限值")
+        raise ValueError("Displayed activity contains missing or non-finite values")
     e_fp = np.array([np.abs(activity[group] - activity[i]).mean()
                      for i, group in enumerate(reference)])
     e_grid = np.array([np.abs(activity[group] - activity[i]).mean()
@@ -55,7 +55,7 @@ def neighborhood_metrics(activity, reference, neighbors):
 
 
 def spearman_rho(x, y):
-    """平均秩的 Pearson 相关；不计算或解释显著性。"""
+    """Pearson correlation on average ranks without significance inference."""
     x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
     if len(x) != len(y) or len(x) < 2 or not (np.isfinite(x).all() and np.isfinite(y).all()):
         return float("nan")
@@ -66,7 +66,7 @@ def spearman_rho(x, y):
 
 
 def bootstrap_spearman(x, y, n_boot=BOOT_N, seed=BOOT_SEED):
-    """分子成对重抽样，邻居保持冻结；每个靶点/布局重启同一个固定 RNG。"""
+    """Bootstrap molecule pairs with frozen neighbours and a fixed RNG per target/layout."""
     x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
     rng = np.random.default_rng(seed)
     draws = np.empty(n_boot)
@@ -80,10 +80,10 @@ def bootstrap_spearman(x, y, n_boot=BOOT_N, seed=BOOT_SEED):
 
 
 def paired_mean_ci(differences, n_boot=BOOT_N, seed=BOOT_SEED):
-    """成对 seed 差值的均值；按 seed 有放回抽样的百分位 95% CI。"""
+    """Mean paired-seed differences with a percentile 95% CI from seed resampling."""
     differences = np.asarray(differences, dtype=float)
     if not len(differences) or not np.isfinite(differences).all():
-        raise ValueError("成对 seed 差值必须非空且有限")
+        raise ValueError("Paired-seed differences must be non-empty and finite")
     rng = np.random.default_rng(seed)
     draws = differences[rng.integers(0, len(differences), (n_boot, len(differences)))].mean(axis=1)
     low, high = np.quantile(draws, [.025, .975])
@@ -93,10 +93,10 @@ def paired_mean_ci(differences, n_boot=BOOT_N, seed=BOOT_SEED):
 
 
 def recall_bins(metrics):
-    """左闭右开，最后一箱含 1；空箱 n=0，均值保留 NA。"""
+    """Use left-closed intervals with 1 in the final bin; empty bins have n=0 and NA mean."""
     recalls = metrics.recall.to_numpy(float)
     if not ((recalls >= 0) & (recalls <= 1)).all():
-        raise ValueError("recall 必须属于 [0,1]")
+        raise ValueError("recall must be in [0,1]")
     assignments = np.searchsorted(BIN_EDGES[1:-1], recalls, side="right")
     rows = []
     for index, label in enumerate(BIN_LABELS):
@@ -108,19 +108,19 @@ def recall_bins(metrics):
 
 
 def check_identity(expected, observed, description):
-    """不依赖隐式行位置；身份唯一且严格同序后才使用冻结坐标。"""
+    """Do not rely on row position; use frozen coordinates only after unique identity and strict order."""
     expected, observed = np.asarray(expected, dtype=str), np.asarray(observed, dtype=str)
     if len(np.unique(expected)) != len(expected) or not np.array_equal(expected, observed):
-        raise ValueError(f"分子身份缺失、重复或排序不一致：{description}")
+        raise ValueError(f"Molecule identity is missing, duplicated, or out of order: {description}")
 
 
 def check_frozen_layout_metrics(seed_metrics, frozen, tolerance=1e-12):
-    """逐 target/seed/layout 核对所有主布局的 e_grid、e_fp 与平均 recall。"""
+    """Check e_grid, e_fp, and mean recall for every target, seed, and layout."""
     key = ["target", "seed", "layout"]
     actual = seed_metrics.loc[seed_metrics.layout.isin(LAYOUTS)].set_index(key).sort_index()
     expected = frozen.set_index(key).sort_index()
     if not actual.index.is_unique or not expected.index.is_unique or not actual.index.equals(expected.index):
-        raise ValueError("冻结布局指标的键不一致")
+        raise ValueError("Frozen layout metric keys are inconsistent")
     result = {"passed": True, "rows": len(actual), "absolute_tolerance": tolerance}
     for new, old in (("mean_e_grid", "neighbor_abs_dpchembl"),
                      ("mean_e_fp", "fingerprint_neighbor_abs_dpchembl"),
@@ -128,13 +128,13 @@ def check_frozen_layout_metrics(seed_metrics, frozen, tolerance=1e-12):
         difference = np.abs(actual[new].to_numpy(float) - expected[old].to_numpy(float))
         maximum = float(difference.max())
         if not np.isfinite(difference).all() or maximum > tolerance:
-            raise ValueError(f"冻结 {old} 不一致，最大误差 {maximum}")
+            raise ValueError(f"Frozen {old} disagree; maximum error {maximum}")
         result[f"{old}_max_absolute_difference"] = maximum
     return result
 
 
 def input_paths():
-    """显式白名单；不扫描或读取 strengthening/data。"""
+    """Use an explicit whitelist and do not scan strengthening/data."""
     paths = [FROZEN_METRICS, FROZEN_RECALL, CGM / "paper/reliability_analysis.py",
              CGM / "src/chemgridmap/reliability.py", CGM / "src/chemgridmap/representations.py"]
     for target in TARGETS:
@@ -152,7 +152,7 @@ def run(output=OUT):
 
     def evaluate(target, seed, layout, family, points, data, reference):
         if points.shape != (len(data), 2) or not np.isfinite(points).all():
-            raise ValueError(f"无效坐标：{target}/{seed}/{layout}")
+            raise ValueError(f"Invalid coordinates: {target}/{seed}/{layout}")
         metrics = neighborhood_metrics(data.activity_pchembl, reference, grid_neighbor_sets(points, k=K))
         metadata = {"target": target, "target_label": TARGETS[target], "seed": seed,
                     "layout": layout, "layout_family": family, "occupancy": .4}
@@ -171,14 +171,14 @@ def run(output=OUT):
         data, fingerprints = load_target(target)
         check_identity(data.molecule_identity_key, data.molecule_identity_key, target)
         if not np.allclose(data.activity_pchembl, data.pchembl_median, rtol=0., atol=1e-12):
-            raise ValueError(f"显示活性不是冻结 pChEMBL 中位数：{target}")
+            raise ValueError(f"Displayed activity is not the frozen pChEMBL median: {target}")
         reference = representation_neighbor_sets(fingerprints, k=K)
         for seed in SEEDS:
             path = OUTPUT / "layouts" / target / f"coordinates_seed_{seed}.csv"
             frame = pd.read_csv(path)
             check_identity(data.molecule_identity_key, frame.molecule_identity_key, path.name)
             if not np.allclose(data.activity_pchembl, frame.activity_pchembl, rtol=0., atol=1e-12):
-                raise ValueError(f"坐标文件活性与映射活性不一致：{path}")
+                raise ValueError(f"Coordinate-file activity disagrees with mapped activity: {path}")
             identities.append({"target": target, "seed": seed, "kind": "main", "n": len(data)})
             if seed == 42:
                 seed42_frame = frame
@@ -191,7 +191,7 @@ def run(output=OUT):
             for baseline, main in (("projection_lap", "minimum_displacement"),
                                    ("projection_lap_refined", "neighbor_refined")):
                 if not np.array_equal(checkpoint[baseline], layout_points(seed42_frame, main)):
-                    raise ValueError(f"主布局与 occupancy 0.4 基线坐标不一致：{target}/{baseline}")
+                    raise ValueError(f"Main-layout coordinates disagree with the occupancy-0.4 baseline: {target}/{baseline}")
                 matching_baselines.append({"target": target, "baseline": baseline,
                                            "main": main, "seed": 42, "exact_match": True})
             for layout in BASELINES:
@@ -205,10 +205,10 @@ def run(output=OUT):
     observed = molecules.loc[molecules.layout_family == "main"].set_index(key).sort_index()
     expected = pd.read_csv(FROZEN_RECALL).set_index(key).sort_index()
     if not observed.index.is_unique or not expected.index.is_unique or not observed.index.equals(expected.index):
-        raise ValueError("冻结 seed42 单分子召回率身份不一致")
+        raise ValueError("Frozen seed-42 per-molecule recall identities are inconsistent")
     recall_maximum = float(np.abs(observed.recall - expected.recall_k10).max())
     if recall_maximum > 1e-12:
-        raise ValueError(f"冻结单分子 recall 不一致：{recall_maximum}")
+        raise ValueError(f"Frozen per-molecule recall is inconsistent: {recall_maximum}")
     regression.update({"per_molecule_recall_rows": len(observed),
                        "per_molecule_recall_max_absolute_difference": recall_maximum})
 

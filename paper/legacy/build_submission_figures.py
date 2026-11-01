@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import build_structure_figures as previous
 from build_revision_figures import (ROOT, text, rect, document, export, embed_svg,
                                     chart_svg, INK, BLUE, ORANGE, TEAL)

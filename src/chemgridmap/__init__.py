@@ -10,6 +10,7 @@ from .evidence import (
     document_pair_offsets,
     document_values,
     fit_between_unit_sd,
+    prepare_generic_activity_records,
 )
 from .pipeline import GridMapResult, build_grid_map
 from .inspection import inspect_entry
@@ -32,6 +33,7 @@ __all__ = [
     "document_pair_offsets",
     "document_values",
     "fit_between_unit_sd",
+    "prepare_generic_activity_records",
     "grid_neighbor_sets",
     "mcs_core",
     "neighbor_recall",

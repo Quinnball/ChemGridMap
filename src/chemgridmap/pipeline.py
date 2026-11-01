@@ -92,7 +92,7 @@ def build_grid_map(
     evidence_model: str = "gaussian",
     merge_identical_documents: bool = True,
     confidence_threshold: float = 0.8,
-    offset_display: str = "uncertain",
+    offset_display: str = "none",
     offset_min_shared: int = 3,
     offset_threshold: float = 1.0,
     offset_sign_agreement: float = 0.8,

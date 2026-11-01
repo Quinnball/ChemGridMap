@@ -21,8 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_ROOT = ROOT / "paper/output/reliability_v1"
 RAW_INPUT = ROOT / "validation_data/chembl37_chembl240_large_scale/chembl37_chembl240_ic50_raw.csv"
 FROZEN_GRID = ROOT / "paper/output/revision_v6/chembl240/full_grid_coordinates_cap2048.csv"
-PRIOR_RESULT = ROOT.parent / (
-    "project1/JCIM_review_innovation_20261024/results/grid_refinement/full_herg_scale_check.json")
+PRIOR_RESULT = ROOT / "paper/legacy/reference/full_herg_scale_check.json"
 SCALE_INPUTS = (RAW_INPUT, FROZEN_GRID, PRIOR_RESULT)
 NAME = "full_herg_default"
 CLI_RESOURCE_RUNNER = """import json, pathlib, resource, runpy, sys
