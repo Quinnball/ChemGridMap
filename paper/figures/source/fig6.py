@@ -1,4 +1,4 @@
-"""图 6：地图、分子检查器、邻居与来源记录的四面板版式。"""
+"""Figure 6: four-panel layout for the map, molecule inspector, neighbours, and source records."""
 
 from __future__ import annotations
 
@@ -44,9 +44,9 @@ def _sha256(path: Path) -> str:
 def _load_capture_report() -> dict[str, object]:
     report = json.loads(CAPTURE_REPORT.read_text(encoding="utf-8"))
     if report.get("status") != "passed":
-        raise AssertionError(f"图 6 capture_report 状态不是 passed：{report.get('status')}")
+        raise AssertionError(f"Figure 6 capture_report status is not passed: {report.get('status')}")
     if not math.isclose(float(report.get("device_scale_factor", 0)), 3.0):
-        raise AssertionError("图 6 capture_report 的 device_scale_factor 不是 3")
+        raise AssertionError("Figure 6 capture_report device_scale_factor is not 3")
     expected = {
         item["file"]: item["sha256"]
         for item in report.get("screenshots", [])
@@ -60,14 +60,14 @@ def _load_capture_report() -> dict[str, object]:
     }
     if not required_files <= set(expected):
         raise AssertionError(
-            f"图 6 capture_report 缺少截图：{sorted(required_files - set(expected))}"
+            f"Figure 6 capture_report is missing screenshots: {sorted(required_files - set(expected))}"
         )
     hashes = {}
     for name in sorted(required_files):
         path = SCREENSHOT_DIR / name
         actual = _sha256(path)
         if actual != expected[name]:
-            raise AssertionError(f"{name} SHA-256 与 capture_report 不符")
+            raise AssertionError(f"{name} SHA-256 disagrees with capture_report")
         hashes[name] = actual
     return {"report": report, "hashes": hashes}
 
@@ -144,7 +144,7 @@ def _border_axis(fig, rect_mm):
 
 
 def _mm_rect(bbox, dpi: float, canvas_height_mm: float) -> tuple[float, float, float, float]:
-    """Matplotlib 外框转成与版面矩形一致的左下原点毫米坐标。"""
+    """Convert a Matplotlib bounding box to lower-left-origin millimetre coordinates."""
     return (
         bbox.x0 * 25.4 / dpi,
         bbox.y0 * 25.4 / dpi,
@@ -345,7 +345,7 @@ def _layout_checks(fig, layout: dict[str, dict[str, object]]) -> list[dict[str, 
 
 
 def insert_images(pdf_path: Path, audit: dict[str, object]) -> None:
-    """按审计后的毫米矩形嵌入裁好的截图。"""
+    """Insert cropped screenshots into audited millimetre rectangles."""
     points_per_mm = 72 / 25.4
 
     def pdf_rect(rect_mm) -> pymupdf.Rect:
@@ -405,7 +405,7 @@ def insert_images(pdf_path: Path, audit: dict[str, object]) -> None:
                 continue
             rects = page.get_image_rects(image[0])
             if len(rects) != 1:
-                raise AssertionError(f"图 6{panel} 的 PDF 图像矩形数为 {len(rects)}")
+                raise AssertionError(f"Figure 6{panel} has PDF image rectangles: {len(rects)}")
             rect = rects[0]
             actual_rects[panel] = [
                 float(rect.x0 * 25.4 / 72),
@@ -581,7 +581,7 @@ def build() -> tuple[object, dict[str, object]]:
         item["effective_dpi"] = item["pixel_width"] / (item["rendered_width_mm"] / 25.4)
 
     fig = c.mm_figure(WIDTH_MM, HEIGHT_MM)
-    # b、d 截图自带完整边界；a、c 不再叠加会穿入文字的外框。
+    # b/d screenshots have full borders; do not add borders over text in a/c.
     for panel in ("b", "d"):
         _border_axis(fig, layout[panel]["rect_mm"])
 

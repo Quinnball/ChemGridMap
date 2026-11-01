@@ -1,4 +1,4 @@
-"""重画稿件图 3：52 个数据集的留出评价。"""
+"""Rebuild Figure 3: held-out evaluation across 52 datasets."""
 
 from __future__ import annotations
 
@@ -71,23 +71,10 @@ def _draw_forest_panel(
             float(row["g_auc"]),
             float(row["d_auc"]),
         ]
-        if np.isfinite(row["b_range_2_auc"]):
-            points.append(float(row["b_range_2_auc"]))
         c.register_axis_points(ax, points, [y] * len(points))
         c.record_value(3, "3b", "G 95% CI", row["target_id"], "g_ci_low", row["g_ci_low"], f"3b_{endpoint}.csv")
         c.record_value(3, "3b", "G 95% CI", row["target_id"], "g_ci_high", row["g_ci_high"], f"3b_{endpoint}.csv")
 
-    ax.plot(
-        frame["b_range_2_auc"],
-        frame["target_rank"],
-        linestyle="none",
-        marker="^",
-        markersize=3.0,
-        markerfacecolor="none",
-        markeredgecolor=c.GRAY,
-        markeredgewidth=0.7,
-        zorder=3,
-    )
     ax.plot(
         frame["g_auc"],
         frame["target_rank"],
@@ -116,7 +103,6 @@ def _draw_forest_panel(
         for variable, series in [
             ("g_auc", "G"),
             ("d_auc", "D"),
-            ("b_range_2_auc", "B-range-2"),
         ]:
             if np.isfinite(row[variable]):
                 c.record_value(3, "3b", series, row_id, variable, row[variable], f"3b_{endpoint}.csv")
@@ -130,7 +116,7 @@ def build() -> Figure:
     c.panel_letter(fig, "b", 96, 159, (W, H))
     c.panel_letter(fig, "c", 1, 114, (W, H))
 
-    # 3a：B0 不一致率
+    # 3a: B0 disagreement rate
     frame_3a = c.load_csv("3a_B0_disagreement.csv")
     ax_3a = c.add_axes_mm(fig, (14, 126.5, 76, 24), (W, H))
     ax_3a.set_xlim(-0.01, 0.71)
@@ -185,11 +171,11 @@ def build() -> Figure:
         c.record_value(3, "3a", f"{endpoint} quartiles", "summary", "q1", q1, "3a_B0_disagreement.csv")
         c.record_value(3, "3a", f"{endpoint} quartiles", "summary", "q3", q3, "3a_B0_disagreement.csv")
 
-    # 3b：逐数据集 AUC
+    # 3b: per-dataset AUC
     frame_ic50 = c.load_csv("3b_IC50.csv")
     frame_ki = c.load_csv("3b_Ki.csv")
-    # 5b 的长标签需要约 25 mm 的左侧空间；收窄绘图区并右移，
-    # 让它与 5c 的绘图区保留明确间隔。
+    # The long 5b labels need about 25 mm on the left; narrow and shift the plot,
+    # keeping clear separation from the 5c plotting area.
     ax_ic50 = _draw_forest_panel(fig, frame_ic50, (120.0, 77.75, 48.5, 72.85), "IC50")
     ax_ic50._qa_fig3b_ic50 = True  # type: ignore[attr-defined]
     ax_ki = _draw_forest_panel(fig, frame_ki, (120.0, 14.3, 48.5, 57.8), "Ki")
@@ -205,21 +191,20 @@ def build() -> Figure:
         handles=[
             c.ci_handle(marker="o", marker_size=3.0, color="black", line=True),
             c.ci_handle(marker="o", marker_size=3.4, color=c.BLUE, hollow=True, line=False),
-            c.ci_handle(marker="^", marker_size=3.4, color="black", hollow=True, line=False),
         ],
-        labels=["G with 95% CI", "D (post hoc)", "B-range-2 (post hoc)"],
+        labels=["G with 95% CI", "D (post hoc)"],
         loc="center left",
         bbox_to_anchor=(100 / W, 157.3 / H),
         frameon=False,
         fontsize=6.5,
-        ncol=3,
+        ncol=2,
         handlelength=1.8,
         handletextpad=0.45,
         columnspacing=1.1,
         borderaxespad=0,
     )
 
-    # 3c：替代模型差值，带断开的 X 轴
+    # 3c: alternative-model differences with a broken x-axis
     row_labels = ["G-record", "G-global", "G-fixed", "X"]
     columns = [
         "g_minus_record_log_loss",

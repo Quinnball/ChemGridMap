@@ -1,4 +1,4 @@
-"""生成并嵌入矢量 RDKit 分子。"""
+"""Generate and embed vector RDKit molecules."""
 
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ FONT_PATH = Path("/System/Library/Fonts/Supplemental/Arial.ttf")
 
 
 def molecule_svg(smiles: str) -> tuple[str, dict[str, float]]:
-    """返回 SVG 与印刷测量值；不改动输入分子。"""
+    """Return SVG and printing measurements without changing the input molecule."""
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
-        raise ValueError(f"RDKit 无法解析分子：{smiles}")
+        raise ValueError(f"RDKit cannot parse molecule: {smiles}")
     before = Chem.MolToSmiles(mol, isomericSmiles=True)
     rdDepictor.Compute2DCoords(mol)
 
@@ -39,7 +39,7 @@ def molecule_svg(smiles: str) -> tuple[str, dict[str, float]]:
     drawer.FinishDrawing()
     after = Chem.MolToSmiles(mol, isomericSmiles=True)
     if after != before:
-        raise AssertionError("RDKit 绘图改变了 canonical SMILES")
+        raise AssertionError("RDKit drawing changed canonical SMILES")
 
     coordinates = [drawer.GetDrawCoords(i) for i in range(mol.GetNumAtoms())]
     bond_lengths = []
@@ -64,12 +64,12 @@ def molecule_svg(smiles: str) -> tuple[str, dict[str, float]]:
 
 
 def _coerce_molecule(value: str | Chem.Mol) -> Chem.Mol:
-    """接受 SMILES 或 RDKit 分子，并返回独立副本。"""
+    """Accept SMILES or an RDKit molecule and return an independent copy."""
     if isinstance(value, Chem.Mol):
         return Chem.Mol(value)
     molecule = Chem.MolFromSmiles(value)
     if molecule is None:
-        raise ValueError(f"RDKit 无法解析分子：{value}")
+        raise ValueError(f"RDKit cannot parse molecule: {value}")
     return molecule
 
 
@@ -78,7 +78,7 @@ def fixed_bond_molecule_svg(
     *,
     printed_bond_length_mm: float,
 ) -> tuple[str, dict[str, float]]:
-    """以自适应画布绘制分子，并按目标印刷键长计算统一缩放。"""
+    """Draw on an adaptive canvas and scale to a target printed bond length."""
     mol = _coerce_molecule(smiles)
     before = Chem.MolToSmiles(mol, isomericSmiles=True)
     highlight_atoms = []
@@ -123,7 +123,7 @@ def fixed_bond_molecule_svg(
     drawer.FinishDrawing()
     after = Chem.MolToSmiles(mol, isomericSmiles=True)
     if after != before:
-        raise AssertionError("RDKit 绘图改变了 canonical SMILES")
+        raise AssertionError("RDKit drawing changed canonical SMILES")
 
     coordinates = [drawer.GetDrawCoords(i) for i in range(mol.GetNumAtoms())]
     bond_lengths_px = [
@@ -173,13 +173,13 @@ def fixed_bond_molecule_svg(
     }
     svg = drawer.GetDrawingText()
     if highlight_atoms:
-        # 高亮圆与填充同色，去掉仅产生亚 0.4 pt 虚边框的描边。
+        # Match highlight circle and fill colours; omit a sub-0.4 pt hairline.
         svg = svg.replace(f"stroke:{highlight_color};", "stroke:none;")
     return svg, measurements
 
 
 def insert_molecule(pdf_path: Path, smiles: str, rect_mm_pt: tuple[float, float, float, float]) -> dict[str, float]:
-    """把 RDKit SVG 转为矢量 PDF 并贴入指定毫米矩形。"""
+    """Convert an RDKit SVG to vector PDF and place it in a specified millimetre rectangle."""
     svg, measurements = molecule_svg(smiles)
     with NamedTemporaryFile(suffix=".svg", delete=False) as stream:
         svg_path = Path(stream.name)
@@ -225,7 +225,7 @@ def insert_fixed_bond_molecule(
     canvas_height_mm: float,
     printed_bond_length_mm: float = 2.4,
 ) -> dict[str, float]:
-    """把统一键长的 RDKit 矢量分子居中贴入页面。"""
+    """Centre a fixed-bond-length RDKit vector molecule on the page."""
     svg, measurements = fixed_bond_molecule_svg(
         smiles,
         printed_bond_length_mm=printed_bond_length_mm,

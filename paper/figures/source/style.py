@@ -1,4 +1,4 @@
-"""F1 稿件图 3–5 的统一样式。"""
+"""Shared manuscript style for Figures 3-5."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import matplotlib as mpl
 from matplotlib import font_manager
 
 
-# 7 pt 数学文字的下标需达到 6 pt；0.86 使缩小后的下标约为 6.0 pt。
+# Subscripts of 7 pt math text should reach 6 pt; 0.86 gives about 6.0 pt.
 mpl._mathtext.SHRINK_FACTOR = 0.86
 
 FONT_DIR = Path("/System/Library/Fonts/Supplemental")
@@ -21,12 +21,12 @@ _FONTS_REGISTERED = False
 
 
 def apply_style() -> None:
-    """注册 Arial，并设置所有图共用的印刷样式。"""
+    """Register Arial and configure the shared print style."""
     global _FONTS_REGISTERED
     if not _FONTS_REGISTERED:
         for path in FONT_FILES:
             if not path.is_file():
-                raise FileNotFoundError(f"缺少 Arial 字体：{path}")
+                raise FileNotFoundError(f"Missing Arial font: {path}")
             font_manager.fontManager.addfont(path)
         _FONTS_REGISTERED = True
 

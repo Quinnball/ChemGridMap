@@ -1,4 +1,4 @@
-"""图 2–5 的尺寸、文字、几何、数据与矢量核查。"""
+"""Check size, text, geometry, data, and vectors for Figures 2-5."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from matplotlib.colors import to_hex, to_rgb
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
+from chemgridmap.plotting import DEFAULT_COLORS
 
 import common as c
 
@@ -79,7 +80,7 @@ def _bbox_gap_mm(a, b, dpi: float) -> float:
 
 
 def _text_spacing_check(fig: Figure) -> dict[str, object]:
-    """任意两段文字的外框间距不得小于 0.5 mm。"""
+    """Text bounding boxes must be at least 0.5 mm apart."""
     renderer = fig.canvas.get_renderer()
     texts = _audio_texts(fig)
     minimum = None
@@ -139,7 +140,7 @@ def _legend_texts(fig: Figure) -> list[mtext.Text]:
 
 
 def _legend_title_spacing_check(fig: Figure) -> dict[str, object]:
-    """图例文字与面板标题的间距不得小于 1.5 mm。"""
+    """Legend text and panel titles must be at least 1.5 mm apart."""
     renderer = fig.canvas.get_renderer()
     legend_texts = _legend_texts(fig)
     title_texts = [
@@ -192,7 +193,7 @@ def _legend_title_spacing_check(fig: Figure) -> dict[str, object]:
 
 
 def _fig2c_spacing_check(fig: Figure) -> dict[str, object]:
-    """图 2c 的均值文字与上方色块行至少相隔 1.5 mm。"""
+    """The Figure 2c mean label must stay at least 1.5 mm below the colour row."""
     renderer = fig.canvas.get_renderer()
     swatches = [
         patch
@@ -258,7 +259,7 @@ def _svg_grid_fills(path: Path) -> dict[tuple[int, int], str]:
 
 
 def _fig2_color_check(fig: Figure) -> dict[str, object]:
-    """逐格核对 a–c 与软件 SVG，并核对图例与软件色值。"""
+    """Check panels a-c cell by cell against the software SVG, legend, and colours."""
     svg_dir = (
         c.FIG_DIR / "data_fig2" / "default"
     )
@@ -274,6 +275,7 @@ def _fig2_color_check(fig: Figure) -> dict[str, object]:
     }
     swatches = []
     triangles = []
+    legend_triangles = []
     for ax in fig.axes:
         for patch in ax.patches:
             if hasattr(patch, "_qa_fig2_grid_panel"):
@@ -284,6 +286,8 @@ def _fig2_color_check(fig: Figure) -> dict[str, object]:
                 swatches.append(patch)
             if hasattr(patch, "_qa_fig2_triangle_leg"):
                 triangles.append(patch)
+            if getattr(patch, "_qa_fig2_legend_triangle", False):
+                legend_triangles.append(patch)
 
     failures = []
     color_counts = {}
@@ -330,10 +334,43 @@ def _fig2_color_check(fig: Figure) -> dict[str, object]:
     ]
     triangle_panels = Counter(patch._qa_fig2_triangle_panel for patch in triangles)
     triangle_legs = sorted(patch._qa_fig2_triangle_leg for patch in triangles)
+
+    def upper_right_angle(patch) -> bool:
+        vertices = np.asarray(patch._qa_fig2_triangle_vertices)  # type: ignore[attr-defined]
+        right = float(vertices[:, 0].max())
+        top = float(vertices[:, 1].max())
+        return any(
+            math.isclose(x, right, abs_tol=1e-9)
+            and math.isclose(y, top, abs_tol=1e-9)
+            for x, y in vertices
+        )
+
+    triangle_styles_ok = all(
+        math.isclose(
+            patch._qa_fig2_triangle_edgewidth,  # type: ignore[attr-defined]
+            0.3,
+            abs_tol=1e-9,
+        )
+        and to_hex(patch.get_edgecolor(), keep_alpha=False).lower() == "#ffffff"
+        and upper_right_angle(patch)
+        for patch in [*triangles, *legend_triangles]
+    )
+    triangle_cells_ok = all(
+        all(
+            abs(float(x) - col) <= 0.5 + 1e-9
+            and abs(float(y) - row) <= 0.5 + 1e-9
+            for x, y in patch._qa_fig2_triangle_vertices  # type: ignore[attr-defined]
+        )
+        for patch in triangles
+        for col, row in [patch._qa_fig2_triangle_cell]  # type: ignore[attr-defined]
+    )
     triangles_ok = (
         triangle_panels == {"a": 17, "b": 17}
         and triangle_legs
-        and all(math.isclose(value, 0.5) for value in triangle_legs)
+        and all(math.isclose(value, 0.62) for value in triangle_legs)
+        and len(legend_triangles) == 1
+        and triangle_styles_ok
+        and triangle_cells_ok
     )
     return {
         "cells_compared": sum(len(value) for value in tiles.values()),
@@ -345,6 +382,9 @@ def _fig2_color_check(fig: Figure) -> dict[str, object]:
         "triangles": {
             "counts": dict(triangle_panels),
             "legs_grid_cells": sorted(set(triangle_legs)),
+            "legend_count": len(legend_triangles),
+            "same_upper_right_corner": triangle_styles_ok,
+            "inside_cells": triangle_cells_ok,
         },
         "passed": (
             not failures
@@ -356,7 +396,7 @@ def _fig2_color_check(fig: Figure) -> dict[str, object]:
 
 
 def _fig4a_check(fig: Figure) -> dict[str, object]:
-    """图 4a 不再显示 n，坐标显示范围为 0–1 外扩 0.03。"""
+    """Compare Figure 4a curves point by point with the class calibration table."""
     panels = [
         ax for ax in fig.axes if getattr(ax, "_qa_fig4a", False)
     ]
@@ -366,6 +406,75 @@ def _fig4a_check(fig: Figure) -> dict[str, object]:
         for text in ax.texts
         if text.get_text().startswith(("n=", "n\n"))
     ]
+    calibration = c.load_csv("4a_calibration_by_class.csv")
+    expected_styles = {
+        "inactive": (to_hex(DEFAULT_COLORS["inactive"], keep_alpha=False).lower(), "o"),
+        "medium": (to_hex(DEFAULT_COLORS["medium"], keep_alpha=False).lower(), "s"),
+        "active": (to_hex(DEFAULT_COLORS["active"], keep_alpha=False).lower(), "^"),
+    }
+    comparison_failures = []
+    actual_counts = {}
+    for panel in panels:
+        endpoint = panel._qa_fig4a_endpoint  # type: ignore[attr-defined]
+        actual = sorted(
+            (
+                item["display_class"],
+                item["probability_bin"],
+                item["mean_p"],
+                item["agreement_rate"],
+                item["wilson_ci_low"],
+                item["wilson_ci_high"],
+                item["color"],
+                item["marker"],
+            )
+            for item in panel._qa_fig4a_records  # type: ignore[attr-defined]
+        )
+        visible = calibration.loc[
+            calibration["endpoint"].eq(endpoint)
+            & ~calibration["omit_in_figure"].astype(bool)
+        ]
+        expected = sorted(
+            (
+                str(row.display_class),
+                int(row.probability_bin),
+                float(row.mean_p),
+                float(row.agreement_rate),
+                float(row.wilson_ci_low),
+                float(row.wilson_ci_high),
+                expected_styles[str(row.display_class)][0],
+                expected_styles[str(row.display_class)][1],
+            )
+            for row in visible.itertuples(index=False)
+        )
+        actual_counts[endpoint] = len(actual)
+        if len(actual) != len(expected):
+            comparison_failures.append(
+                {
+                    "endpoint": endpoint,
+                    "problem": "point count",
+                    "actual": len(actual),
+                    "expected": len(expected),
+                }
+            )
+            continue
+        for actual_row, expected_row in zip(actual, expected, strict=True):
+            if (
+                actual_row[:2] != expected_row[:2]
+                or actual_row[6:] != expected_row[6:]
+                or not np.allclose(
+                    actual_row[2:6],
+                    expected_row[2:6],
+                    rtol=0.0,
+                    atol=1e-15,
+                )
+            ):
+                comparison_failures.append(
+                    {
+                        "endpoint": endpoint,
+                        "actual": actual_row,
+                        "expected": expected_row,
+                    }
+                )
     limits = {
         panel.get_label(): {
             "xlim": [float(value) for value in panel.get_xlim()],
@@ -378,15 +487,36 @@ def _fig4a_check(fig: Figure) -> dict[str, object]:
         and np.allclose(panel.get_ylim(), (-0.03, 1.03))
         for panel in panels
     )
+    legend_labels = {
+        panel._qa_fig4a_endpoint: (  # type: ignore[attr-defined]
+            [text.get_text() for text in panel.get_legend().get_texts()]
+            if panel.get_legend() is not None
+            else []
+        )
+        for panel in panels
+    }
     return {
         "panels_checked": len(panels),
         "n_labels": n_labels,
         "limits": limits,
-        "passed": len(panels) == 2 and not n_labels and limits_ok,
+        "actual_point_counts": actual_counts,
+        "comparison_failures": comparison_failures[:40],
+        "legend_labels": legend_labels,
+        "passed": (
+            len(panels) == 2
+            and not n_labels
+            and limits_ok
+            and actual_counts == {"IC50": 12, "Ki": 11}
+            and not comparison_failures
+            and legend_labels == {
+                "IC50": ["Inactive", "Medium", "Active"],
+                "Ki": [],
+            }
+        ),
     }
 
 
-def _fig4d_check(fig: Figure) -> dict[str, object]:
+def _fig4d_check(fig: Figure, png_path: Path) -> dict[str, object]:
     panels = [ax for ax in fig.axes if getattr(ax, "_qa_fig4d", False)]
     bars = [
         patch
@@ -423,6 +553,86 @@ def _fig4d_check(fig: Figure) -> dict[str, object]:
         {"endpoint": "IC50", "group": "m_eq_1", "state": "touched_all", "n_predictions": 2},
         {"endpoint": "Ki", "group": "m_eq_1", "state": "touched_all", "n_predictions": 3},
     ]
+    intervals = [
+        collection
+        for panel in panels
+        for collection in panel.collections
+        if getattr(collection, "_qa_fig4d_interval", False)
+    ]
+    bar_zorder = max((patch.get_zorder() for patch in bars), default=np.inf)
+    interval_zorder = min(
+        (collection.get_zorder() for collection in intervals),
+        default=-np.inf,
+    )
+    count_labels = sorted(
+        [
+            tuple(text._qa_fig4d_count)  # type: ignore[attr-defined]
+            for panel in panels
+            for text in panel.texts
+            if hasattr(text, "_qa_fig4d_count")
+        ]
+    )
+    expected_count_labels = sorted(
+        [
+            (
+                panel._qa_fig4d_endpoint,  # type: ignore[attr-defined]
+                row["earlier_units_group"],
+                row["state"],
+                int(row["n_predictions"]),
+                int(row["n_datasets"]),
+            )
+            for panel in panels
+            for row in panel._qa_fig4d_rows  # type: ignore[attr-defined]
+            if int(row["n_predictions"]) >= 8
+        ]
+    )
+    legend_patches = [
+        handle
+        for legend in fig.legends
+        for handle in (
+            getattr(legend, "legend_handles", None)
+            or getattr(legend, "legendHandles", [])
+        )
+        if hasattr(handle, "_qa_fig4d_legend_state")
+    ]
+    bar_alpha = {
+        state: sorted({float(patch.get_alpha()) for patch in bars if patch._qa_fig4d_state == state})
+        for state in expected_counts
+    }
+    legend_alpha = {
+        handle._qa_fig4d_legend_state: float(handle.get_alpha())
+        for handle in legend_patches
+    }
+    rgb = np.asarray(Image.open(png_path).convert("RGB"))
+    renderer = fig.canvas.get_renderer()
+    pixel_comparisons = []
+    for handle in legend_patches:
+        state = handle._qa_fig4d_legend_state
+        bar = next(
+            patch
+            for patch in bars
+            if patch._qa_fig4d_state == state
+        )
+        legend_box = handle.get_window_extent(renderer)
+        legend_x = round((legend_box.x0 + legend_box.x1) / 2)
+        legend_y = round(fig.bbox.height - (legend_box.y0 + legend_box.y1) / 2)
+        bar_box = bar.get_window_extent(renderer)
+        bar_x = round(bar_box.x0 + 0.25 * bar_box.width)
+        bar_y = round(fig.bbox.height - (bar_box.y0 + 0.25 * bar_box.height))
+        legend_rgb = rgb[legend_y, legend_x].astype(int).tolist()
+        bar_rgb = rgb[bar_y, bar_x].astype(int).tolist()
+        channel_differences = np.abs(
+            np.asarray(legend_rgb) - np.asarray(bar_rgb)
+        ).tolist()
+        pixel_comparisons.append(
+            {
+                "state": state,
+                "legend_rgb": legend_rgb,
+                "bar_rgb": bar_rgb,
+                "channel_differences": channel_differences,
+                "passed": bool(max(channel_differences) <= 2),
+            }
+        )
     return {
         "panels_checked": len(panels),
         "bars_expected": expected_bars,
@@ -430,11 +640,33 @@ def _fig4d_check(fig: Figure) -> dict[str, object]:
         "state_counts": dict(counts),
         "colors": colors,
         "omitted_groups": omitted,
+        "intervals_checked": len(intervals),
+        "bar_zorder": bar_zorder,
+        "interval_zorder": interval_zorder,
+        "count_labels": count_labels,
+        "bar_alpha": bar_alpha,
+        "legend_alpha": legend_alpha,
+        "legend_pixel_comparisons": pixel_comparisons,
         "passed": (
             len(panels) == 2
             and len(bars) == expected_bars == 10
             and counts == expected_counts
             and omitted == expected_omissions
+            and len(intervals) == 20
+            and interval_zorder > bar_zorder
+            and count_labels == expected_count_labels
+            and all(len(values) == 1 for values in bar_alpha.values())
+            and len(legend_alpha) == 3
+            and all(
+                len(bar_alpha[state]) == 1
+                and np.isclose(
+                    bar_alpha[state][0],
+                    legend_alpha.get(state, np.nan),
+                )
+                for state in expected_counts
+            )
+            and len(pixel_comparisons) == 3
+            and all(item["passed"] for item in pixel_comparisons)
         ),
     }
 
@@ -463,7 +695,7 @@ def _text_margin_failures(fig: Figure) -> list[list[object]]:
 
 
 def _text_owner_axis(ax, text: mtext.Text) -> bool:
-    """判断文字是否属于该坐标轴；不包括跨坐标轴的 Figure 文字。"""
+    """Test whether text belongs to an axes, excluding cross-axes figure text."""
     candidates = [
         *ax.texts,
         *ax.get_xticklabels(),
@@ -478,7 +710,7 @@ def _text_owner_axis(ax, text: mtext.Text) -> bool:
 
 
 def _text_geometry_check(fig: Figure) -> dict[str, object]:
-    """检查文字不越画布、不进入其他坐标轴，且不与其他文字重叠。"""
+    """Check that text stays on the canvas, outside other axes, and does not overlap text."""
     renderer = fig.canvas.get_renderer()
     texts = _audio_texts(fig)
     owners = {}
@@ -488,7 +720,7 @@ def _text_geometry_check(fig: Figure) -> dict[str, object]:
             None,
         )
         if owner is None:
-            # 图级坐标标注若只落入一个绘图区，就视为该坐标轴的标注。
+            # Treat figure-level coordinates in one plot area as that axes annotation.
             intersecting_axes = [
                 ax
                 for ax in fig.axes
@@ -680,7 +912,7 @@ def _text_data_overlap(fig: Figure) -> list[dict[str, object]]:
 
 
 def _path_line_geometry(transform, path, spacing_px: float):
-    """把路径的直线段转换为显示坐标采样点。"""
+    """Convert path line segments to sampled display coordinates."""
     vertices = transform.transform_path(path).vertices
     if len(vertices) < 2:
         return
@@ -689,7 +921,7 @@ def _path_line_geometry(transform, path, spacing_px: float):
 
 
 def _line_text_intersection_check(fig: Figure) -> dict[str, object]:
-    """所有可见线、patch 边界和 axes 边框都不得穿过文字外框。"""
+    """Visible lines, patch edges, and axes borders must not cross text boxes."""
     renderer = fig.canvas.get_renderer()
     spacing_px = 0.05 * fig.dpi / 25.4
     text_boxes = [
@@ -825,7 +1057,7 @@ def _rotation_failures(fig: Figure) -> list[list[object]]:
 
 
 def _swarm_spacing_check(fig: Figure) -> dict[str, object]:
-    """检查同一蜂群行的圆心距，位置均在物理毫米空间计算。"""
+    """Check centre distances on a swarm row in physical millimetres."""
     rows: dict[str, dict[str, object]] = {}
     for ax in fig.axes:
         for swarm in getattr(ax, "_qa_swarms", []):
@@ -1030,7 +1262,7 @@ def figure_2_supplementary(
     pdf_path: Path,
     measurements: list[dict[str, float]],
 ) -> dict[str, object]:
-    """图 2 的六槽结构、共享键长与关键文字核查。"""
+    """Check the six Figure 2 structure slots, shared bond length, and key text."""
     expected_heavy_atoms = [31, 12, 22, 9, 17, 17]
     expected_dummy_atoms = [0, 0, 2, 0, 0, 0]
     expected_highlight_atoms = [0, 0, 0, 0, 9, 0]
@@ -1080,6 +1312,7 @@ def figure_2_supplementary(
         "Mean 0.585",
         "Fixed k 0.536",
         "Wide record range",
+        "wavy bonds: attachment points",
         "Most frequent scaffold",
         "31 heavy atoms",
         "in 5 of 42 members",
@@ -1099,7 +1332,61 @@ def figure_2_supplementary(
         "lacks the core",
     )
     with pymupdf.open(pdf_path) as pdf:
-        page_text = pdf[0].get_text("text")
+        page = pdf[0]
+        page_text = page.get_text("text")
+        wavy_boxes = page.search_for("wavy bonds: attachment points")
+        page_height_mm = page.rect.height * 25.4 / 72
+        cropped_bottom_mm = SOURCE_HEIGHT_MM[2] - page_height_mm
+        structure_boxes = [
+            pymupdf.Rect(
+                (float(item["center_x_mm"]) - float(item["width_mm"]) / 2) * 72 / 25.4,
+                (
+                    SOURCE_HEIGHT_MM[2]
+                    - float(item["center_y_mm"])
+                    - float(item["height_mm"]) / 2
+                    - cropped_bottom_mm
+                ) * 72 / 25.4,
+                (float(item["center_x_mm"]) + float(item["width_mm"]) / 2) * 72 / 25.4,
+                (
+                    SOURCE_HEIGHT_MM[2]
+                    - float(item["center_y_mm"])
+                    + float(item["height_mm"]) / 2
+                    - cropped_bottom_mm
+                ) * 72 / 25.4,
+            )
+            for item in measurements
+        ]
+    wavy_structure_overlaps = [
+        index
+        for index, structure_box in enumerate(structure_boxes)
+        if any(_bbox_intersection(wavy_box, structure_box) for wavy_box in wavy_boxes)
+    ]
+    wavy_center_x_mm = (
+        (wavy_boxes[0].x0 + wavy_boxes[0].x1) / 2 * 25.4 / 72
+        if len(wavy_boxes) == 1
+        else None
+    )
+    wavy_width_mm = (
+        wavy_boxes[0].width * 25.4 / 72
+        if len(wavy_boxes) == 1
+        else 0.0
+    )
+    wavy_overlap_mm = (
+        max(
+            0.0,
+            min(wavy_boxes[0].x1 * 25.4 / 72, 92.0)
+            - max(wavy_boxes[0].x0 * 25.4 / 72, 62.0),
+        )
+        if len(wavy_boxes) == 1
+        else 0.0
+    )
+    wavy_in_fmcs_column = (
+        len(wavy_boxes) == 1
+        and wavy_center_x_mm is not None
+        and 62.0 <= wavy_center_x_mm <= 92.0
+        and wavy_width_mm > 0
+        and wavy_overlap_mm / wavy_width_mm >= 0.9
+    )
     missing_text = [text for text in required_text if text not in page_text]
     passed = (
         len(measurements) == 6
@@ -1110,6 +1397,8 @@ def figure_2_supplementary(
         and nitrogen_hydrogens[2] == 0
         and max(deviations, default=1.0) <= 0.03
         and all(item["within_slot"] for item in structure_layout)
+        and wavy_in_fmcs_column
+        and not wavy_structure_overlaps
         and not missing_text
     )
     return {
@@ -1132,6 +1421,15 @@ def figure_2_supplementary(
             "printed_bond_length_mm": bond_lengths,
             "maximum_fractional_deviation": max(deviations, default=None),
             "structure_layout": structure_layout,
+            "wavy_box_count": len(wavy_boxes),
+            "wavy_in_fmcs_column": wavy_in_fmcs_column,
+            "wavy_center_x_mm": wavy_center_x_mm,
+            "wavy_column_overlap_fraction": (
+                wavy_overlap_mm / wavy_width_mm
+                if wavy_width_mm > 0
+                else 0.0
+            ),
+            "wavy_structure_overlaps": wavy_structure_overlaps,
             "missing_text": missing_text,
         },
         "passed": passed,
@@ -1139,7 +1437,7 @@ def figure_2_supplementary(
 
 
 def _description_layout_check(fig: Figure) -> dict[str, object]:
-    """检查图 2d 的六个三行说明块与槽边界。"""
+    """Check the six descriptions, including the fourth FMCS caption line."""
     renderer = fig.canvas.get_renderer()
     texts = [
         text
@@ -1173,7 +1471,10 @@ def _description_layout_check(fig: Figure) -> dict[str, object]:
             max(entry["bbox"].y1, bbox.y1),
         )
         entry["lines"][line] = float(text.get_position()[1])
-        if bbox_mm[0] < slot[0] - 1e-6 or bbox_mm[1] > slot[1] + 1e-6:
+        if (
+            not getattr(text, "_qa_fig2_fmcs_wavy", False)
+            and (bbox_mm[0] < slot[0] - 1e-6 or bbox_mm[1] > slot[1] + 1e-6)
+        ):
             slot_failures.append(
                 {
                     "block": block,
@@ -1201,24 +1502,48 @@ def _description_layout_check(fig: Figure) -> dict[str, object]:
     else:
         baseline_failures.append({"line": None, "positions": len(blocks)})
 
+    wavy_texts = [
+        text
+        for text in texts
+        if getattr(text, "_qa_fig2_fmcs_wavy", False)
+    ]
+    wavy_layout_ok = False
+    if len(wavy_texts) == 1 and len(blocks) == 6:
+        wavy = wavy_texts[0]
+        fmcs = blocks[2]
+        wavy_layout_ok = bool(
+            wavy.get_text() == "wavy bonds: attachment points"
+            and int(wavy._qa_description_block) == 2  # type: ignore[attr-defined]
+            and int(wavy._qa_description_line) == 3  # type: ignore[attr-defined]
+            and tuple(wavy._qa_description_slot_mm) == (62.0, 92.0)  # type: ignore[attr-defined]
+            and np.isclose(wavy.get_position()[0], 77.0 / 170.0)
+            and 2 in fmcs["lines"]
+            and np.isclose(
+                fmcs["lines"][2] - fmcs["lines"][3],
+                3.0 / SOURCE_HEIGHT_MM[2],
+            )
+        )
     return {
         "blocks_checked": len(blocks),
         "texts_checked": len(texts),
         "slot_failures": slot_failures,
         "overlaps": overlaps,
         "baseline_failures": baseline_failures,
+        "fmcs_wavy_text_checked": len(wavy_texts),
+        "fmcs_wavy_layout_ok": wavy_layout_ok,
         "passed": (
             len(blocks) == 6
-            and len(texts) == 18
+            and len(texts) == 19
             and not slot_failures
             and not overlaps
             and not baseline_failures
+            and wavy_layout_ok
         ),
     }
 
 
 def _letter_centering_check(png_path: Path, fig: Figure) -> dict[str, object]:
-    """用 600 dpi PNG 检查图 5c 字母墨迹外接框的中心。"""
+    """Use a 600 dpi PNG to check letter-ink bounding-box centres in Figure 5c."""
     labels = [
         text
         for text in fig.findobj(mtext.Text)
@@ -1283,7 +1608,7 @@ def _letter_centering_check(png_path: Path, fig: Figure) -> dict[str, object]:
 
 
 def figure_6_supplementary(supplementary_checks: dict[str, object]) -> dict[str, object]:
-    """核查图 6 的四面板构建与截图输入。"""
+    """Check the four-panel Figure 6 build and screenshot inputs."""
     figure_6 = supplementary_checks.get("figure_6", {})
     final = figure_6.get("build") if isinstance(figure_6, dict) else None
     final_ok = bool(isinstance(final, dict) and final.get("passed"))
@@ -1312,7 +1637,7 @@ def figure_6_supplementary(supplementary_checks: dict[str, object]) -> dict[str,
 
 
 def _fig3b_label_gap_check(fig: Figure) -> dict[str, object]:
-    """IC50 子面板的 x 轴刻度标签与 Ki 标题至少相隔 2.5 mm。"""
+    """The IC50 x-axis labels and Ki title must be at least 2.5 mm apart."""
     renderer = fig.canvas.get_renderer()
     upper = next(
         ax for ax in fig.axes if getattr(ax, "_qa_fig3b_ic50", False)
@@ -1343,8 +1668,30 @@ def _fig3b_label_gap_check(fig: Figure) -> dict[str, object]:
     }
 
 
+def _fig3b_legend_check(fig: Figure) -> dict[str, object]:
+    """Figure 3b shows only G and the post hoc distance score D."""
+    matching = [
+        legend
+        for legend in fig.legends
+        if any(
+            text.get_text() == "G with 95% CI"
+            for text in legend.get_texts()
+        )
+    ]
+    labels = (
+        [text.get_text() for text in matching[0].get_texts()]
+        if len(matching) == 1
+        else []
+    )
+    return {
+        "labels": labels,
+        "expected": ["G with 95% CI", "D (post hoc)"],
+        "passed": labels == ["G with 95% CI", "D (post hoc)"],
+    }
+
+
 def _fig5e_layout_check(fig: Figure) -> dict[str, object]:
-    """图 5e 字母、图例、上方说明与面板标题的垂直间距。"""
+    """Check vertical spacing for the Figure 5e letter, legend, note, and title."""
     renderer = fig.canvas.get_renderer()
     letter = next(
         text
@@ -1420,7 +1767,7 @@ def _source_specs():
         "3b_Ki.csv": c.DATA_DIR / "3b_Ki.csv",
         "3c_IC50.csv": c.DATA_DIR / "3c_IC50.csv",
         "3c_Ki.csv": c.DATA_DIR / "3c_Ki.csv",
-        "4a_calibration_curves.csv": c.DATA_DIR / "4a_calibration_curves.csv",
+        "4a_calibration_by_class.csv": c.DATA_DIR / "4a_calibration_by_class.csv",
         "4b_hERG_patent_pair.csv": c.DATA_DIR / "4b_hERG_patent_pair.csv",
         "4c_IC50.csv": c.DATA_DIR / "4c_IC50.csv",
         "4c_Ki.csv": c.DATA_DIR / "4c_Ki.csv",
@@ -1455,7 +1802,7 @@ def _check_plotted_values() -> dict[str, object]:
 
     for endpoint in ("IC50", "Ki"):
         frame = sources[f"3b_{endpoint}.csv"]
-        for column in ("g_ci_low", "g_ci_high", "g_auc", "d_auc", "b_range_2_auc"):
+        for column in ("g_ci_low", "g_ci_high", "g_auc", "d_auc"):
             add("3b", column, frame[column])
 
         frame = sources[f"3c_{endpoint}.csv"]
@@ -1471,7 +1818,7 @@ def _check_plotted_values() -> dict[str, object]:
             for prefix in ("median", "ci_low", "ci_high"):
                 add("3c", f"{prefix}_{column}", [summary[f"{prefix}_{column}"]])
 
-        frame = sources["4a_calibration_curves.csv"]
+        frame = sources["4a_calibration_by_class.csv"]
         frame = frame[
             frame["endpoint"].eq(endpoint) & ~frame["omit_in_figure"].astype(bool)
         ]
@@ -1493,6 +1840,7 @@ def _check_plotted_values() -> dict[str, object]:
             "agreement_ci_high",
             "mean_probability",
             "n_predictions",
+            "n_datasets",
         ):
             add("4d", column, frame[column])
 
@@ -1574,6 +1922,23 @@ def _source_assertions() -> list[dict[str, object]]:
 
     symbol_frame = c.load_csv("target_symbols.csv")
     symbol_ids = set(symbol_frame["target_id"])
+    plotted_3 = pd.read_csv(
+        c.QA_DIR / "Figure_3_plotted_values.csv",
+        float_precision="round_trip",
+    )
+    results.append(
+        _assertion(
+            "3b no B-range-2 plotted values",
+            [],
+            sorted(
+                plotted_3.loc[
+                    plotted_3["panel"].eq("3b")
+                    & plotted_3["variable"].eq("b_range_2_auc"),
+                    "row_identifier",
+                ].tolist()
+            ),
+        )
+    )
     for endpoint, expected_count in (("IC50", 29), ("Ki", 23)):
         frame = c.load_csv(f"3b_{endpoint}.csv")
         results.append(_assertion(f"3b {endpoint} rows", expected_count, len(frame)))
@@ -1619,15 +1984,18 @@ def _source_assertions() -> list[dict[str, object]]:
             )
         )
 
-    calibration = c.load_csv("4a_calibration_curves.csv")
-    for endpoint, expected in (("IC50", {"untouched": 5, "touched": 5}), ("Ki", {"untouched": 4, "touched": 4})):
+    calibration = c.load_csv("4a_calibration_by_class.csv")
+    for endpoint, expected in (
+        ("IC50", {"active": 4, "inactive": 5, "medium": 3}),
+        ("Ki", {"active": 3, "inactive": 4, "medium": 4}),
+    ):
         local = calibration[
             calibration["endpoint"].eq(endpoint)
             & ~calibration["omit_in_figure"].astype(bool)
         ]
-        actual = local.groupby("population").size().to_dict()
+        actual = local.groupby("display_class").size().to_dict()
         results.append(_assertion(f"4a {endpoint} plotted bins", expected, actual))
-    results.append(_assertion("4a omitted bins", 2, int(calibration["omit_in_figure"].sum())))
+    results.append(_assertion("4a omitted bins", 7, int(calibration["omit_in_figure"].sum())))
     si_4a = c.load_csv("si_4a_without_CHEMBL5113.csv")
     results.extend(
         [
@@ -1668,6 +2036,11 @@ def _source_assertions() -> list[dict[str, object]]:
                     f"4d {endpoint} omitted n<8",
                     ["touched_all"] if endpoint == "IC50" else ["touched_all"],
                     frame.loc[frame["n_predictions"] < 8, "state"].unique().tolist(),
+                ),
+                _assertion(
+                    f"4d {endpoint} dataset counts",
+                    True,
+                    bool(frame["n_datasets"].notna().all()),
                 ),
             ]
         )
@@ -1783,7 +2156,7 @@ def run_qa(
     allowed_raster_counts: dict[int, int] | None = None,
 ) -> dict[str, object]:
     if crop_audits is None:
-        raise ValueError("缺少 PDF 裁切审计")
+        raise ValueError("Missing PDF crop audit")
     figure_results = {}
     swarm_spacing = {}
     for fig_no, fig in figures.items():
@@ -1846,7 +2219,12 @@ def run_qa(
             "tick_rotation": {"passed": not rotations, "failures": rotations[:80]},
             "line_width": {
                 "minimum_pt": min(line_widths) if line_widths else None,
-                "passed": bool(line_widths) and min(line_widths) >= MIN_LINE_PT,
+                "required_pt": 0.3 if fig_no == 2 else MIN_LINE_PT,
+                "passed": (
+                    bool(line_widths)
+                    and min(line_widths)
+                    >= (0.3 if fig_no == 2 else MIN_LINE_PT) - 1e-9
+                ),
             },
             "vector": {
                 "raster_image_count": image_count,
@@ -1861,9 +2239,13 @@ def run_qa(
             figure_results[fig_no]["fig2_colors"] = _fig2_color_check(fig)
         if fig_no == 4:
             figure_results[fig_no]["fig4a"] = _fig4a_check(fig)
-            figure_results[fig_no]["fig4d"] = _fig4d_check(fig)
+            figure_results[fig_no]["fig4d"] = _fig4d_check(
+                fig,
+                png_paths[fig_no],
+            )
         if fig_no == 3:
             figure_results[fig_no]["fig3b_label_gap"] = _fig3b_label_gap_check(fig)
+            figure_results[fig_no]["fig3b_legend"] = _fig3b_legend_check(fig)
         if fig_no == 5:
             figure_results[fig_no]["letter_centering"] = _letter_centering_check(
                 png_paths[fig_no],
@@ -1915,6 +2297,7 @@ def run_qa(
                 "fig4a",
                 "fig4d",
                 "fig3b_label_gap",
+                "fig3b_legend",
                 "letter_centering",
                 "fig5e_layout",
             }
@@ -1945,4 +2328,4 @@ def run_qa(
 
 
 if __name__ == "__main__":
-    raise SystemExit("请通过 build_figures.py 运行 QA，以便同时取得 Matplotlib 对象。")
+    raise SystemExit("Run QA through build_figures.py to access Matplotlib objects.")

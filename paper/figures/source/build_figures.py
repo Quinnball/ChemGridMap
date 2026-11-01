@@ -1,4 +1,4 @@
-"""生成图 2–5，渲染 PNG，并执行完整 QA。"""
+"""Build Figures 2-5, render PNG files, and run the complete QA."""
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ def _pdf_text_sequence(page) -> list[str]:
 
 
 def _crop_pdf_bottom(pdf_path: Path) -> dict[str, object]:
-    """按非白色文字与绘图的最低点裁去页面底部空白。"""
+    """Crop the bottom margin to the lowest non-white text or drawing."""
     temp_path = pdf_path.with_name(f".{pdf_path.name}.crop.tmp")
     with pymupdf.open(pdf_path) as source_doc:
         source = source_doc[0]
@@ -84,7 +84,7 @@ def _crop_pdf_bottom(pdf_path: Path) -> dict[str, object]:
                 content_rects.append(pymupdf.Rect(drawing["rect"]))
 
         if not content_rects:
-            raise RuntimeError(f"{pdf_path.name} 未找到可见文字或绘图")
+            raise RuntimeError(f"{pdf_path.name} no visible text or drawing was found")
 
         content_bottom_mm = max(rect.y1 for rect in content_rects) * MM_PER_INCH / 72
         crop_height_mm = math.ceil((content_bottom_mm + 1.5) * 2) / 2
@@ -92,7 +92,7 @@ def _crop_pdf_bottom(pdf_path: Path) -> dict[str, object]:
         source_height_mm = source.rect.height * MM_PER_INCH / 72
         if not 0 < crop_height_mm < source_height_mm:
             raise RuntimeError(
-                f"{pdf_path.name} 裁切高度 {crop_height_mm} mm 不在原页面范围内"
+                f"{pdf_path.name} crop height {crop_height_mm} mm is outside the original page"
             )
 
         crop_height_pt = crop_height_mm * 72 / MM_PER_INCH
@@ -150,7 +150,7 @@ def main() -> int:
         _save_pdf(fig, pdf_paths[number])
     fig6.insert_images(pdf_paths[6], figure_6_audit)
 
-    # 页面顶部坐标：150 - (100.5 + 14)。
+    # Top page coordinate: 150 - (100.5 + 14).
     molecule_measurements = {
         "Figure_5c": molecule.insert_molecule(
             pdf_paths[5],

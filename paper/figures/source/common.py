@@ -1,4 +1,4 @@
-"""图 3–5 共用的数据、坐标、排版与绘图值登记工具。"""
+"""Shared data, coordinate, layout, and plotted-value registry helpers for Figures 3-5."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def init() -> None:
 
 
 def mm_figure(width_mm: float, height_mm: float) -> Figure:
-    """创建物理尺寸严格的白色画布。"""
+    """Create a white canvas with an exact physical size."""
     return plt.figure(
         figsize=(width_mm / MM_PER_INCH, height_mm / MM_PER_INCH),
         dpi=600,
@@ -60,7 +60,7 @@ def cap_height_mm(
     family: str = "Arial",
     weight: str = "bold",
 ) -> float:
-    """按 Arial Bold 的 H 字形读取 cap height，并换算为毫米。"""
+    """Measure Arial Bold cap height from the H glyph and convert it to millimetres."""
     path = font_manager.findfont(
         font_manager.FontProperties(family=family, weight=weight)
     )
@@ -78,7 +78,7 @@ def add_axes_mm(
     rect_mm: Sequence[float],
     canvas_mm: tuple[float, float],
 ) -> Axes:
-    """按左下角原点解释毫米坐标。"""
+    """Interpret millimetre coordinates with the origin at the lower-left corner."""
     x, y, width, height = map(float, rect_mm)
     canvas_width, canvas_height = canvas_mm
     ax = fig.add_axes(
@@ -131,7 +131,7 @@ def panel_letter(
     y_mm: float,
     canvas_mm: tuple[float, float],
 ) -> mtext.Text:
-    """面板字母按左上角定位。"""
+    """Place panel letters from their upper-left anchors."""
     width, height = canvas_mm
     text = fig.text(
         x_mm / width,
@@ -166,7 +166,7 @@ def set_bounds(ax: Axes, *, x: tuple[float, float] | None = None,
 
 
 def load_csv(name: str, *, root: Path | None = None) -> pd.DataFrame:
-    """所有源 CSV 必须以 round-trip 浮点精度读取。"""
+    """Read every source CSV with round-trip floating-point precision."""
     path = (root or DATA_DIR) / name
     return pd.read_csv(path, float_precision="round_trip")
 
@@ -180,10 +180,10 @@ def record_value(
     value: float,
     source_file: str,
 ) -> None:
-    """记录真正进入绘图对象的数值；缺失值不伪装成零。"""
+    """Record values that enter plotted objects; never disguise a missing value as zero."""
     numeric = float(value)
     if not np.isfinite(numeric):
-        raise ValueError(f"未绘图数值不是有限值：{panel} {series} {row_id} {variable}")
+        raise ValueError(f"Plotted value is not finite: {panel} {series} {row_id} {variable}")
     PLOTTED_VALUES.append(
         {
             "figure": fig_no,
@@ -218,7 +218,7 @@ def write_plotted_values(fig_no: int) -> None:
 
 
 def register_axis_points(ax: Axes, x: Iterable[float], y: Iterable[float]) -> None:
-    """供 QA 检查点或 CI 端点是否在坐标轴显示范围内。"""
+    """Expose points and CI endpoints so QA can check them against the displayed axes."""
     for xv, yv in zip(x, y, strict=True):
         if np.isfinite(xv) and np.isfinite(yv):
             ax._qa_points.append((float(xv), float(yv)))  # type: ignore[attr-defined]
@@ -231,7 +231,7 @@ def register_swarm_points(
     y: Iterable[float],
     marker_diameter_pt: float,
 ) -> None:
-    """登记同一蜂群行，供 QA 在毫米空间检查圆心距。"""
+    """Register points on a swarm row so QA can check centre distances in millimetres."""
     points = [
         (float(xv), float(yv))
         for xv, yv in zip(x, y, strict=True)
@@ -247,7 +247,7 @@ def register_swarm_points(
 
 
 def shade(color: str, fraction: float = 0.35) -> str:
-    """返回布局色与白色按指定比例混合后的不透明十六进制色。"""
+    """Return an opaque hexadecimal colour made by blending a layout colour with white."""
     color = color.lstrip("#")
     rgb = np.array([int(color[i:i + 2], 16) for i in (0, 2, 4)], dtype=float)
     mixed = fraction * rgb + (1 - fraction) * 255
@@ -264,10 +264,11 @@ def swarm_offsets(
     marker_diameter_pt: float = 2.8,
 ) -> list[float]:
     """
-    确定性横向蜂群。
+    Deterministic horizontal swarm layout.
 
-    数值本身不改变。从零及已放置圆的相切位置产生连续候选偏移，
-    按绝对值最小选择；已在毫米空间中的距离须至少为 0.95 个符号直径。
+    Values are unchanged. Candidate offsets start at zero and at tangent positions
+    of placed circles, then the smallest absolute offset is selected. Distances are
+    checked in millimetres and must be at least 0.95 symbol diameters.
     """
     diameter_mm = marker_diameter_pt * 25.4 / 72
     minimum_mm = 0.95 * diameter_mm
@@ -295,8 +296,8 @@ def swarm_offsets(
                 valid.append(float(y_mm))
         if not valid:
             raise RuntimeError(
-                f"蜂群排布在 {max_half_height_data=} 内无法避免重叠，"
-                f"第 {index + 1} 个点 value={value}"
+                f"swarm layout within {max_half_height_data=} cannot avoid overlap "
+                f"at point {index + 1}, value={value}"
             )
         chosen_mm = min(
             valid,
@@ -331,7 +332,7 @@ def ci_handle(
 
 
 def add_break_marks(ax: Axes, side: str) -> None:
-    """在断开轴底边各画一条同向“/”，长约 1.2 mm、倾角约 60°。"""
+    """Draw parallel break marks about 1.2 mm long at 60 degrees along the broken axis."""
     axis_width_mm = ax.get_position().width * ax.figure.get_figwidth() * 25.4
     axis_height_mm = ax.get_position().height * ax.figure.get_figheight() * 25.4
     dx = 1.2 * np.cos(np.deg2rad(60)) / axis_width_mm
@@ -348,5 +349,15 @@ def add_break_marks(ax: Axes, side: str) -> None:
     )
 
 
-def legend_patch(color: str, edge: str = "none", linewidth: float = 0) -> Patch:
-    return Patch(facecolor=color, edgecolor=edge, linewidth=linewidth)
+def legend_patch(
+    color: str,
+    edge: str = "none",
+    linewidth: float = 0,
+    alpha: float = 1.0,
+) -> Patch:
+    return Patch(
+        facecolor=color,
+        edgecolor=edge,
+        linewidth=linewidth,
+        alpha=alpha,
+    )

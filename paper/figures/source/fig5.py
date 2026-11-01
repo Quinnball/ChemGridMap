@@ -1,4 +1,4 @@
-"""重画稿件图 5：邻域与核心。"""
+"""Rebuild Figure 5: neighbourhoods and cores."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def _recall_panel(fig: Figure) -> None:
     offsets = [-0.27, 0.0, 0.27]
     for layout, offset in zip(layouts, offsets, strict=True):
         columns = [f"{layout}__r{i:02d}" for i in range(1, 11)]
-        # 每列是同一布局在十个 seed 下的值。
+        # Each column is one layout across ten seeds.
         for target_x, (_, row) in zip(range(3), frame.iterrows(), strict=True):
             values = row[columns].to_numpy(dtype=float)
             mean = float(values.mean())
@@ -138,7 +138,7 @@ def _contrast_panel(fig: Figure) -> None:
     ax.tick_params(axis="y", length=0)
     ax.set_xlabel(r"$\Delta e_\mathrm{grid}$ (other − refined)", fontsize=7)
     ax.xaxis.label._qa_fig5b_axis_title = True  # type: ignore[attr-defined]
-    # 为组名留出干净空间，参考线只在 CA II 标题行短暂断开。
+    # Reserve space for group names and break the reference line only at the CA II title.
     ax.vlines(
         [0, 0],
         [-0.5, 14.5],
@@ -290,7 +290,7 @@ def _neighbor_grids(fig: Figure) -> str:
             )
         )
 
-        # 先画邻域窗内的其他条目，再覆盖 Q/S/G/F。
+        # Draw other entries in the neighbourhood window first, then overlay Q/S/G/F.
         in_window = coordinates[
             coordinates[col_prefix].between(7, 15)
             & coordinates[row_prefix].between(24, 32)
@@ -381,7 +381,7 @@ def _neighbor_grids(fig: Figure) -> str:
         )
         audits[predicate] = {"S": counts["S"], "G": counts["G"], "F": counts["F"]}
 
-    # 5c 图例
+    # 5c legend
     legend_rows = [
         ("Q", "white", "Query"),
         ("S", "white", "Shared"),

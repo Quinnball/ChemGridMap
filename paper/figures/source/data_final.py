@@ -1,4 +1,4 @@
-"""生成 F5 图 3–5 的最终数据表与来源清单。"""
+"""Build final data tables and source inventories for Figures 3-5."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ S_OUTPUT = ROOT / "paper/strengthening/output"
 PRISM_DATA = S_OUTPUT / "F0"
 OUTPUT = FIG_DIR / "data_final"
 TARGET_SYMBOLS = FIG_DIR / "data" / "target_symbols.csv"
+DISPLAY_CLASSES = ("inactive", "medium", "active")
 
 
 def sha256(path: Path) -> str:
@@ -42,7 +43,7 @@ def copy_unchanged(name: str, records: list[dict[str, object]]) -> Path:
     source_hash = sha256(source)
     target_hash = sha256(target)
     if source_hash != target_hash:
-        raise AssertionError(f"{name} 复制后哈希不一致")
+        raise AssertionError(f"{name} changed hash after copying")
     frame = read_csv(target)
     records.append(
         {
@@ -63,7 +64,7 @@ def attach_symbols(frame: pd.DataFrame) -> pd.DataFrame:
     merged = frame.merge(symbols, on="target_id", how="left", validate="many_to_one")
     if merged["symbol"].isna().any():
         missing = merged.loc[merged["symbol"].isna(), "target_id"].unique().tolist()
-        raise AssertionError(f"缺少靶点基因符号：{missing}")
+        raise AssertionError(f"Missing target gene symbols: {missing}")
     return merged
 
 
@@ -103,6 +104,42 @@ def calibration_curve(predictions: pd.DataFrame) -> pd.DataFrame:
                         "endpoint": endpoint,
                         "population": population,
                         "display_class": "all",
+                        "probability_bin": bin_index,
+                        "n": n,
+                        "mean_p": float(group["p_displayed"].mean()) if n else np.nan,
+                        "agreement_rate": float(group["agree"].mean()) if n else np.nan,
+                        "wilson_ci_low": low,
+                        "wilson_ci_high": high,
+                        "omit_in_figure": bool(n < 8),
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def calibration_by_display_class(predictions: pd.DataFrame) -> pd.DataFrame:
+    """Bin class reproducibility separately for each displayed class."""
+    rows = []
+    for endpoint in ("IC50", "Ki"):
+        endpoint_frame = predictions.loc[predictions["endpoint"].eq(endpoint)].copy()
+        endpoint_frame["probability_bin"] = np.clip(
+            np.floor(endpoint_frame["p_displayed"] * 5 + 1e-12).astype(int),
+            0,
+            4,
+        )
+        for display_index, display_class in enumerate(DISPLAY_CLASSES):
+            selected = endpoint_frame.loc[
+                endpoint_frame["displayed"].eq(display_index)
+            ]
+            for bin_index in range(5):
+                group = selected.loc[selected["probability_bin"].eq(bin_index)]
+                n = len(group)
+                low, high = wilson_interval(int(group["agree"].sum()), n)
+                rows.append(
+                    {
+                        "analysis_role": "post hoc",
+                        "design": "entry",
+                        "endpoint": endpoint,
+                        "display_class": display_class,
                         "probability_bin": bin_index,
                         "n": n,
                         "mean_p": float(group["p_displayed"].mean()) if n else np.nan,
@@ -168,13 +205,13 @@ def build_3b(
     table.insert(0, "target_rank", np.arange(1, len(table) + 1))
     expected = 29 if endpoint == "IC50" else 23
     if len(table) != expected:
-        raise AssertionError(f"3b {endpoint} 行数为 {len(table)}，不是 {expected}")
+        raise AssertionError(f"3b {endpoint} has rows {len(table)} instead of {expected}")
     if table["g_auc"].isna().any() or table["d_auc"].isna().any():
-        raise AssertionError(f"3b {endpoint} 的 G 或 D AUC 缺失")
+        raise AssertionError(f"3b {endpoint} has a missing G or D AUC")
     if endpoint == "Ki":
         missing_b2 = table.loc[table["b_range_2_auc"].isna(), "target_id"].tolist()
         if missing_b2 != ["CHEMBL4005"]:
-            raise AssertionError(f"3b Ki 的 B-range-2 缺失行异常：{missing_b2}")
+            raise AssertionError(f"Unexpected missing B-range-2 rows in 3b Ki: {missing_b2}")
     columns = [
         "target_rank",
         "target_id",
@@ -258,9 +295,9 @@ def build_3c(
             rtol=0.0,
             atol=1e-15,
         ):
-            raise AssertionError(f"3c {endpoint} {new_column} 不是原值的相反数")
+            raise AssertionError(f"3c {endpoint} {new_column} is not the negated original value")
     if values[list(source_columns.values())[:3]].isna().any().any():
-        raise AssertionError(f"3c {endpoint} 有目标缺少 G−对照 差值")
+        raise AssertionError(f"3c {endpoint} has targets missing a G-minus-comparator difference")
     values.insert(0, "row_type", "target")
     values = values.sort_values("target_rank").reset_index(drop=True)
 
@@ -342,7 +379,7 @@ def build_4d(
         & source["state"].isin(["P_supported", "uncertain_low_support", "touched_all"])
     ].copy()
     if len(selected) != 6:
-        raise AssertionError(f"4d {endpoint} 行数为 {len(selected)}，不是 6")
+        raise AssertionError(f"4d {endpoint} has rows {len(selected)} instead of 6")
     selected = selected.sort_values(
         ["earlier_units_group", "state"],
         key=lambda values: values.map(
@@ -383,11 +420,11 @@ def main() -> int:
     records: list[dict[str, object]] = []
     symbol_frame = read_csv(TARGET_SYMBOLS)
     if symbol_frame["target_id"].duplicated().any():
-        raise AssertionError("target_symbols.csv 含重复靶点编号")
+        raise AssertionError("target_symbols.csv contains duplicate target IDs")
     target_symbols_output = OUTPUT / TARGET_SYMBOLS.name
     shutil.copyfile(TARGET_SYMBOLS, target_symbols_output)
     if sha256(TARGET_SYMBOLS) != sha256(target_symbols_output):
-        raise AssertionError("target_symbols.csv 复制后哈希不一致")
+        raise AssertionError("target_symbols.csv changed hash after copying")
     records.append(
         {
             "file": target_symbols_output.name,
@@ -428,6 +465,7 @@ def main() -> int:
             "merge_basis",
             "target",
             "endpoint",
+            "displayed",
             "p_displayed",
             "agree",
             "method",
@@ -440,8 +478,11 @@ def main() -> int:
         & predictions["merge_basis"].eq("same_value")
         & predictions["method"].eq("G")
     ].reset_index(drop=True)
-    calibration = calibration_curve(entry_predictions)
-    calibration_name = "4a_calibration_curves.csv"
+    legacy_calibration = OUTPUT / "4a_calibration_curves.csv"
+    if legacy_calibration.exists():
+        legacy_calibration.unlink()
+    calibration = calibration_by_display_class(entry_predictions)
+    calibration_name = "4a_calibration_by_class.csv"
     calibration_output = write_csv(calibration, calibration_name)
     records.append(
         {
@@ -452,12 +493,14 @@ def main() -> int:
             "source_hashes": [sha256(predictions_path)],
             "derivation": (
                 "E5c predictions; entry design, model G, five equal-width bins, "
-                "Wilson 95% intervals, bins with fewer than 8 predictions omitted"
+                "separately for each displayed class; Wilson 95% intervals; "
+                "bins with fewer than 8 predictions omitted"
             ),
             "unchanged_copy": False,
             "assertions": {
                 "rows": len(calibration),
                 "omitted_rows": int(calibration["omit_in_figure"].sum()),
+                "display_classes": list(calibration["display_class"].unique()),
                 "recomputed_from_e5c": True,
             },
         }
@@ -525,7 +568,7 @@ def main() -> int:
                     f"{actual} vs {expected}"
                 )
     if not (fixed["n_seeds"] == 10).all():
-        raise AssertionError("5a 固定 k 汇总不是每个组合 10 个 seed")
+        raise AssertionError("5a fixed-k summary does not contain ten seeds per combination")
     fixed_name = "5a_fixedk_means.csv"
     fixed_output = write_csv(fixed, fixed_name)
     records.append(

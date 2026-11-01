@@ -1,4 +1,4 @@
-"""图 2：CA II 地图的活性、支持度与邻域可靠性层。"""
+"""Figure 2: activity, support, and neighbourhood reliability layers for the CA II map."""
 
 from __future__ import annotations
 
@@ -36,7 +36,9 @@ MAP_RECTS_MM = ((2.0, 58.0), (59.8, 58.0), (117.6, 58.0))
 MAP_WIDTH_MM = 50.4
 MAP_HEIGHT_MM = 60.0
 SOURCE_HEIGHT_MM = 125.0
-WIDE_MARKER_LEG = 0.5
+WIDE_MARKER_LEG = 0.62
+TRIANGLE_INSET = 0.06
+TRIANGLE_EDGEWIDTH = 0.3
 
 
 def _tag_swatch(patch: Rectangle, color: str, panel: str) -> None:
@@ -45,7 +47,7 @@ def _tag_swatch(patch: Rectangle, color: str, panel: str) -> None:
 
 
 def _ordinary_query_graph(pattern):
-    """按查询的原子与键类型构造无隐式氢的普通分子图。"""
+    """Build an ordinary molecular graph without implicit hydrogens from query atom and bond types."""
     molecule = Chem.RWMol()
     for atom in pattern.GetAtoms():
         ordinary = Chem.Atom(atom.GetAtomicNum())
@@ -69,7 +71,7 @@ def _fmcs_core_with_attachments(
     pattern,
     members: pd.DataFrame,
 ) -> tuple[Chem.Mol, dict[str, object]]:
-    """从首个匹配成员复制核心原子的氢状态，并补画环外连接点。"""
+    """Copy core hydrogen states from the first matching member and draw attachment points outside rings."""
     template = None
     member_match = None
     member_id = None
@@ -84,7 +86,7 @@ def _fmcs_core_with_attachments(
             member_id = row.molecule_identity_key
             break
     if template is None or member_match is None:
-        raise AssertionError("G001 中没有可匹配 FMCS 核心的成员")
+        raise AssertionError("No G001 member matches the FMCS core")
 
     drawing = Chem.RWMol()
     for pattern_atom, member_idx in zip(
@@ -141,12 +143,12 @@ def _fmcs_core_with_attachments(
     amide_n_hydrogens = molecule.GetAtomWithIdx(amide_n_idx).GetTotalNumHs()
     heavy_atoms = molecule.GetNumHeavyAtoms()
     if heavy_atoms != 22:
-        raise AssertionError(f"FMCS 绘制核心重原子数为 {heavy_atoms}，不是 22")
+        raise AssertionError(f"Drawn FMCS core has heavy atoms {heavy_atoms} instead of 22")
     if amide_n_hydrogens != 0:
-        raise AssertionError(f"FMCS 酰胺 N 氢数为 {amide_n_hydrogens}，不是 0")
+        raise AssertionError(f"FMCS amide N hydrogens {amide_n_hydrogens} instead of 0")
     encoded = Chem.MolToSmiles(molecule, isomericSmiles=True)
     if Chem.MolFromSmiles(encoded) is None:
-        raise AssertionError("FMCS 带连接点核心无法序列化为 SMILES")
+        raise AssertionError("FMCS core with attachment points cannot be serialized as SMILES")
     return molecule, {
         "template_member": member_id,
         "heavy_atoms": heavy_atoms,
@@ -158,19 +160,25 @@ def _fmcs_core_with_attachments(
 
 def _add_triangle(ax, col: int, row: int) -> None:
     leg = WIDE_MARKER_LEG
+    right = col + 0.5 - TRIANGLE_INSET
+    top = row + 0.5 - TRIANGLE_INSET
     marker = Polygon(
-            (
-                (col + 0.5, row + 0.5),
-                (col + 0.5 - leg, row + 0.5),
-                (col + 0.5, row + 0.5 - leg),
-            ),
-            closed=True,
-            facecolor=OUTLINE,
-            edgecolor="none",
-            zorder=4,
+        (
+            (right, top),
+            (right - leg, top),
+            (right, top - leg),
+        ),
+        closed=True,
+        facecolor=OUTLINE,
+        edgecolor="white",
+        linewidth=TRIANGLE_EDGEWIDTH,
+        zorder=4,
     )
     marker.set_gid("wide-record-marker")
     marker._qa_fig2_triangle_leg = leg  # type: ignore[attr-defined]
+    marker._qa_fig2_triangle_vertices = marker.get_xy().copy()  # type: ignore[attr-defined]
+    marker._qa_fig2_triangle_edgewidth = TRIANGLE_EDGEWIDTH  # type: ignore[attr-defined]
+    marker._qa_fig2_triangle_cell = (col, row)  # type: ignore[attr-defined]
     ax.add_patch(marker)
 
 
@@ -237,14 +245,19 @@ def _build_legends(fig, data: pd.DataFrame):
         ax.add_patch(patch)
         _legend_text(ax, 5.3, y, label)
     y = 44.0
-    ax.add_patch(
-        Polygon(
-            ((2.0, y - 0.65), (3.25, y - 0.65), (3.25, y + 0.6)),
-            closed=True,
-            facecolor=OUTLINE,
-            edgecolor="none",
-        )
+    legend_triangle = Polygon(
+        ((3.25, y + 0.6), (2.0, y + 0.6), (3.25, y - 0.65)),
+        closed=True,
+        facecolor=OUTLINE,
+        edgecolor="white",
+        linewidth=TRIANGLE_EDGEWIDTH,
     )
+    legend_triangle._qa_fig2_legend_triangle = True  # type: ignore[attr-defined]
+    legend_triangle._qa_fig2_triangle_vertices = (  # type: ignore[attr-defined]
+        legend_triangle.get_xy().copy()
+    )
+    legend_triangle._qa_fig2_triangle_edgewidth = TRIANGLE_EDGEWIDTH  # type: ignore[attr-defined]
+    ax.add_patch(legend_triangle)
     _legend_text(ax, 5.3, y, "Wide record range")
 
     _legend_text(ax, 66.3, 55.5, "Supported", fontweight="bold", ha="center")
@@ -302,7 +315,7 @@ def _build_legends(fig, data: pd.DataFrame):
 def _validate_and_load() -> dict[str, object]:
     input_sha = hashlib.sha256(RAW_INPUT.read_bytes()).hexdigest()
     if input_sha != EXPECTED_INPUT_SHA256:
-        raise AssertionError(f"输入 SHA-256 不符：{input_sha}")
+        raise AssertionError(f"Input SHA-256 mismatch: {input_sha}")
 
     data = pd.read_csv(
         DEFAULT_DIR / "caii_seed42_grid_coordinates.csv",
@@ -360,7 +373,7 @@ def _validate_and_load() -> dict[str, object]:
     check("supported 条目数", 506, int((data["class_status"] == "supported").sum()))
     check("平均 neighbor recall（三位）", 0.585, round(float(data["neighbor_recall"].mean()), 3))
     check("冲突条目数", 17, int((data["is_conflicted"] == 1).sum()))
-    check("宽记录范围三角直角边（格子）", 0.5, WIDE_MARKER_LEG)
+    check("宽记录范围三角直角边（格子）", 0.62, WIDE_MARKER_LEG)
 
     default_by_id = {group["structure_group"]: group for group in default_groups["groups"]}
     fmcs_by_id = {group["structure_group"]: group for group in fmcs_groups["groups"]}
@@ -388,7 +401,7 @@ def _validate_and_load() -> dict[str, object]:
     core_mol = Chem.MolFromSmiles(g001_fmcs["core_smiles"])
     pattern = Chem.MolFromSmarts(g001_fmcs["core_smarts"])
     if pattern is None:
-        raise AssertionError("G001 FMCS core_smarts 无法解析")
+        raise AssertionError("G001 FMCS core_smarts cannot be parsed")
     fmcs_core, fmcs_core_info = _fmcs_core_with_attachments(
         pattern,
         fmcs_data[fmcs_data["structure_group"] == "G001"],
@@ -434,11 +447,11 @@ def _validate_and_load() -> dict[str, object]:
     representative = Chem.MolFromSmiles(representative_row["canonical_smiles"])
     noncore = Chem.MolFromSmiles(noncore_row["canonical_smiles"])
     if g002_core is None or representative is None or noncore is None:
-        raise AssertionError("G002 核心或代表分子的 SMILES 无法解析")
+        raise AssertionError("G002 core or representative SMILES cannot be parsed")
     representative_matches = representative.GetSubstructMatches(g002_core)
     if len(representative_matches) != 1:
         raise AssertionError(
-            f"CHEMBL81688 的核心匹配数为 {len(representative_matches)}，不是 1"
+            f"CHEMBL81688 core match count is {len(representative_matches)} instead of 1"
         )
     representative_match = representative_matches[0]
     highlighted_bonds = []
@@ -447,7 +460,7 @@ def _validate_and_load() -> dict[str, object]:
         second = representative_match[query_bond.GetEndAtomIdx()]
         actual_bond = representative.GetBondBetweenAtoms(first, second)
         if actual_bond is None:
-            raise AssertionError("CHEMBL81688 的核心匹配缺少对应化学键")
+            raise AssertionError("CHEMBL81688 core match is missing a corresponding bond")
         highlighted_bonds.append(actual_bond.GetIdx())
     representative.SetProp(
         "_f3_highlight_atoms",
@@ -477,7 +490,7 @@ def _validate_and_load() -> dict[str, object]:
 
     failed = [item for item in checks if not item["passed"]]
     if failed:
-        raise AssertionError(f"图 2 数据断言失败：{failed}")
+        raise AssertionError(f"Figure 2 data assertions failed: {failed}")
 
     return {
         "data": data,
@@ -793,6 +806,7 @@ def build():
                 "FMCS core (10-s budget)",
                 f"{g001_fmcs['core_heavy_atoms']} heavy atoms",
                 f"in {g001_fmcs['core_coverage_count']} of {g001['size']} members",
+                "wavy bonds: attachment points",
             ),
             "slot": (62.0, 92.0),
         },
@@ -827,13 +841,12 @@ def build():
             "slot": (146.0, 171.0),
         },
     )
-    text_baselines_mm = (12.0, 9.0, 6.0)
+    text_baselines_mm = (12.0, 9.0, 6.0, 3.0)
     for block_index, spec in enumerate(structure_specs):
         x = float(spec["x"])
         slot_x0, slot_x1 = spec["slot"]
-        for line_index, (text, baseline) in enumerate(
-            zip(spec["lines"], text_baselines_mm, strict=True)
-        ):
+        for line_index, text in enumerate(spec["lines"]):
+            baseline = text_baselines_mm[line_index]
             label = fig.text(
                 x / 170.0,
                 baseline / SOURCE_HEIGHT_MM,
@@ -846,6 +859,8 @@ def build():
             label._qa_description_block = block_index  # type: ignore[attr-defined]
             label._qa_description_line = line_index  # type: ignore[attr-defined]
             label._qa_description_slot_mm = (slot_x0, slot_x1)  # type: ignore[attr-defined]
+            if block_index == 2 and line_index == 3:
+                label._qa_fig2_fmcs_wavy = True  # type: ignore[attr-defined]
     placements = [
         {**spec, "center_y": 25.0}
         for spec in structure_specs

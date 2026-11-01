@@ -129,8 +129,8 @@ scientific outputs agree with the current code, with these recorded exceptions:
 - E11 uses the newer identity handling; its archived numerical validation
   outputs agree with the current implementation.
 - E2c and E6 `as_executed_pre05/` preserve the old spectral path for 10
-  disconnected UMAP graphs. Current deterministic reconnect results differ for
-  those datasets and are retained as a separate comparison.
+  disconnected UMAP graphs. Version 0.5 starts UMAP from seeded random coordinates for
+  these graphs, so their layouts differ; E10 compares the two runs.
 - E5 uses the source-defined per-dataset B1c output; the old executable had
   rewritten that cache by pooling datasets.
 - E10 intentionally compares the old and current definitions, so some E10
