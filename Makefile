@@ -80,7 +80,7 @@ paper-e2b: paper-e2
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e2b_analysis.py
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e2b_analysis.py --r1-outputs
 
-paper-e4: paper-e2 paper-e1b
+paper-e4: paper-e2 paper-e1b paper-e2b
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e4a_analysis.py
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e4b_analysis.py
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e4c_analysis.py
@@ -99,7 +99,7 @@ paper-e5b: paper-e5 paper-fig2-data
 paper-e5c: paper-e5b
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e5c_analysis.py
 
-paper-e5d: paper-e5c
+paper-e5d: paper-e5c paper-e4
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e5d_analysis.py
 
 paper-e2c: check
@@ -114,7 +114,7 @@ paper-e6-regression: paper-e6-prepare
 paper-e6: paper-e6-prepare paper-e6-regression paper-e4
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e6_analysis.py
 
-paper-e7: paper-e2c paper-e4
+paper-e7: paper-e2c paper-e4 paper-e2b
 	$(VENV_PYTHON) $(PAPER_SOURCE)/e7_analysis.py
 
 paper-e9: paper-e5d
