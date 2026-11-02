@@ -100,7 +100,9 @@ def mapped_support_regression() -> list[dict]:
             REVISION / target / f"{target}_retained_records.csv",
             low_memory=False,
         )
-        current, _ = annotate_activity_confidence(molecules, records)
+        current, _ = annotate_activity_confidence(
+            molecules, records, offset_display="uncertain"
+        )
         expected = frozen.loc[frozen.target.eq(target)].set_index(
             "molecule_identity_key"
         )

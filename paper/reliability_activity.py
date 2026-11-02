@@ -311,8 +311,13 @@ def annotate_target(mapped, records, model, merge_identical=True):
     """Fit on complete retained records; annotate only frozen mapped entries."""
     doc = document_values(records, merge_identical=merge_identical)
     gaussian_fit = fit_between_unit_sd(doc)
-    out, fit = annotate_activity_confidence(mapped, records, fit=gaussian_fit,
-                                           merge_identical=merge_identical)
+    out, fit = annotate_activity_confidence(
+        mapped,
+        records,
+        fit=gaussian_fit,
+        merge_identical=merge_identical,
+        offset_display="uncertain",
+    )
     out["model_units_used"] = out.n_evidence_units
     out["fallback_to_G"] = False
     if model == "O":

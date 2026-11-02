@@ -113,6 +113,7 @@ def figure1_cli_command(directory):
     return [str(ROOT / ".venv/bin/python"), "-B", "-m", "chemgridmap", str(RAW_INPUT),
             "--input-format", "chembl", "--target-id", "CHEMBL205", "--projection", "umap",
             "--random-state", "42", "--map-color-modes", "activity", "class_support", "neighbor_recall",
+            "--offset-display", "uncertain",
             "--output-dir", str(directory), "--name", CLI_NAME]
 
 

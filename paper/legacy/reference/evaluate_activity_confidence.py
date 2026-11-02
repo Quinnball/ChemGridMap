@@ -85,7 +85,14 @@ for target, (label, _) in TARGETS.items():
     frame["target"] = label
     validation.append(frame)
     mapped = load_layout(target, 42)
-    out, _ = annotate_activity_confidence(mapped, records, lower=LOWER, upper=UPPER, fit=fits[label])
+    out, _ = annotate_activity_confidence(
+        mapped,
+        records,
+        lower=LOWER,
+        upper=UPPER,
+        fit=fits[label],
+        offset_display="uncertain",
+    )
     out["target"] = label
     annotated.append(out)
     print(label, {k: round(v, 3) if isinstance(v, float) else v for k, v in fits[label].items()}, flush=True)

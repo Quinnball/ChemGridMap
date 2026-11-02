@@ -104,7 +104,10 @@ def run_cli(output, mode, extra):
     raw = source(ROOT / "validation_data/chembl37_chembl205/chembl37_chembl205_ic50_raw.csv")
     command = [sys.executable, "-m", "chemgridmap.cli", str(raw), "--input-format", "chembl",
                "--target-id", "CHEMBL205", "--projection", "umap", "--random-state", "42",
-               "--name", "chembl205", "--output-dir", str(folder), "--output-formats", "svg", *extra]
+               "--name", "chembl205", "--output-dir", str(folder), "--output-formats", "svg",
+               *extra]
+    if "--no-activity-confidence" not in extra:
+        command.extend(["--offset-display", "none"])
     env = dict(os.environ, PYTHONPATH=str(ROOT / "src"), PYTHONDONTWRITEBYTECODE="1")
     started = time.perf_counter()
     result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True)

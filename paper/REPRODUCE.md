@@ -144,44 +144,88 @@ The `paper/output/reliability_v1/` tree is generated independently of
 
 ## Archived runs
 
-The sealed E2 and E11 plans fixed the software version and the identity rule.
+A clean rerun used a `git archive` of public commit `969704f`. Its main chain ran
+from 06:39 to 11:45 (+0800) on 2026-11-02 and stopped at E9, whose check of the
+three detailed maps relied on the earlier default display. After E9 was made to
+request the display rule explicitly (`offset_display="uncertain"`), E9 and every
+later stage were run in the same checkout from 14:55 to 15:27.
+
+The checkout restored only inputs that no analysis stage produces: the ChEMBL
+37 activity downloads and validation downloads, the frozen `revision_v6` and
+`reliability_v1` data, and `as_executed_pre05/`. Stage outputs, caches, manifests
+and figures were all regenerated. The comparison scripts and the file-by-file
+results are in `paper/strengthening/qa/E24/` of the validation data.
+
+The following counts come from `paper/strengthening/qa/E24/summary.csv`. Manifests,
+logs and timing metadata are excluded from the judged counts. “Last bits” means
+rows, columns and text agree, but at least one numeric field is not byte-equal.
+
+| Stage | Byte-identical | Last bits only (maximum absolute difference) | Expected different | Missing/new |
+| --- | ---: | ---: | ---: | ---: |
+| E1-A | 11 | — | 0 | 0/0 |
+| E1-B | 6 | 1 (`3.8`) | 3 | 3/0 |
+| E2 | 20 | — | 1 | 0/0 |
+| E2b | — | — | — | — |
+| E2c | 4 | — | 0 | 0/0 |
+| E4 | 10 | — | 0 | 1/0 |
+| E5 | 28 | — | 0 | 0/0 |
+| E5b | 20 | 1 (`5.55e-16`) | 0 | 1/0 |
+| E5c | 5 | 19 (`6.84e-10`) | 1 | 1/0 |
+| E5d | 12 | — | 0 | 1/0 |
+| E6 | 6 | — | 0 | 0/0 |
+| E7 | 23 | — | 0 | 0/0 |
+| E9 | 13 | 1 (`2.84e-14`) | 1 | 0/0 |
+| E10 | 7 | — | 0 | 0/0 |
+| E11 | 1 | 5 (`3.97e-23`) | 1 | 0/0 |
+| E12a | 0 | 9 (`2.22e-16`) | 0 | 0/0 |
+| E12b | 9 | — | 0 | 0/0 |
+| E12c | 1 | — | 0 | 0/0 |
+| E15 | 14 | 1 (`0`) | 0 | 0/0 |
+| E16 | 10 | — | 0 | 0/0 |
+| E22 | 6 | 2 (`2.22e-16`) | 0 | 0/0 |
+| T1 | 7 | 1 (`4.01`) | 201 | 8/1 |
+| Figure 2 data | 32 | — | 14 | 2/0 |
+| Figure 6 data | 4 | — | 2 | 6/0 |
+| Figure 3–5 data | 16 | 2 (`0`) | 1 | 0/0 |
+
+E2b writes its outputs into the E2 and E7 directories, so it has no row of its own. The large T1 difference count is explained by the old archive's
+column schema, logs, timing fields and default-display metadata; it is not 201
+independent scientific disagreements.
+
+The observed differences fall into the following expected classes:
+
+- **Timing.** T1's wall-clock fields and log files differ by run. Across the six
+  fixed sizes, the recorded group timings differ by at most `4.01` in the
+  compared summary, and individual `core_timing_by_group.csv` times differ by at
+  most `0.411`. E1-B has one 2 s FMCS group change from timed out to complete
+  (64 to 63); T1 has two such 2 s groups change from timed out to complete. The
+  saved group cores themselves are unchanged.
+- **Output format.** The archived T1 runs were written by an earlier software
+  release. Their scale outputs lack later fields such as `wide_record_range`,
+  `offset_pair_touched`, `status_reason`, `neighbor_recall_fixed_k` and
+  `touched_entry_count`, so those CSV schemas cannot be byte-compared with the
+  current outputs.
+- **Text and paths.** E2 has 86 and E11 has 65 non-numeric cells different in
+  `target_inclusion.csv`; these are checkout paths and current identity-failure
+  wording, with no numeric difference. E11's five numeric CSV comparisons have
+  a maximum absolute difference of `3.97e-23`.
+- **Default display.** Figure 2's `document_offsets.csv` now lists all four
+  evaluated pairs instead of no rows. The current default also removes “or an
+  offset document pair” from the class-support layers and from the Figure 6
+  legend. Figure 6 now reads
+  `Pale: uncertain (class support below 0.8).`
+- **Jitter.** Figure 3 has one scatter arrangement displaced by the floating
+  last-bit differences in the figure input tables; the plotted input values
+  otherwise agree. This is the only positional change in the pixel comparison of Figs. 2–5.
+- **Serialization and metadata.** Manifests, run logs, timing records, archives,
+  PDFs and PNG/SVG metadata also differ where they contain times, paths, hashes
+  or software provenance. The scientific CSV comparison above is the judged
+  result.
+
+The sealed E2 and E11 plans still fix the software version and identity rule.
 Their archived runs used the pre-0.5 `normalized-structure` rule, and E15 must
-use the same rule because its R5 check verifies the E11 execution. The public
-commands now make that choice explicit; the current default remains
-`inchikey`, which E16 uses for its sensitivity analysis.
-
-E2c, E5, E6, E7, E9, E10 and E12b were produced by the public 0.5 scripts. For
-every other stage, use the software version and source hashes in that stage's
-manifest. The comparison results for the isolated E23a rerun are reported with
-that task; archived outputs are not treated as current-code agreement when the
-identity rule differs.
-
-The E14, E15 and E16 checks and the E17 stage reruns show that the archived
-scientific outputs agree with the current code, with these recorded exceptions:
-
-- E2 numerical outputs are byte-identical. `target_inclusion.csv` differs in
-  paths and in the three identity-failure reasons: the archived E2 text is older
-  than the da2162d wording required by the current option.
-- E11 under `normalized-structure` has the archived 23-dataset selection and
-  5,339 predictions. Its paths differ, and several floating-point fields differ
-  in the final bits (maximum `p0` difference `3.97e-23`).
-- E2c and E6 `as_executed_pre05/` preserve the old spectral path for 10
-  disconnected UMAP graphs. Version 0.5 starts UMAP from seeded random coordinates for
-  these graphs, so their layouts differ; E10 compares the two runs.
-- E5 uses the source-defined per-dataset B1c output; the old executable had
-  rewritten that cache by pooling datasets.
-- E10 intentionally compares the old and current definitions, so some E10
-  files differ in schema as well as values.
-- E12b path strings and fixed-k rows differ only where they derive from the
-  corrected disconnected-layout results.
-- E12a outputs agree in rows, keys, classes and strings; some floating-point
-  values differ in the final one or two displayed digits (maximum absolute
-  difference `1.42e-14` in E17).
-- E15 has 14 of 15 scientific outputs byte-identical; `q2_three_state.csv`
-  differs by at most `2.78e-17`.
-- E16 has all 10 data and audit outputs byte-identical.
-- Manifests can differ in timestamps, paths, hashes, software versions and the
-  added `git_commit`/`git_dirty` fields.
+use that rule because R5 verifies the E11 execution. Current public commands make
+the choice explicit; the default remains `inchikey`, used by E16.
 
 ## Archived provenance
 
@@ -208,9 +252,9 @@ not contain that package version.
 | E15 | `paper/strengthening/output/E15/manifest.json` | not recorded | chemgridmap 0.5.0 |
 | E16 | `paper/strengthening/output/E16/manifest.json` | not recorded | chemgridmap 0.5.0 |
 | T1 | `paper/strengthening/output/T1/input_manifest.json`, `timing_metadata.json` | not recorded | not recorded |
-| Fig. 2 inputs | no figure manifest | not recorded | not recorded |
+| Fig. 2 inputs | no figure manifest | clean rerun at `969704f` | not recorded; current default CLI |
 | Fig. 3-5 data | `paper/figures/data_final/data_manifest.json` | not recorded | producer `paper/figures/source/data_final.py` |
-| Fig. 6 captures | `paper/figures/data_fig6/capture_report.json` | not recorded | not recorded |
+| Fig. 6 captures | `paper/figures/data_fig6/capture_report.json` | clean rerun at `969704f` | not recorded; current default settings, 3× device scale |
 
 ## Not reproducible
 
@@ -221,6 +265,19 @@ not contain that package version.
   archive was not migrated into this repository.
 - S16.1: the CI run record is external execution evidence, not a scientific
   output produced by the local analysis scripts.
+
+The following archived files are not regenerated by the current stage scripts:
+
+- `RESULTS_E1B.md`, `RESULTS_E5b.md`, `RESULTS_E5c.md`, `RESULTS_E5d.md` and
+  `RESULTS_T1.md`: text reports written when the stages were first run.
+- E1-B `scope_check.json` and `manifest.json`: no current script writes
+  `scope_check.json`, while `e1b_reporting.py` requires it.
+- E4 `flag_clean_trainfold_R0_bug.csv`: a retained record from an earlier
+  erroneous run.
+- T1 `ui/` screenshots and `logs/run_10001_*`: manual UI evidence and historical
+  failure/retry logs.
+- Figure 6 `attempt1_long_inspector/`: a retained failed capture attempt.
+- Figure 2 `*_cli.log`: historical CLI logs.
 
 ## Dependency order
 

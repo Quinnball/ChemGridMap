@@ -7,6 +7,7 @@ import hashlib
 import itertools
 import json
 import math
+import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -70,6 +71,18 @@ def _load_capture_report() -> dict[str, object]:
             raise AssertionError(f"{name} SHA-256 disagrees with capture_report")
         hashes[name] = actual
     return {"report": report, "hashes": hashes}
+
+
+def _pale_legend_text(report: dict[str, object]) -> str:
+    """Read the pale-class legend sentence from the browser capture report."""
+    checks = report.get("checks")
+    legend = checks.get("legend") if isinstance(checks, dict) else None
+    if not isinstance(legend, str):
+        raise AssertionError("Figure 6 capture_report has no checks.legend text")
+    match = re.search(r"Pale:.*?\.(?=\s|$)", legend)
+    if match is None:
+        raise AssertionError("Figure 6 capture_report has no complete Pale: legend sentence")
+    return match.group(0)
 
 
 def _crop_from_css_rect(image: Image.Image, rect: dict[str, float], scale: float) -> Image.Image:
@@ -163,7 +176,7 @@ def _rect_gap(a, b) -> float:
     return math.hypot(dx, dy)
 
 
-def _draw_map_legend(fig) -> None:
+def _draw_map_legend(fig, report: dict[str, object]) -> None:
     entries = (
         ("Inactive (≤6)", "inactive", 6.5, 27.0),
         ("Medium (6, 7)", "medium", 38.0, 59.0),
@@ -201,7 +214,7 @@ def _draw_map_legend(fig) -> None:
         fig.text(
             6.5 / WIDTH_MM,
             135.8 / HEIGHT_MM,
-            "Pale: uncertain (class support below 0.8, or an offset document pair)",
+            _pale_legend_text(report),
             ha="left",
             va="center",
             fontsize=6.5,
@@ -612,7 +625,7 @@ def build() -> tuple[object, dict[str, object]]:
             color=c.INK,
         )
     )
-    _draw_map_legend(fig)
+    _draw_map_legend(fig, report)
     _draw_neighbor_legend(fig)
 
     _write_plotted_values(layout)

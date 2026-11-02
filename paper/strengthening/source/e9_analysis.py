@@ -1371,7 +1371,9 @@ def detailed_maps() -> pd.DataFrame:
             path / f"{target}_retained_records.csv",
             low_memory=False,
         )
-        annotated, fit = annotate_activity_confidence(molecules, records)
+        annotated, fit = annotate_activity_confidence(
+            molecules, records, offset_display="uncertain"
+        )
         touched = annotated.offset_pair_touched.astype(bool)
         g_supported = annotated.class_confidence >= 0.8
         p_supported = annotated.class_status == "supported"
