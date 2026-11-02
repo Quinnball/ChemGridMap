@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 
 
+pytest.importorskip("pymupdf", reason="The figure scripts need the paper dependencies.")
+
 SOURCE_DIR = Path(__file__).resolve().parent / "figures/source"
 sys.path.insert(0, str(SOURCE_DIR))
 
