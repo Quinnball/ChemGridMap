@@ -11,7 +11,7 @@ Tables and audit information produced from a ChEMBL activity export.
 ## `GridMapResult`
 
 ```python
-GridMapResult(data: 'pd.DataFrame', representation: 'np.ndarray', projection: 'np.ndarray', grid: 'np.ndarray', metrics: 'pd.DataFrame', preprocessing: 'Dict[str, int]', feature_names: 'List[str]' = <factory>, output_files: 'Dict[str, str]' = <factory>, structure_groups: 'List[Dict]' = <factory>, grouping_protocol: 'Dict' = <factory>) -> None
+GridMapResult(data: 'pd.DataFrame', representation: 'np.ndarray', projection: 'np.ndarray', grid: 'np.ndarray', metrics: 'pd.DataFrame', preprocessing: 'Dict[str, int]', feature_names: 'List[str]' = <factory>, output_files: 'Dict[str, str]' = <factory>, structure_groups: 'List[Dict]' = <factory>, grouping_protocol: 'Dict' = <factory>, query_check: 'pd.DataFrame' = <factory>, query_neighbors: 'pd.DataFrame' = <factory>, query_report: 'Dict' = <factory>) -> None
 ```
 
 Data and files produced by one grid-map run.
@@ -19,7 +19,7 @@ Data and files produced by one grid-map run.
 ## `annotate_activity_confidence`
 
 ```python
-annotate_activity_confidence(molecules: 'pd.DataFrame', records: 'pd.DataFrame', *, lower: 'float' = 6.0, upper: 'float' = 7.0, confidence_threshold: 'float' = 0.8, model: 'str' = 'gaussian', fit: 'Optional[Dict[str, object]]' = None, entry: 'str' = 'molecule_identity_key', value: 'str' = 'pchembl_value', document: 'str' = 'document_chembl_id', displayed: 'str' = 'activity_pchembl', merge_identical: 'bool' = True, offset_display: 'str' = 'none', offset_min_shared: 'int' = 3, offset_threshold: 'float' = 1.0, offset_sign_agreement: 'float' = 0.8)
+annotate_activity_confidence(molecules: 'pd.DataFrame', records: 'pd.DataFrame', *, lower: 'float' = 6.0, upper: 'float' = 7.0, confidence_threshold: 'float' = 0.8, model: 'str' = 'gaussian', fit: 'Optional[Dict[str, object]]' = None, entry: 'str' = 'molecule_identity_key', value: 'str' = 'pchembl_value', document: 'Optional[str]' = 'document_chembl_id', displayed: 'str' = 'activity_pchembl', merge_identical: 'bool' = True, offset_display: 'str' = 'none', offset_min_shared: 'int' = 3, offset_threshold: 'float' = 1.0, offset_sign_agreement: 'float' = 0.8, assumed_sigma: 'Optional[float]' = None)
 ```
 
 Add document-balanced estimates and class confidence to entry-level annotations.
@@ -49,7 +49,8 @@ entry : str, default "molecule_identity_key"
 value : str, default "pchembl_value"
     Activity-value column in ``records``.
 document : str, default "document_chembl_id"
-    Source-document column in ``records``.
+    Evidence-unit column in ``records``; use ``None`` with ``assumed_sigma``
+    when each compound's record median supplies a single evidence unit.
 displayed : str, default "activity_pchembl"
     Displayed activity column whose class receives support values.
 merge_identical : bool, default True
@@ -62,6 +63,10 @@ offset_threshold : float, default 1.0
     Minimum absolute median offset in log units.
 offset_sign_agreement : float, default 0.8
     Minimum fraction of paired differences sharing the median sign.
+assumed_sigma : float, optional
+    Fixed, finite positive between-unit SD in log units. With ``document=None``,
+    each compound supplies one unit at its record median and document-offset
+    detection does not apply. This SD is not estimated from the input data.
 
 Returns
 -------
@@ -82,7 +87,7 @@ Assign each projected point to a unique dense- or sparse-matched cell.
 ## `build_grid_map`
 
 ```python
-build_grid_map(data: 'pd.DataFrame', output_dir: 'Optional[Path]' = None, name: 'str' = 'grid_map', smiles_col: 'str' = 'smiles', value_col: 'Optional[str]' = None, label_col: 'Optional[str]' = None, representation: 'str' = 'morgan', projection: 'str' = 'umap', umap_metric: 'str' = 'auto', x_col: 'Optional[str]' = None, y_col: 'Optional[str]' = None, embedding_prefix: 'str' = 'emb_', radius: 'int' = 2, n_bits: 'int' = 2048, lower_threshold: 'float' = 6.0, upper_threshold: 'float' = 7.0, duplicate_policy: 'str' = 'error', random_state: 'int' = 42, k: 'int' = 10, trustworthiness_sample_size: 'int' = 3000, grid_padding: 'Optional[int]' = None, grid_occupancy: 'float' = 0.4, coordinate_scaling: 'str' = 'isotropic', assignment_method: 'str' = 'auto', dense_max_pairs: 'int' = 20000000, sparse_neighbors: 'int' = 128, render_detail: 'str' = 'auto', output_formats: 'Optional[List[str]]' = None, color_map: 'Optional[Dict[str, str]]' = None, provenance: 'Optional[Dict]' = None, sparse_adaptive: 'bool' = True, sparse_max_neighbors: 'int' = 1024, grouping: 'str' = 'butina', group_similarity: 'float' = 0.6, cluster_col: 'Optional[str]' = None, cluster_source: 'Optional[str]' = None, grid_refinement: 'str' = 'neighbors', core_rule: 'str' = 'coverage', core_min_coverage: 'float' = 0.8, fmcs_timeout: 'int' = 1, compound_col: 'Optional[str]' = None, document_col: 'Optional[str]' = None, relation_col: 'Optional[str]' = None, evidence_model: 'str' = 'gaussian', merge_identical_documents: 'bool' = True, confidence_threshold: 'float' = 0.8, offset_display: 'str' = 'none', offset_min_shared: 'int' = 3, offset_threshold: 'float' = 1.0, offset_sign_agreement: 'float' = 0.8, map_color_modes: 'Optional[List[str]]' = None, map_color_formats: 'Optional[Sequence[str]]' = None) -> 'GridMapResult'
+build_grid_map(data: 'pd.DataFrame', output_dir: 'Optional[Path]' = None, name: 'str' = 'grid_map', smiles_col: 'str' = 'smiles', value_col: 'Optional[str]' = None, label_col: 'Optional[str]' = None, representation: 'str' = 'morgan', projection: 'str' = 'umap', umap_metric: 'str' = 'auto', x_col: 'Optional[str]' = None, y_col: 'Optional[str]' = None, embedding_prefix: 'str' = 'emb_', radius: 'int' = 2, n_bits: 'int' = 2048, lower_threshold: 'float' = 6.0, upper_threshold: 'float' = 7.0, duplicate_policy: 'str' = 'error', random_state: 'int' = 42, k: 'int' = 10, trustworthiness_sample_size: 'int' = 3000, grid_padding: 'Optional[int]' = None, grid_occupancy: 'float' = 0.4, coordinate_scaling: 'str' = 'isotropic', assignment_method: 'str' = 'auto', dense_max_pairs: 'int' = 20000000, sparse_neighbors: 'int' = 128, render_detail: 'str' = 'auto', output_formats: 'Optional[List[str]]' = None, color_map: 'Optional[Dict[str, str]]' = None, provenance: 'Optional[Dict]' = None, sparse_adaptive: 'bool' = True, sparse_max_neighbors: 'int' = 1024, grouping: 'str' = 'butina', group_similarity: 'float' = 0.6, cluster_col: 'Optional[str]' = None, cluster_source: 'Optional[str]' = None, grid_refinement: 'str' = 'neighbors', core_rule: 'str' = 'coverage', core_min_coverage: 'float' = 0.8, fmcs_timeout: 'int' = 1, compound_col: 'Optional[str]' = None, document_col: 'Optional[str]' = None, relation_col: 'Optional[str]' = None, evidence_model: 'str' = 'gaussian', merge_identical_documents: 'bool' = True, confidence_threshold: 'float' = 0.8, offset_display: 'str' = 'none', offset_min_shared: 'int' = 3, offset_threshold: 'float' = 1.0, offset_sign_agreement: 'float' = 0.8, map_color_modes: 'Optional[List[str]]' = None, map_color_formats: 'Optional[Sequence[str]]' = None, value_unit: 'str' = 'p', unit_column: 'Optional[str]' = None, assumed_sigma: 'Optional[float]' = None, query_data: 'Optional[pd.DataFrame]' = None, query_smiles_col: 'Optional[str]' = None, query_id_col: 'Optional[str]' = None, query_structure_policy: 'str' = 'canonical') -> 'GridMapResult'
 ```
 
 Build and optionally save a one-molecule-per-cell grid chemical map.
@@ -197,6 +202,21 @@ map_color_modes : sequence of str, optional
     Additional reliability layers to export.
 map_color_formats : sequence of {"svg", "png"}, optional
     Formats for additional reliability layers.
+value_unit : {"p", "M", "mM", "uM", "nM", "pM"}, default "p"
+    Unit of numeric activities; concentrations are converted to pActivity.
+unit_column : str, optional
+    Per-row concentration unit, instead of a common nondefault value_unit.
+assumed_sigma : float, optional
+    Positive assumed document standard deviation for generic records.
+    Molecule tables without records cannot use this parameter.
+query_data : pandas.DataFrame, optional
+    Unmeasured structures to map with at least two measured references.
+    They never receive predicted activity or class support.
+query_smiles_col, query_id_col : str, optional
+    Query SMILES and identifier columns; otherwise detect SMILES and assign
+    Q00001-style identifiers. See prepare_query_molecules.
+query_structure_policy : {"canonical", "as-recorded", "parent"}, default "canonical"
+    Actual reference preparation policy to apply to query structures.
 
 Returns
 -------
@@ -305,14 +325,15 @@ Pooled SD between evidence units of the same entry (Gaussian model).
 ## `prepare_generic_activity_records`
 
 ```python
-prepare_generic_activity_records(data: 'pd.DataFrame', *, compound_column: 'str', value_column: 'str', document_column: 'Optional[str]', smiles_column: 'str', relation_column: 'Optional[str]' = None, lower: 'float' = 6.0, upper: 'float' = 7.0, conflict_range_threshold: 'float' = 1.0, confidence: 'bool' = True, confidence_threshold: 'float' = 0.8, merge_identical: 'bool' = True, evidence_model: 'str' = 'gaussian', offset_display: 'str' = 'none', offset_min_shared: 'int' = 3, offset_threshold: 'float' = 1.0, offset_sign_agreement: 'float' = 0.8) -> 'Tuple[pd.DataFrame, pd.DataFrame, Optional[Dict[str, object]], Dict[str, object]]'
+prepare_generic_activity_records(data: 'pd.DataFrame', *, compound_column: 'str', value_column: 'str', document_column: 'Optional[str]' = None, smiles_column: 'str', relation_column: 'Optional[str]' = None, lower: 'float' = 6.0, upper: 'float' = 7.0, conflict_range_threshold: 'float' = 1.0, confidence: 'bool' = True, confidence_threshold: 'float' = 0.8, merge_identical: 'bool' = True, evidence_model: 'str' = 'gaussian', offset_display: 'str' = 'none', offset_min_shared: 'int' = 3, offset_threshold: 'float' = 1.0, offset_sign_agreement: 'float' = 0.8, value_unit: 'str' = 'p', unit_column: 'Optional[str]' = None, assumed_sigma: 'Optional[float]' = None) -> 'Tuple[pd.DataFrame, pd.DataFrame, Optional[Dict[str, object]], Dict[str, object]]'
 ```
 
 Curate a generic activity-record CSV into the molecule-level map schema.
 
-Each compound ID is one entry. Values must already be pActivity values
-(-log10 M). If a document column is supplied, class support is calculated
-by default with the same evidence functions used by the ChEMBL path.
+Each compound ID is one entry. Values default to pActivity (-log10 M);
+concentration units can be supplied with ``value_unit`` or ``unit_column``.
+If a document column or ``assumed_sigma`` is supplied, class support uses
+the same evidence functions as the ChEMBL path.
 
 Parameters
 ----------
@@ -321,9 +342,10 @@ data : pandas.DataFrame
 compound_column : str
     Compound identifier column.
 value_column : str
-    pActivity value column.
+    Activity value column, using the selected units.
 document_column : str, optional
-    Source-document column; required when ``confidence`` is true.
+    Evidence-unit column: for example publication, batch, experiment date
+    or laboratory. Without it, support requires ``assumed_sigma``.
 smiles_column : str
     Molecular structure column.
 relation_column : str, optional
@@ -350,6 +372,14 @@ offset_threshold : float, default 1.0
     Minimum absolute median offset in log units.
 offset_sign_agreement : float, default 0.8
     Minimum sign agreement for a systematic offset.
+value_unit : {"p", "M", "mM", "uM", "nM", "pM"}, default "p"
+    Activity units. Concentrations are converted to -log10 mol/L.
+unit_column : str, optional
+    Per-record concentration units; also accepts µM and μM. Raw values and
+    units are preserved as ``raw_activity_value`` and ``raw_activity_unit``.
+assumed_sigma : float, optional
+    Finite positive SD in log units, used without estimating it from data.
+    Without a document column, each compound's median is one evidence unit.
 
 Returns
 -------
@@ -361,6 +391,92 @@ fit : dict or None
     Activity-confidence diagnostics, or ``None`` when disabled.
 report : dict
     Input counts, excluded records and warnings.
+
+## `prepare_molecules`
+
+```python
+prepare_molecules(data: 'pd.DataFrame', smiles_col: 'str' = 'smiles', value_col: 'Optional[str]' = None, label_col: 'Optional[str]' = None, lower_threshold: 'float' = 6.0, upper_threshold: 'float' = 7.0, duplicate_policy: 'str' = 'error', value_unit: 'str' = 'p', unit_column: 'Optional[str]' = None, assumed_sigma: 'Optional[float]' = None) -> 'Tuple[pd.DataFrame, Dict[str, object]]'
+```
+
+Validate structures and prepare a molecule-level table.
+
+Duplicate canonical structures are not silently aggregated. The default
+policy raises an error so that repeated measurements can be curated before
+map construction.
+
+Parameters
+----------
+data : pandas.DataFrame
+    One input row per molecule.
+smiles_col : str, default "smiles"
+    Molecular structure column.
+value_col : str, optional
+    Activity column; converted values replace this column when units are supplied.
+label_col : str, optional
+    Existing class labels, used ahead of numeric activity thresholds.
+lower_threshold : float, default 6.0
+    Upper pActivity bound of the inactive class.
+upper_threshold : float, default 7.0
+    Lower pActivity bound of the active class.
+duplicate_policy : {"error", "first", "keep"}, default "error"
+    Handling of repeated canonical structures.
+value_unit : {"p", "M", "mM", "uM", "nM", "pM"}, default "p"
+    Activity units; concentrations are converted to -log10 mol/L.
+unit_column : str, optional
+    Per-row concentration units; also accepts µM and μM. Converted rows
+    preserve ``raw_activity_value`` and ``raw_activity_unit``.
+assumed_sigma : float, optional
+    Rejected for molecule tables; use ``prepare_generic_activity_records``
+    to calculate evidence support from a table of activity records.
+
+Returns
+-------
+molecules : pandas.DataFrame
+    Valid molecular rows with canonical structures and activity classes.
+report : dict
+    Structure and duplicate counts, plus unit-conversion exclusion reasons
+    when unit conversion is requested.
+
+## `prepare_query_molecules`
+
+```python
+prepare_query_molecules(query_data: 'pd.DataFrame', reference_data: 'pd.DataFrame', *, smiles_column: 'str | None' = None, id_column: 'str | None' = None, structure_policy: 'str' = 'canonical')
+```
+
+Check unmeasured molecules against the prepared measured reference table.
+
+Parameters
+----------
+query_data : pandas.DataFrame
+    Unmeasured structures, in source order. Activity annotations are ignored.
+reference_data : pandas.DataFrame
+    Prepared measured molecules with ``canonical_smiles``. Pass the actual
+    reference structure policy, including ``parent`` for ChEMBL parents.
+smiles_column : str, optional
+    Query SMILES column. Otherwise recognize SMILES, canonical_smiles,
+    canonical smiles, or representation_smiles, without case sensitivity.
+id_column : str, optional
+    Unique, nonempty query identifiers. Otherwise generate Q00001, Q00002,
+    and so on, counting every input row, including excluded rows.
+structure_policy : {"canonical", "as-recorded", "parent"}, default "canonical"
+    Apply canonical isomeric SMILES or the same ChEMBL parent standardizer
+    used for reference molecules. Identity comparisons use these SMILES.
+
+Returns
+-------
+molecules : pandas.DataFrame
+    Valid, first-occurrence structures absent from the reference, with
+    ``measurement_status`` and ``activity_class`` both ``not_measured``.
+check : pandas.DataFrame
+    One row per input with zero-based source_row, IDs, input and canonical
+    SMILES, status, first_query_id for duplicates, and matching reference_id.
+report : dict
+    Input and four status counts, selected columns and structure policy.
+
+Notes
+-----
+This function never infers activity or class from structural similarity.
+``build_grid_map(query_data=...)`` calls this same public preparation path.
 
 ## `grid_neighbor_sets`
 

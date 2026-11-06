@@ -31,6 +31,7 @@ from scipy import optimize, stats
 
 from .activity import activity_annotations, activity_class
 from .core import canonicalize_smiles
+from .units import convert_activity_values, validate_assumed_sigma
 
 CLASSES = ("inactive", "medium", "active")
 VARIANCE_FLOOR = 1e-4  # pChEMBL values are reported to two decimals
@@ -276,12 +277,13 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
                                  upper: float = 7.0, confidence_threshold: float = 0.8,
                                  model: str = "gaussian", fit: Optional[Dict[str, object]] = None,
                                  entry: str = "molecule_identity_key", value: str = "pchembl_value",
-                                 document: str = "document_chembl_id", displayed: str = "activity_pchembl",
+                                 document: Optional[str] = "document_chembl_id", displayed: str = "activity_pchembl",
                                  merge_identical: bool = True,
                                  offset_display: str = "none",
                                  offset_min_shared: int = 3,
                                  offset_threshold: float = 1.0,
-                                 offset_sign_agreement: float = 0.8):
+                                 offset_sign_agreement: float = 0.8,
+                                 assumed_sigma: Optional[float] = None):
     """Add document-balanced estimates and class confidence to entry-level annotations.
 
     Displayed classes, medians and source records are unchanged. Added columns
@@ -309,7 +311,8 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
     value : str, default "pchembl_value"
         Activity-value column in ``records``.
     document : str, default "document_chembl_id"
-        Source-document column in ``records``.
+        Evidence-unit column in ``records``; use ``None`` with ``assumed_sigma``
+        when each compound's record median supplies a single evidence unit.
     displayed : str, default "activity_pchembl"
         Displayed activity column whose class receives support values.
     merge_identical : bool, default True
@@ -322,6 +325,10 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
         Minimum absolute median offset in log units.
     offset_sign_agreement : float, default 0.8
         Minimum fraction of paired differences sharing the median sign.
+    assumed_sigma : float, optional
+        Fixed, finite positive between-unit SD in log units. With ``document=None``,
+        each compound supplies one unit at its record median and document-offset
+        detection does not apply. This SD is not estimated from the input data.
 
     Returns
     -------
@@ -347,18 +354,44 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
         raise ValueError("offset_threshold must be a finite number greater than 0.")
     if not 0.5 < offset_sign_agreement <= 1:
         raise ValueError("offset_sign_agreement must lie in (0.5, 1].")
-    doc = document_values(records, entry=entry, value=value, document=document, merge_identical=merge_identical)
-    offsets = document_pair_offsets(
-        records,
-        entry=entry,
-        value=value,
-        document=document,
-        min_shared=int(offset_min_shared),
-        offset_threshold=float(offset_threshold),
-        sign_agreement=float(offset_sign_agreement),
-    )
+    validate_assumed_sigma(assumed_sigma)
+    if assumed_sigma is not None and fit is not None:
+        raise ValueError("Use assumed_sigma or a precomputed fit, not both.")
+    if document is None:
+        if assumed_sigma is None and (fit or {}).get("method") != "assumed_sigma":
+            raise ValueError("Without a document column, class support requires assumed_sigma.")
+        finite = records.loc[np.isfinite(pd.to_numeric(records[value], errors="coerce"))].copy()
+        finite[value] = pd.to_numeric(finite[value])
+        grouped = finite.groupby(entry, sort=True)[value]
+        doc = pd.DataFrame({"document_value": grouped.median(), "n_records": grouped.size()})
+        doc = doc.rename_axis("entry").reset_index()
+        doc["document"] = ""
+        doc["documents"] = ""
+        offsets = pd.DataFrame(columns=DOCUMENT_OFFSET_COLUMNS)
+        offsets.attrs.update({"document_pair_possible_count": 0, "observed_document_pair_count": 0,
+                              "document_pair_count": 0, "min_shared": int(offset_min_shared),
+                              "offset_threshold": float(offset_threshold),
+                              "sign_agreement": float(offset_sign_agreement)})
+    else:
+        doc = document_values(records, entry=entry, value=value, document=document, merge_identical=merge_identical)
+        offsets = document_pair_offsets(
+            records,
+            entry=entry,
+            value=value,
+            document=document,
+            min_shared=int(offset_min_shared),
+            offset_threshold=float(offset_threshold),
+            sign_agreement=float(offset_sign_agreement),
+        )
     flagged = offsets[offsets.systematic_offset.astype(bool)].to_dict("records")
-    if fit is None:
+    if assumed_sigma is not None:
+        moments = _entry_moments(doc)
+        multi = moments[moments.n_units >= 2]
+        fit = {"tau": float(assumed_sigma), "prior_df": float("inf"),
+               "method": "assumed_sigma", "assumed_sigma": float(assumed_sigma),
+               "degrees_of_freedom": None, "n_entries": int(len(multi)),
+               "n_units": int(multi.n_units.sum())}
+    elif fit is None:
         fit = fit_predictive_variance(doc) if model == "moderated_t" else fit_between_unit_sd(doc)
     fit = dict(fit)
     if fit.get("prior_df") is None:  # JSON reports store the Gaussian model's infinite prior_df as null
@@ -388,7 +421,8 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
         remaining = doc.loc[keep]
         excluded_entries = sorted(set(doc["entry"]) - set(remaining["entry"]))
         fallback = doc[doc["entry"].isin(excluded_entries)]
-        fit = fit_between_unit_sd(remaining) if not remaining.empty else fit_between_unit_sd(doc)
+        if fit.get("method") != "assumed_sigma":
+            fit = fit_between_unit_sd(remaining) if not remaining.empty else fit_between_unit_sd(doc)
         if fit.get("prior_df") is None:
             fit["prior_df"] = float("inf")
         pieces = []
@@ -419,7 +453,8 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
     shown = np.array([activity_class(v, lower, upper) for v in out[displayed]])
     index = np.array([CLASSES.index(c) for c in shown])
     rows = np.arange(len(out))
-    out["n_documents"] = records.groupby(entry)[document].nunique().reindex(out[entry]).fillna(0).astype(int).to_numpy()
+    out["n_documents"] = (records.groupby(entry)[document].nunique().reindex(out[entry]).fillna(0).astype(int).to_numpy()
+                          if document is not None else 0)
     out["n_evidence_units"] = keyed["n_units"].astype(int).to_numpy()
     out["top_unit_documents"] = keyed["top_unit_documents"].to_numpy()
     out["top_unit_record_fraction"] = keyed["top_unit_record_fraction"].to_numpy()
@@ -487,10 +522,23 @@ def annotate_activity_confidence(molecules: pd.DataFrame, records: pd.DataFrame,
                 "offset_sign_agreement": float(offset_sign_agreement),
                 "flagged_document_count": len(flagged_documents),
                 "offset_pair_touched_entry_count": int(out["offset_pair_touched"].sum())})
+    if fit.get("method") == "assumed_sigma":
+        fit["evidence_unit_source"] = document or "one unit per compound"
+        fit["document_offset_detection"] = "evaluated" if document is not None else "not applicable"
+        if document is None:
+            fit["evidence_unit"] = "one unit per compound"
+            fit["evidence_unit_policy"] = "one median per compound"
+        out["sigma_doc"] = float(fit["tau"])
+        out["sigma_doc_degrees_of_freedom"] = None
     max_df_share = fit.get("max_entry_degrees_of_freedom_share")
     max_sumsq_share = fit.get("max_entry_sum_of_squares_share")
     warnings = list(fit.get("warnings", []))
-    if fit.get("method") == "literature_fallback":
+    if fit.get("method") == "assumed_sigma":
+        warning = (f"Class support uses an assumed σ of {float(fit['tau']):g} log units; "
+                   "it was not estimated from these data.")
+        if warning not in warnings:
+            warnings.append(warning)
+    elif fit.get("method") == "literature_fallback":
         warnings.append(
             "σ_doc was not estimated: fewer than 5 entries have two or more "
             "evidence units; the literature value 0.64 is used"
@@ -515,7 +563,7 @@ def prepare_generic_activity_records(
     *,
     compound_column: str,
     value_column: str,
-    document_column: Optional[str],
+    document_column: Optional[str] = None,
     smiles_column: str,
     relation_column: Optional[str] = None,
     lower: float = 6.0,
@@ -529,12 +577,16 @@ def prepare_generic_activity_records(
     offset_min_shared: int = 3,
     offset_threshold: float = 1.0,
     offset_sign_agreement: float = 0.8,
+    value_unit: str = "p",
+    unit_column: Optional[str] = None,
+    assumed_sigma: Optional[float] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[Dict[str, object]], Dict[str, object]]:
     """Curate a generic activity-record CSV into the molecule-level map schema.
 
-    Each compound ID is one entry. Values must already be pActivity values
-    (-log10 M). If a document column is supplied, class support is calculated
-    by default with the same evidence functions used by the ChEMBL path.
+    Each compound ID is one entry. Values default to pActivity (-log10 M);
+    concentration units can be supplied with ``value_unit`` or ``unit_column``.
+    If a document column or ``assumed_sigma`` is supplied, class support uses
+    the same evidence functions as the ChEMBL path.
 
     Parameters
     ----------
@@ -543,9 +595,10 @@ def prepare_generic_activity_records(
     compound_column : str
         Compound identifier column.
     value_column : str
-        pActivity value column.
+        Activity value column, using the selected units.
     document_column : str, optional
-        Source-document column; required when ``confidence`` is true.
+        Evidence-unit column: for example publication, batch, experiment date
+        or laboratory. Without it, support requires ``assumed_sigma``.
     smiles_column : str
         Molecular structure column.
     relation_column : str, optional
@@ -572,6 +625,14 @@ def prepare_generic_activity_records(
         Minimum absolute median offset in log units.
     offset_sign_agreement : float, default 0.8
         Minimum sign agreement for a systematic offset.
+    value_unit : {"p", "M", "mM", "uM", "nM", "pM"}, default "p"
+        Activity units. Concentrations are converted to -log10 mol/L.
+    unit_column : str, optional
+        Per-record concentration units; also accepts µM and μM. Raw values and
+        units are preserved as ``raw_activity_value`` and ``raw_activity_unit``.
+    assumed_sigma : float, optional
+        Finite positive SD in log units, used without estimating it from data.
+        Without a document column, each compound's median is one evidence unit.
 
     Returns
     -------
@@ -584,11 +645,14 @@ def prepare_generic_activity_records(
     report : dict
         Input counts, excluded records and warnings.
     """
+    validate_assumed_sigma(assumed_sigma)
+    convert_units = value_unit != "p" or unit_column is not None
+    new_features = convert_units or assumed_sigma is not None
     required = [compound_column, value_column, smiles_column]
-    if confidence:
-        if not document_column:
-            raise ValueError("document_column is required when activity confidence is enabled.")
+    if confidence and document_column:
         required.append(document_column)
+    if unit_column:
+        required.append(unit_column)
     missing = [name for name in required if name not in data.columns]
     if missing:
         raise ValueError(f"Generic activity input lacks required columns: {missing}.")
@@ -599,9 +663,21 @@ def prepare_generic_activity_records(
 
     records = data.copy()
     records.insert(0, "source_row", np.arange(len(records), dtype=int))
-    numeric = pd.to_numeric(records[value_column], errors="coerce")
+    if convert_units:
+        numeric, reasons = convert_activity_values(
+            records[value_column], value_unit=value_unit,
+            units=records[unit_column] if unit_column is not None else None,
+        )
+        records["raw_activity_value"] = records[value_column]
+        records["raw_activity_unit"] = records[unit_column] if unit_column is not None else value_unit
+    else:
+        numeric = pd.to_numeric(records[value_column], errors="coerce")
+        reasons = pd.Series("", index=records.index, dtype=object)
+        reasons.loc[~np.isfinite(numeric)] = "invalid_activity_value"
     canonical = records[smiles_column].map(canonicalize_smiles)
     compounds = records[compound_column].fillna("").astype(str).str.strip()
+    reasons.loc[reasons.eq("") & canonical.isna()] = "invalid_smiles"
+    reasons.loc[reasons.eq("") & compounds.eq("")] = "missing_compound_id"
     keep = np.isfinite(numeric).to_numpy() & canonical.notna().to_numpy() & compounds.ne("").to_numpy()
     excluded_non_exact = 0
     if relation_column:
@@ -609,14 +685,17 @@ def prepare_generic_activity_records(
         relation = relation.str.replace(r"^'([=<>~]+)'$", r"\1", regex=True)
         exact = relation.eq("=").to_numpy()
         excluded_non_exact = int((keep & ~exact).sum())
+        reasons.loc[reasons.eq("") & ~exact] = "non_exact_relation"
         keep &= exact
     records = records.loc[keep].copy()
     if records.empty:
         raise ValueError("No finite non-exact relation, SMILES and compound records remained.")
     records["molecule_identity_key"] = compounds.loc[keep].to_numpy()
     records["pchembl_value"] = numeric.loc[keep].to_numpy(float)
+    if new_features:
+        records["activity_pchembl_raw"] = records["pchembl_value"]
     records["canonical_smiles"] = canonical.loc[keep].to_numpy()
-    if confidence:
+    if confidence and document_column:
         records["document_chembl_id"] = (
             records[document_column].fillna("unknown_document").astype(str).str.strip()
         )
@@ -658,7 +737,7 @@ def prepare_generic_activity_records(
         )
 
     fit = None
-    if confidence:
+    if confidence and (document_column or assumed_sigma is not None):
         molecules, fit = annotate_activity_confidence(
             molecules,
             records,
@@ -671,7 +750,12 @@ def prepare_generic_activity_records(
             offset_min_shared=offset_min_shared,
             offset_threshold=offset_threshold,
             offset_sign_agreement=offset_sign_agreement,
+            document="document_chembl_id" if document_column else None,
+            assumed_sigma=assumed_sigma,
         )
+        if assumed_sigma is not None and document_column:
+            fit["evidence_unit_source"] = document_column
+            molecules.attrs["activity_confidence_fit"] = fit
     report = {
         "input_rows": int(len(data)),
         "retained_activity_records": int(len(records)),
@@ -687,4 +771,18 @@ def prepare_generic_activity_records(
         "activity_confidence": fit,
         "warnings": list(fit.get("warnings", [])) if fit is not None else [],
     }
+    if not document_column and assumed_sigma is None:
+        report["warnings"].append(
+            "Activity class support was not estimated: the input has no document identifiers. "
+            "Use --assumed-sigma to calculate class support with an assumed uncertainty."
+        )
+    if new_features:
+        report["value_unit"] = value_unit
+        report["unit_column"] = unit_column
+        report["excluded_reasons"] = {
+            name: int(reasons.eq(name).sum())
+            for name in ("invalid_activity_value", "nonpositive_activity_value",
+                         "unrecognized_activity_unit", "invalid_smiles",
+                         "missing_compound_id", "non_exact_relation")
+        }
     return molecules, records, fit, report

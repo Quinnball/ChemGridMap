@@ -196,6 +196,94 @@ to generic records as well.
 A curated one-row-per-molecule table remains supported through `--smiles-col`,
 `--value-col` and `--label-col`.
 
+## Your own data and unmeasured molecules
+
+Generic records and one-row-per-molecule tables accept concentration values:
+`--value-unit M`, `mM`, `uM`, `nM` or `pM` converts each value to
+`pActivity = -log10(value × molar unit factor)`. The default `p` keeps existing
+pActivity values. For mixed units, use `--unit-column unit` instead; it also
+accepts `µM` and `μM`, trims whitespace and distinguishes case. Do not combine
+the two options. Invalid/nonfinite values, nonpositive concentrations and
+unrecognized units are excluded with separate reason counts. Generic retained
+records preserve `raw_activity_value` and `raw_activity_unit`; converted values
+enter the existing pActivity fields. A relation column still retains only `=`.
+
+`--document-column` may identify a publication, batch, experiment date or
+laboratory. Repeated measurements within one evidence unit are not independent
+evidence. If an appropriate between-unit SD is known, `--assumed-sigma S` uses
+that finite positive SD instead of estimating it. With no evidence-unit
+column, each compound's record median forms one unit (`m = 1`); document-offset
+detection is then not applicable. With an evidence-unit column, offset checks
+continue normally. Without this option, the existing estimation and fallback
+rules remain in effect, and no support is calculated without evidence units.
+
+For example, an IC50 record table without document identifiers can be mapped as:
+
+```bash
+chemgridmap measurements.csv --compound-column compound_id \
+  --smiles-column smiles --value-column IC50 --value-unit nM \
+  --assumed-sigma 0.64 --map-color-modes activity class_support \
+  --output-dir own_data_map
+```
+
+The value 0.64 log units has the same source as the existing literature
+fallback: Landrum & Riniker, *J. Chem. Inf. Model.* **2024**, 64, 1560.
+Their observation that 27% of cross-assay IC50 pairs differ by more than one
+log unit gives approximately 0.64 per measurement under a Gaussian model.
+Supplying it explicitly is an assumption, not an estimate from your data:
+fits distinguish `assumed_sigma` from automatic `literature_fallback` and
+record the evidence-unit source. Assumed SDs have no fitted degrees of freedom.
+This option requires records; a molecule-only table must first be supplied in
+record-table form with `--compound-column`.
+
+To place unmeasured molecules alongside measured references:
+
+```bash
+chemgridmap --example caii --query-file virtual_library.csv \
+  --query-smiles-column smiles --query-id-column query_id \
+  --map-color-modes activity class_support neighbor_recall structure_group \
+  --output-dir query_map
+```
+
+Queries may be CSV or TSV. SMILES-column detection accepts common names such as
+`smiles`, `SMILES` and `canonical_smiles`; omitted IDs become `Q00001`,
+`Q00002`, and so on in input order. Duplicate IDs are errors. Queries use the
+reference input's actual structure policy. Invalid structures, repeated query
+structures and structures already in the measured set are recorded in
+`<name>_query_check.csv` and excluded from additional map cells. At least two
+measured reference molecules are required.
+
+`<name>_query_neighbors.csv` lists each query's five most similar measured
+Morgan-fingerprint neighbors, including all ties at fifth place, with their
+observed class, median pActivity and available evidence statistics. This uses
+the map's Morgan radius and bit count even for descriptor maps. Similarity 1.0
+can occur for stereoisomers or tautomers of measured molecules. The tool does
+not predict activity or assign a predicted activity class. Grid adjacency is
+not evidence; these neighbors come from fingerprint space.
+
+Unmeasured rows have `measurement_status=not_measured` and
+`activity_class=not_measured`, with blank activity and support fields. Their
+activity and class-support cells are white with a thin gray border and a
+`Not measured` legend. Structure and neighbor-reliability layers include all
+molecules. Activity-based diagnostics include only measured references.
+
+Groups and cores are calculated using measured references alone. A query
+joins the group whose center has the highest Morgan similarity at or above
+`--group-similarity`; tied centers favor the smaller group number. Unmatched
+queries and all queries with external grouping remain ungrouped. Each group
+adds `n_query_members`, while reference membership and core-coverage statistics
+stay unchanged. Query rows record center similarity and core containment.
+Exact grouping's 10,000 limit applies to references; larger combined maps warn
+about runtime, and automatic structure drawing uses the total 2,000 threshold.
+
+Python uses the same public `prepare_query_molecules` function and
+`build_grid_map(..., query_data=queries, query_smiles_col="smiles",
+query_id_col="query_id")` workflow. For pre-curated ChEMBL tables pass the
+curation report's actual structure policy as `query_structure_policy`.
+See [generated API](docs/API.md) and [output columns](docs/OUTPUT_COLUMNS.md)
+for parameters, conditional fields and audit outputs. These new options apply
+to the library and CLI; browser controls are a separate follow-up.
+
 ## Python API
 
 The public functions for evidence units, σ_doc, class probabilities, offset

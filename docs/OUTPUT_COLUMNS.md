@@ -86,6 +86,8 @@
 | `action_type_action_type` | Raw action-type field from the export. | text |
 | `action_type_description` | Action-type description. | text |
 | `action_type_parent_type` | Parent action type. | text |
+| `raw_activity_value` | Original activity value before unit conversion; the input column is also retained. | input unit |
+| `raw_activity_unit` | Original per-row unit, or the selected common unit, before conversion. | M, mM, uM, µM, μM, nM, pM |
 
 ## `grid_coordinates.csv`
 
@@ -102,7 +104,7 @@
 | `parent_extraction_excluded` | Whether parent extraction removed atoms. | 0 or 1 |
 | `n_record_structures` | Number of distinct record structures for the entry. | count |
 | `activity_pchembl` | Displayed median pChEMBL value. | −log10 mol/L |
-| `activity_class` | Activity class from the displayed pChEMBL and thresholds. | inactive, medium or active |
+| `activity_class` | Activity class from the displayed pChEMBL and thresholds. | inactive, medium, active; not_measured for unmeasured map rows |
 | `n_records` | Retained source records for the entry. | count |
 | `pchembl_min` | Minimum retained pChEMBL value. | −log10 mol/L |
 | `pchembl_max` | Maximum retained pChEMBL value. | −log10 mol/L |
@@ -168,6 +170,17 @@
 | `structure_group` | Structure-group identifier. | text |
 | `structure_group_color` | Group layer color. | hex RGB |
 | `scaffold_smiles` | Bemis–Murcko scaffold SMILES. Charge-separated groups can leave representation artifacts after removal of the negative oxygen: sulfoxides may appear as `[SH+]` and N-oxides as `[nH+]`. These scaffold strings are not neutral structures. Sulfones retain `S(=O)(=O)`, so sulfoxides and sulfones yield different scaffolds. | SMILES |
+| `name` | Supplied molecule name when present. | text |
+| `raw_activity_value` | Original activity value before unit conversion; the input column is also retained. | input unit |
+| `raw_activity_unit` | Original per-row unit, or the selected common unit, before conversion. | M, mM, uM, µM, μM, nM, pM |
+| `sigma_doc` | Assumed between-unit SD, only emitted for assumed_sigma. | log units |
+| `sigma_doc_degrees_of_freedom` | Empty for assumed_sigma because the SD was not estimated. | empty |
+| `measurement_status` | Whether the molecule belongs to measured reference data or the unmeasured query set. | measured or not_measured |
+| `query_id` | User query identifier or generated Q00001-style identifier; empty for measured rows. | text |
+| `nearest_measured_id` | Most similar measured molecule in Morgan fingerprint space; no activity is inferred. | text |
+| `nearest_measured_similarity` | Morgan Tanimoto to the nearest measured molecule. | similarity 0–1 |
+| `query_group_center_similarity` | Morgan Tanimoto to the assigned reference group center; empty when unassigned. | similarity 0–1 |
+| `contains_group_core` | Whether the unmeasured molecule contains its assigned reference group's core; empty when no core/group applies. | boolean or empty |
 
 ## `identity_conflicts.csv`
 
@@ -223,6 +236,8 @@
 | `assignment_candidate_edges` | Candidate edges supplied to the sparse solver. | count |
 | `assignment_fallback_edges_added` | Fallback assignment edges added. | count |
 | `assignment_fallback_edges_used` | Fallback assignment edges selected. | count |
+| `n_measured` | Measured reference molecules used for activity/class diagnostics in a query run. | count |
+| `n_query` | Unmeasured molecules included in structural/layout diagnostics. | count |
 
 ## `molecule_level.csv`
 
@@ -239,7 +254,7 @@
 | `parent_extraction_excluded` | Whether parent extraction removed atoms. | 0 or 1 |
 | `n_record_structures` | Number of distinct record structures for the entry. | count |
 | `activity_pchembl` | Displayed median pChEMBL value. | −log10 mol/L |
-| `activity_class` | Activity class from the displayed pChEMBL and thresholds. | inactive, medium or active |
+| `activity_class` | Activity class from the displayed pChEMBL and thresholds. | inactive, medium, active; not_measured for unmeasured map rows |
 | `n_records` | Retained source records for the entry. | count |
 | `pchembl_min` | Minimum retained pChEMBL value. | −log10 mol/L |
 | `pchembl_max` | Maximum retained pChEMBL value. | −log10 mol/L |
@@ -304,6 +319,43 @@
 | `structure_group` | Structure-group identifier. | text |
 | `structure_group_color` | Group layer color. | hex RGB |
 | `scaffold_smiles` | Bemis–Murcko scaffold SMILES. Charge-separated groups can leave representation artifacts after removal of the negative oxygen: sulfoxides may appear as `[SH+]` and N-oxides as `[nH+]`. These scaffold strings are not neutral structures. Sulfones retain `S(=O)(=O)`, so sulfoxides and sulfones yield different scaffolds. | SMILES |
+| `name` | Supplied molecule name when present. | text |
+| `raw_activity_value` | Original activity value before unit conversion; the input column is also retained. | input unit |
+| `raw_activity_unit` | Original per-row unit, or the selected common unit, before conversion. | M, mM, uM, µM, μM, nM, pM |
+| `sigma_doc` | Assumed between-unit SD, only emitted for assumed_sigma. | log units |
+| `sigma_doc_degrees_of_freedom` | Empty for assumed_sigma because the SD was not estimated. | empty |
+| `measurement_status` | Whether the molecule belongs to measured reference data or the unmeasured query set. | measured or not_measured |
+| `query_id` | User query identifier or generated Q00001-style identifier; empty for measured rows. | text |
+| `nearest_measured_id` | Most similar measured molecule in Morgan fingerprint space; no activity is inferred. | text |
+| `nearest_measured_similarity` | Morgan Tanimoto to the nearest measured molecule. | similarity 0–1 |
+| `query_group_center_similarity` | Morgan Tanimoto to the assigned reference group center; empty when unassigned. | similarity 0–1 |
+| `contains_group_core` | Whether the unmeasured molecule contains its assigned reference group's core; empty when no core/group applies. | boolean or empty |
+
+## `query_check.csv`
+
+| Column | Meaning | Unit or values |
+|---|---|---|
+| `canonical_smiles` | Canonical isomeric SMILES. | SMILES |
+| `source_row` | 0-based source row carried through curation. | integer |
+| `query_id` | User query identifier or generated Q00001-style identifier; empty for measured rows. | text |
+| `input_smiles` | Original query SMILES before structure preparation. | SMILES |
+| `status` | Query inclusion decision, one row per input row. | mapped, invalid_smiles, duplicate_query or in_reference |
+| `first_query_id` | First query identifier with the same canonical structure; empty otherwise. | text |
+| `reference_id` | Measured molecule with the same canonical structure; empty otherwise. | text |
+
+## `query_neighbors.csv`
+
+| Column | Meaning | Unit or values |
+|---|---|---|
+| `activity_pchembl` | Displayed median pChEMBL value. | −log10 mol/L |
+| `activity_class` | Activity class from the displayed pChEMBL and thresholds. | inactive, medium, active; not_measured for unmeasured map rows |
+| `n_evidence_units` | Document-balanced units after optional identical-value merging. | count |
+| `class_confidence` | Posterior consensus probability for the displayed class. | fraction 0–1 |
+| `class_status` | Displayed support status. | supported or uncertain |
+| `query_id` | User query identifier or generated Q00001-style identifier; empty for measured rows. | text |
+| `rank` | Similarity rank among measured neighbors, including every tie at the fifth neighbor. | integer starting at 1 |
+| `measured_id` | Measured reference molecule identifier. | text |
+| `tanimoto` | Morgan fingerprint Tanimoto using the map radius and bit count, including for descriptor maps. | similarity 0–1 |
 
 ## `retained_records.csv`
 
@@ -374,6 +426,8 @@
 | `action_type_action_type` | Raw action-type field from the export. | text |
 | `action_type_description` | Action-type description. | text |
 | `action_type_parent_type` | Parent action type. | text |
+| `raw_activity_value` | Original activity value before unit conversion; the input column is also retained. | input unit |
+| `raw_activity_unit` | Original per-row unit, or the selected common unit, before conversion. | M, mM, uM, µM, μM, nM, pM |
 
 ## `structure_members.csv`
 
@@ -399,6 +453,10 @@
 | `core_smiles` | Selected group core SMILES. Charge-separated groups can leave representation artifacts after removal of the negative oxygen: sulfoxides may appear as `[SH+]` and N-oxides as `[nH+]`. These core strings are not neutral structures. Sulfones retain `S(=O)(=O)`, so sulfoxides and sulfones yield different cores. | SMILES |
 | `core_smarts` | FMCS core SMARTS when available. | SMARTS |
 | `core_coverage_target` | Requested core-coverage target. | fraction 0–1 |
+| `measurement_status` | Whether the molecule belongs to measured reference data or the unmeasured query set. | measured or not_measured |
+| `query_id` | User query identifier or generated Q00001-style identifier; empty for measured rows. | text |
+| `query_group_center_similarity` | Morgan Tanimoto to the assigned reference group center; empty when unassigned. | similarity 0–1 |
+| `contains_group_core` | Whether the unmeasured molecule contains its assigned reference group's core; empty when no core/group applies. | boolean or empty |
 
 ## `structure_variants.csv`
 
@@ -411,6 +469,35 @@
 | `structure_record_count` | Retained records using this SMILES writing. | count |
 | `standard_inchikey` | Standard InChIKey shared by the writing variants for this identity. | InChIKey |
 | `selected` | Whether this writing normalizes to the map's selected structure (the normalized form with the most records). | boolean |
+
+## Optional own-data outputs and metadata
+
+Filenames have the run's `<name>_` prefix. `query_check.csv` and `query_neighbors.csv`
+are written only with query input. `structure_groups.json` adds `n_query_members`
+per group; member counts, core selection and core coverage still refer to measured references.
+Generic records with unit conversion, assumed sigma or query input also export
+`retained_records.csv`, `molecule_level.csv` and `curation_report.json`.
+
+Unit-conversion reports contain `excluded_reasons` counts and the selected unit/column.
+Fits and manifests identify assumed SDs with `method=assumed_sigma`, `assumed_sigma`,
+and `evidence_unit_source` (the supplied column or `one unit per compound`).
+With no evidence-unit column, `document_offset_detection` is `not applicable`.
+The existing automatic `literature_fallback` remains a separate method.
+
+Query manifests add `query_molecules` counts, `query_table_sha256` and `metric_populations`.
+Structure/layout metrics use all mapped molecules; activity differences and class purity
+use measured molecules only. Query neighbors supply observed reference evidence, never predictions.
+
+## Own-data CLI options
+
+| Option | Meaning |
+|---|---|
+| `--value-unit {p,M,mM,uM,nM,pM}` | Default `p` preserves existing pActivity values; concentrations become −log10 mol/L. |
+| `--unit-column COL` | Per-row concentration units, also accepting µM and μM; case sensitive, whitespace trimmed. Mutually exclusive with explicit `--value-unit`. |
+| `--assumed-sigma S` | Finite positive SD in log units for record-table support; incompatible with molecule-only input or disabled support. |
+| `--query-file PATH` | Unmeasured molecules as CSV or TSV; requires at least two measured references. |
+| `--query-smiles-column COL` | Override automatic SMILES-column detection. |
+| `--query-id-column COL` | Query IDs, unique within the input; default generated IDs preserve input order. |
 
 ## Offset display default
 

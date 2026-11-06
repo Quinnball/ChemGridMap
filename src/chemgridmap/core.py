@@ -16,6 +16,8 @@ from scipy.spatial.distance import cdist
 from sklearn.manifold import trustworthiness
 from sklearn.neighbors import NearestNeighbors
 
+from .units import convert_activity_values
+
 def canonicalize_smiles(smiles: object) -> Optional[str]:
     """Return an RDKit canonical SMILES, or None for an invalid structure."""
     if pd.isna(smiles) or not str(smiles).strip():
@@ -34,13 +36,52 @@ def prepare_molecules(
     lower_threshold: float = 6.0,
     upper_threshold: float = 7.0,
     duplicate_policy: str = "error",
-) -> Tuple[pd.DataFrame, Dict[str, int]]:
+    value_unit: str = "p",
+    unit_column: Optional[str] = None,
+    assumed_sigma: Optional[float] = None,
+) -> Tuple[pd.DataFrame, Dict[str, object]]:
     """Validate structures and prepare a molecule-level table.
 
     Duplicate canonical structures are not silently aggregated. The default
     policy raises an error so that repeated measurements can be curated before
     map construction.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        One input row per molecule.
+    smiles_col : str, default "smiles"
+        Molecular structure column.
+    value_col : str, optional
+        Activity column; converted values replace this column when units are supplied.
+    label_col : str, optional
+        Existing class labels, used ahead of numeric activity thresholds.
+    lower_threshold : float, default 6.0
+        Upper pActivity bound of the inactive class.
+    upper_threshold : float, default 7.0
+        Lower pActivity bound of the active class.
+    duplicate_policy : {"error", "first", "keep"}, default "error"
+        Handling of repeated canonical structures.
+    value_unit : {"p", "M", "mM", "uM", "nM", "pM"}, default "p"
+        Activity units; concentrations are converted to -log10 mol/L.
+    unit_column : str, optional
+        Per-row concentration units; also accepts µM and μM. Converted rows
+        preserve ``raw_activity_value`` and ``raw_activity_unit``.
+    assumed_sigma : float, optional
+        Rejected for molecule tables; use ``prepare_generic_activity_records``
+        to calculate evidence support from a table of activity records.
+
+    Returns
+    -------
+    molecules : pandas.DataFrame
+        Valid molecular rows with canonical structures and activity classes.
+    report : dict
+        Structure and duplicate counts, plus unit-conversion exclusion reasons
+        when unit conversion is requested.
     """
+    if assumed_sigma is not None:
+        raise ValueError("assumed_sigma requires an activity-record table; use "
+                         "prepare_generic_activity_records or --compound-column.")
     if smiles_col not in data.columns:
         raise ValueError("SMILES column {!r} was not found.".format(smiles_col))
     if value_col and value_col not in data.columns:
@@ -51,6 +92,26 @@ def prepare_molecules(
         raise ValueError("duplicate_policy must be 'error', 'first' or 'keep'.")
     if lower_threshold >= upper_threshold:
         raise ValueError("lower_threshold must be smaller than upper_threshold.")
+
+    convert_units = value_unit != "p" or unit_column is not None
+    unit_reasons = None
+    original_count = len(data)
+    if convert_units:
+        if not value_col:
+            raise ValueError("A value column is required for activity unit conversion.")
+        if unit_column and unit_column not in data:
+            raise ValueError(f"Unit column {unit_column!r} was not found.")
+        converted, unit_reasons = convert_activity_values(
+            data[value_col], value_unit=value_unit,
+            units=data[unit_column] if unit_column is not None else None,
+        )
+        data = data.copy()
+        data["raw_activity_value"] = data[value_col]
+        data["raw_activity_unit"] = data[unit_column] if unit_column is not None else value_unit
+        data[value_col] = converted
+        if "source_row" not in data:
+            data["source_row"] = np.arange(len(data), dtype=int)
+        data = data.loc[unit_reasons.eq("")].copy()
 
     rows = []
     invalid_count = 0
@@ -106,6 +167,16 @@ def prepare_molecules(
         "duplicate_structures": duplicate_structures,
         "output_rows": int(len(prepared)),
     }
+    if convert_units:
+        report["input_rows"] = original_count
+        report["value_unit"] = value_unit
+        report["unit_column"] = unit_column
+        report["excluded_reasons"] = {
+            name: int(unit_reasons.eq(name).sum())
+            for name in ("invalid_activity_value", "nonpositive_activity_value",
+                         "unrecognized_activity_unit")
+        }
+        report["excluded_reasons"]["invalid_smiles"] = invalid_count
     return prepared, report
 
 
