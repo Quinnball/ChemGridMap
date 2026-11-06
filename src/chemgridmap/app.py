@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 import io
 import json
+import math
 import mimetypes
 from pathlib import Path
 import re
@@ -23,7 +24,7 @@ import pandas as pd
 from . import __version__
 from .chembl import curate_chembl_activity_data, detect_chembl_columns, save_chembl_curation
 from .evidence import annotate_activity_confidence, prepare_generic_activity_records
-from .inspection import inspect_entry, load_audit_context
+from .inspection import inspect_entry, load_audit_context, offset_pair_details
 from .pipeline import build_grid_map
 from .plotting import render_svg
 from .provenance import file_digests
@@ -117,6 +118,7 @@ class AppSession:
         self.query_filename = ""
         self.result = None
         self.curation = None
+        self.generic_records = None
         self.activity_confidence = None
         self.files = {}
         self.group_cache = {}
@@ -132,6 +134,7 @@ class AppSession:
             self.filename = Path(filename.replace("\\", "/")).name
             self.query_frame, self.query_raw, self.query_filename = None, b"", ""
             self.result, self.curation, self.files = None, None, {}
+            self.generic_records = None
             self.activity_confidence = None
             self.group_cache = {}
             self.group_detail_cache = {}
@@ -161,6 +164,7 @@ class AppSession:
 
     def _discard_map(self):
         self.result, self.curation, self.files = None, None, {}
+        self.generic_records = None
         self.activity_confidence = None
         self.group_cache, self.group_detail_cache = {}, {}
         self.job = {"state": "ready" if self.frame is not None else "empty",
@@ -201,6 +205,7 @@ class AppSession:
             if options.get("unit_column") and options["unit_column"] not in self.frame:
                 raise ValueError("The selected unit column was not found.")
             self.result, self.curation, self.files = None, None, {}
+            self.generic_records = None
             self.activity_confidence = None
             self.group_cache = {}
             self.group_detail_cache = {}
@@ -236,6 +241,7 @@ class AppSession:
             data = self.frame.copy()
             curation, curation_files = None, {}
             generic_report = None
+            generic_records = None
             assumed_sigma = options.get("assumed_sigma")
             value_unit, unit_column = options.get("value_unit", "p"), options.get("unit_column")
             query_structure_policy = "canonical"
@@ -290,7 +296,7 @@ class AppSession:
                         raise ValueError("A pActivity column is required for generic activity records.")
                     confidence = bool((options["document_column"] or assumed_sigma is not None)
                                       and options["activity_confidence"])
-                    data, _, fit, report = prepare_generic_activity_records(
+                    data, generic_records, fit, report = prepare_generic_activity_records(
                         data,
                         compound_column=options["compound_column"],
                         value_column=value_col,
@@ -357,22 +363,29 @@ class AppSession:
                     bundle.write(path, name)
             files[archive.name] = archive
             report = curation.report if curation else result.preprocessing
-            if generic_report is not None and (value_unit != "p" or unit_column or assumed_sigma is not None):
-                report = {**report, "generic_activity": generic_report,
-                          "activity_confidence": self.activity_confidence,
-                          "warnings": generic_report["warnings"]}
-            elif generic_report is not None and generic_report["warnings"]:
-                report = {**report, "warnings": generic_report["warnings"]}
             if generic_report is not None:
                 # The grid preparation counts molecules; the browser summary counts source records.
-                report = {**report,
+                report = {**report, "generic_activity": generic_report,
+                          "activity_confidence": self.activity_confidence,
+                          "warnings": generic_report["warnings"],
                           "input_rows": generic_report["input_rows"],
                           "retained_activity_records": generic_report["retained_activity_records"],
                           "repeated_conflicted_molecules": int(data["wide_record_range"].eq(1).sum())}
             if result.query_report:
                 report = {**report, "query_molecules": result.query_report}
+            confidence_report = report.get("activity_confidence")
+            if confidence_report is not None:
+                # Include unflagged evaluated pairs in the browser audit only.
+                # The fitted model, saved reports and manifest remain untouched.
+                pairs = confidence_report.get("document_pair_offsets", [])
+                top_pairs = sorted(pairs, key=lambda pair: (
+                    not pair["systematic_offset"], -abs(pair["median_offset"]),
+                    str(pair["document_a"]), str(pair["document_b"])))[:10]
+                report = {**report, "activity_confidence": {
+                    **confidence_report, "document_offsets_top10": top_pairs}}
             with self.lock:
                 self.result, self.curation, self.files = result, curation, files
+                self.generic_records = generic_records
                 self.job.update(state="done", message="Map ready. Select a cell to inspect its evidence.",
                                 output_dir=str(directory), molecules=len(result.data),
                                 report=report, metrics=json_rows(result.metrics)[0],
@@ -435,6 +448,44 @@ class AppSession:
         with self.lock:
             return dict(self.job)
 
+    def _generic_record_audit(self, chosen, summary):
+        row = chosen.iloc[0]
+        records = self.generic_records
+        source_rows = [int(value) for value in str(row.source_rows).split(";")]
+        evidence = records[records.molecule_identity_key.eq(row.molecule_identity_key)].copy()
+        evidence = evidence.sort_values("source_row")
+        if (len(evidence) != int(row.n_records) or evidence.source_row.duplicated().any()
+                or set(evidence.source_row) != set(source_rows)):
+            raise ValueError("Record counts do not match this cell; check the retained-record file.")
+        # Legacy pActivity-only input lacks this display alias in retained records.
+        evidence["activity_pchembl_raw"] = pd.to_numeric(evidence.pchembl_value, errors="raise")
+        values = evidence.activity_pchembl_raw
+        median = float(values.median())
+        if not values.map(math.isfinite).all() or not math.isclose(
+                median, float(row.activity_pchembl), rel_tol=0, abs_tol=1e-9):
+            raise ValueError("Recalculated activity does not match the map annotation.")
+        options = self.job["options"]
+        touched = bool(row.get("offset_pair_touched", False))
+        document_column = ("document_chembl_id" if "document_chembl_id" in evidence
+                           else options["document_column"])
+        pairs, warnings = offset_pair_details(
+            evidence, document_column, self.activity_confidence or {}, touched)
+        summary.update(
+            input_format="generic_activity", record_count_verified=True, median_verified=True,
+            n_records=len(evidence), median_pchembl=median, document_offsets=pairs, warnings=warnings,
+            interpretation=("Generic activity records: the listed rows are the retained records "
+                            "for this compound; values were converted to pActivity."))
+        priority = ["source_row", options["compound_column"], options["document_column"],
+                    options["value_col"], options.get("unit_column"), options["relation_column"],
+                    "activity_pchembl_raw"]
+        hidden = {"molecule_identity_key", "pchembl_value", "canonical_smiles", "document_chembl_id"}
+        if options.get("unit_column"):
+            hidden.update(("raw_activity_value", "raw_activity_unit"))
+        # Explicit source-column selections are not internal duplicate columns.
+        columns = list(dict.fromkeys(name for name in priority if name in evidence))
+        columns.extend(name for name in evidence if name not in hidden and name not in columns)
+        return evidence[columns]
+
     def inspect(self, row=None, col=None, molecule_id=None):
         with self.lock:
             if self.result is None:
@@ -476,6 +527,8 @@ class AppSession:
                            "multi_unit_entry_count": (
                                self.activity_confidence or {}
                            ).get("multi_unit_entry_count")}
+                if self.generic_records is not None:
+                    records = self._generic_record_audit(chosen, summary)
             fit = self.activity_confidence or {}
             if fit.get("method") == "assumed_sigma":
                 summary.update(method="assumed_sigma", assumed_sigma=fit["assumed_sigma"],
@@ -511,11 +564,15 @@ class AppSession:
                 for name, content in files.items():
                     bundle.writestr(name, content)
             self.files[archive.name] = archive
-            return {"molecule": json_rows(chosen)[0], "summary": summary,
-                    "records": json_rows(records.head(100)), "total_records": len(records),
+            detail = {"molecule": json_rows(chosen)[0], "summary": summary,
+                    "records": json_rows(records if self.generic_records is not None else records.head(100)),
+                    "total_records": len(records),
                     "neighbors": json_rows(neighbor_table), "audit_file": archive.name,
                     "svg": image.read_text(encoding="utf-8"),
-                    "neighborhood_svg": neighborhood.read_text(encoding="utf-8")}, records
+                    "neighborhood_svg": neighborhood.read_text(encoding="utf-8")}
+            if self.generic_records is not None:
+                detail["record_columns"] = records.columns.tolist()
+            return detail, records
 
 
 def validate_options(options):

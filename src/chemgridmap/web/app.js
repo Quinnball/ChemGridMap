@@ -82,10 +82,10 @@ function setBusy(value) {
   $('build').textContent = value ? 'Building map...' : 'Generate map →';
   updateNavigation(); updateEvidenceOptions();
 }
-function table(rows, container, columnLimit = 999) {
+function table(rows, container, columnLimit = 999, orderedColumns = null) {
   container.replaceChildren();
   if (!rows.length) { container.textContent = 'No records available.'; return; }
-  const columns = Object.keys(rows[0]).slice(0, columnLimit), el = document.createElement('table');
+  const columns = (orderedColumns || Object.keys(rows[0])).slice(0, columnLimit), el = document.createElement('table');
   const head = el.createTHead().insertRow();
   for (const col of columns) { const th = document.createElement('th'); th.textContent = col; head.append(th); }
   const body = el.createTBody();
@@ -129,6 +129,7 @@ async function loadInput(demo = false, droppedFile = null) {
     setBusy(false);
     showPage('configure');
   } catch (error) { setBusy(false); $('build').disabled = !job && $('input-summary').hidden; fail(error); }
+  finally { $('csv').value = ''; }
 }
 function showInput(input, demo = false) {
     inputInfo = input;
@@ -265,14 +266,7 @@ function stat(value, label) {
   const number = document.createElement('b'); number.textContent = value == null ? '—' : value.toLocaleString();
   const text = document.createElement('span'); text.textContent = label; el.append(number, text); return el;
 }
-async function showResult() {
-  restoreOptions(job.options);
-  const report = job.report;
-  const stats = [stat(report.input_rows, 'Input records'), stat(job.molecules, 'Mapped molecules')];
-  if (report.query_molecules?.mapped) stats.push(stat(report.query_molecules.mapped, 'Unmeasured molecules'));
-  stats.push(stat(report.retained_activity_records, 'Retained records'), stat(report.repeated_conflicted_molecules, 'Wide record ranges'));
-  $('summary').replaceChildren(...stats);
-  $('summary').hidden = false; $('audit').hidden = false; $('preview').open = false;
+function showDataAudit(report) {
   $('audit-body').replaceChildren();
   const note = document.createElement('p');
   note.textContent = job.options.input_format === 'chembl' ? 'All retained records are summarized by median pChEMBL. A wide record range is retained, not converted to Medium or silently removed. Aggregation does not harmonize assay conditions. An entry without a wide record range is not proof of experimental agreement.' : job.options.compound_column ? 'Retained activity records are converted to pActivity and summarized by compound. Evidence units describe the supplied document, batch or run identifiers.' : 'This map uses the supplied molecule-level annotations. It does not create an assay-record provenance trail.';
@@ -281,6 +275,7 @@ async function showResult() {
     const sigma = document.createElement('p'); sigma.dataset.assumedSigma = 'true';
     const source = report.activity_confidence?.evidence_unit_source || job.options.document_column || 'one per compound';
     sigma.textContent = `σ (assumed) ${format(job.options.assumed_sigma)} log units. Evidence units: ${source === 'one unit per compound' ? 'one per compound' : source}.`;
+    if (job.options.input_format !== 'chembl' && !job.options.document_column) sigma.textContent += ' Offset detection needs an evidence-unit column, so it was not run.';
     $('audit-body').append(sigma);
   }
   if (report.query_molecules) {
@@ -292,15 +287,69 @@ async function showResult() {
     }
     $('audit-body').append(section);
   }
+  const generic = report.generic_activity;
+  if (generic) {
+    const labels = {
+      non_exact_relation: 'censored or inexact values (relation other than =)',
+      invalid_activity_value: 'empty or non-numeric activity values',
+      nonpositive_activity_value: 'zero or negative values',
+      unrecognized_activity_unit: 'unrecognized units',
+      invalid_smiles: 'invalid SMILES',
+      missing_compound_id: 'missing compound IDs'
+    };
+    const counts = generic.excluded_reasons || {non_exact_relation: generic.excluded_non_exact_relation_records};
+    const details = Object.entries(labels).filter(([key]) => counts[key] > 0).map(([key, label]) => `${label}: ${counts[key]}`).join('; ');
+    const excluded = document.createElement('p'); excluded.dataset.excludedRecords = 'true';
+    excluded.textContent = `Excluded records: ${generic.excluded_activity_records} of ${generic.input_rows}.`;
+    if (details) excluded.textContent += ` ${details[0].toUpperCase()}${details.slice(1)}.`;
+    $('audit-body').append(excluded);
+  }
   const exclusions = report.exclusion_counts || {};
   if (Object.keys(exclusions).length) {
     const reasons = document.createElement('p'); reasons.textContent = 'Exclusion reasons (may overlap): ' + Object.entries(exclusions).map(([k,v]) => `${k}: ${v}`).join('; '); $('audit-body').append(reasons);
+  }
+  const confidence = report.activity_confidence;
+  if (confidence?.document_pair_count != null && confidence.document_offset_detection !== 'not applicable' && (!generic || job.options.document_column)) {
+    const section = document.createElement('section'), heading = document.createElement('h3');
+    heading.textContent = 'Evidence units and offsets'; section.append(heading);
+    const description = document.createElement('p');
+    const source = job.options.input_format === 'chembl' ? 'document' : `${generic?.document_column || job.options.document_column} column`;
+    description.textContent = `Evidence units come from ${source}; ${confidence.document_pair_count} pairs with at least ${confidence.offset_min_shared} shared entries were evaluated, ${confidence.discordant_document_pair_count} pairs were flagged, using |median difference| ≥ ${format(confidence.offset_threshold)} log units and sign agreement ≥ ${Math.round(100 * confidence.offset_sign_agreement)}%.`;
+    section.append(description);
+    const pairs = confidence.document_offsets_top10 || [], container = document.createElement('div');
+    container.className = 'table-scroll offset-pairs';
+    table(pairs.map(pair => ({
+      Pair: `${pair.document_a} vs ${pair.document_b}`,
+      'Shared entries': pair.shared_entries,
+      'Median difference (B − A)': `${pair.median_offset >= 0 ? '+' : '−'}${Math.abs(pair.median_offset).toFixed(2)}`,
+      'Sign agreement': `${Math.round(100 * pair.sign_agreement)}%`,
+      Flagged: pair.systematic_offset ? 'Yes' : 'No',
+      'Entries touched': pair.touched_entry_count
+    })), container);
+    container.querySelectorAll('tbody tr').forEach((row, index) => { row.dataset.offsetFlagged = String(pairs[index].systematic_offset); });
+    section.append(container);
+    const display = document.createElement('p');
+    display.textContent = (confidence.offset_display || job.options.offset_display || 'uncertain') === 'uncertain'
+      ? 'Entries with records from a flagged pair are shown as uncertain.'
+      : 'Display unchanged: entries with records from a flagged pair are marked ◣ on Activity class support.';
+    const full = document.createElement('p'); full.textContent = 'Full table: map_document_offsets.csv (Export).';
+    section.append(display, full); $('audit-body').append(section);
   }
   const warnings = document.createElement('ul');
   for (const text of report.warnings || []) { const item = document.createElement('li'); item.textContent = text; warnings.append(item); }
   $('audit-body').append(warnings); $('audit').open = true;
   $('audit-count').textContent = (report.warnings || []).length;
   $('audit-count').hidden = !warnings.children.length;
+}
+async function showResult() {
+  restoreOptions(job.options);
+  const report = job.report;
+  const stats = [stat(report.input_rows, 'Input records'), stat(job.molecules, 'Mapped molecules')];
+  if (report.query_molecules?.mapped) stats.push(stat(report.query_molecules.mapped, 'Unmeasured molecules'));
+  stats.push(stat(report.retained_activity_records, 'Retained records'), stat(report.repeated_conflicted_molecules, 'Wide record ranges'));
+  $('summary').replaceChildren(...stats);
+  $('summary').hidden = false; $('audit').hidden = false; $('preview').open = false;
+  showDataAudit(report);
   const svgFile = job.files.find(name => name === 'map.svg');
   gridSVG = await (await api('/api/file?name=' + encodeURIComponent(svgFile))).text();
   points = await getJSON('/api/points');
@@ -489,7 +538,8 @@ function renderColorLegend(mode) {
       offset.textContent = `◣ offset document pair${offsetDisplay === 'uncertain' ? '' : ' (display unchanged)'}`;
       $('legend').append(offset);
     }
-  } else { const flag = document.createElement('span'); flag.textContent = '◥ Wide record range'; $('legend').append(flag); }
+  }
+  const flag = document.createElement('span'); flag.textContent = '◥ Wide record range'; $('legend').append(flag);
 }
 function applyTransform() {
   $('map-stage').style.transform = `translate(${transform.x}px,${transform.y}px) scale(${transform.s})`;
@@ -571,10 +621,11 @@ async function selectGroup(groupId) {
   highlight(); renderLegend($('color-mode').value); updateNavigation();
   if (!group) return;
   const queryMembers = points.filter(point => point.measurement_status === 'not_measured' && point.structure_group === groupId).length;
-  $('group-core-title').textContent = `${group.structure_group} · ${countLabel(group.size, 'member')}${queryMembers ? ` · ${queryMembers} unmeasured` : ''}`;
+  const members = countLabel(group.size, queryMembers ? 'measured member' : 'member');
+  $('group-core-title').textContent = `${group.structure_group} · ${members}${queryMembers ? ` + ${queryMembers} unmeasured` : ''}`;
   $('group-core-coverage').textContent = group.core_smiles
-    ? `Core in ${group.core_coverage_count} of ${countLabel(group.size, 'member')} · exact scaffold in ${group.core_exact_scaffold_count}`
-    : `${countLabel(group.size, 'member')} · no ring scaffold`;
+    ? `Core in ${group.core_coverage_count} of ${members} · exact scaffold in ${group.core_exact_scaffold_count}`
+    : `${members} · no ring scaffold`;
   $('group-core-rule').textContent = coreRule(group);
   $('group-core-svg').textContent = group.core_smiles ? 'Loading core...' : 'No ring scaffold';
   try {
@@ -666,9 +717,10 @@ async function inspect(query) {
     const fingerprintNeighbors = job.options.representation === 'morgan';
     const activityTerm = job.options.input_format === 'chembl' ? 'pChEMBL' : 'pActivity';
     const assumedSigma = summary.method === 'assumed_sigma' || summary.assumed_sigma != null;
+    const genericRecords = summary.input_format === 'generic_activity';
     const fields = [[`Median ${activityTerm}`,summary.median_pchembl],[`${activityTerm} range`,summary.minimum_pchembl == null ? null : `${format(summary.minimum_pchembl)}–${format(summary.maximum_pchembl)}`],['Source records',summary.n_records],['Distinct assays',summary.n_assays],['Distinct documents',summary.n_documents]];
-    if (!summary.median_verified) {
-      fields.splice(0,fields.length,['Activity class',row.activity_class],['Source-record audit','Not available']);
+    if (genericRecords || !summary.median_verified) {
+      fields.splice(0,fields.length,['Activity class',row.activity_class],['Source-record audit',genericRecords && summary.median_verified ? `Median recomputed from ${summary.n_records} listed records` : 'Not available']);
       if (job.options.input_format !== 'chembl') {
         const activity = row.activity_pchembl ?? row[job.options.value_col];
         if (job.options.compound_column) {
@@ -703,8 +755,8 @@ async function inspect(query) {
       [`${ordinal(neighbors.effective_k)} representation neighbor`, `distance ${summary.neighbor_kth_distance.toFixed(2)}`]);
     for (const [label,value] of fields) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = format(value); stats.append(dt,dd); }
     $('evidence-summary').append(stats);
-    const marker = document.createElement('p'); marker.className = !summary.quality_annotations_verified && summary.median_verified ? 'flag' : summary.wide_record_range ? 'note' : 'micro';
-    marker.textContent = !summary.quality_annotations_verified && summary.median_verified ? 'Quality flags not verified: original annotation rules are unavailable.' : summary.wide_record_range ? 'Records span more than one log unit or lie on both sides of the class thresholds. Class support already accounts for agreement among documents.' : summary.median_verified ? 'No wide record range rule triggered. This does not establish assay equivalence.' : summary.interpretation;
+    const marker = document.createElement('p'); marker.className = genericRecords ? 'micro' : !summary.quality_annotations_verified && summary.median_verified ? 'flag' : summary.wide_record_range ? 'note' : 'micro';
+    marker.textContent = genericRecords ? summary.interpretation : !summary.quality_annotations_verified && summary.median_verified ? 'Quality flags not verified: original annotation rules are unavailable.' : summary.wide_record_range ? 'Records span more than one log unit or lie on both sides of the class thresholds. Class support already accounts for agreement among documents.' : summary.median_verified ? 'No wide record range rule triggered. This does not establish assay equivalence.' : summary.interpretation;
     $('evidence-summary').append(marker);
     for (const text of summary.warnings || []) {
       if (!text.startsWith('Offset document pair:')) continue;
@@ -712,7 +764,7 @@ async function inspect(query) {
       warning.dataset.documentOffsetWarning = 'true'; warning.textContent = text;
       $('evidence-summary').append(warning);
     }
-    if (summary.median_verified) { const verified = document.createElement('p'); verified.className = 'verified'; verified.textContent = summary.quality_annotations_verified ? 'Identity, counts, median, activity class and quality flags checked against retained records and saved rules.' : 'Record count and median verified; quality annotations remain unverified.'; $('evidence-summary').append(verified); }
+    if (summary.median_verified && !genericRecords) { const verified = document.createElement('p'); verified.className = 'verified'; verified.textContent = summary.quality_annotations_verified ? 'Identity, counts, median, activity class and quality flags checked against retained records and saved rules.' : 'Record count and median verified; quality annotations remain unverified.'; $('evidence-summary').append(verified); }
     $('neighbor-title').textContent = `${fingerprintNeighbors ? 'Fingerprint' : 'Representation'} vs grid neighbors`;
     $('neighbor-summary').textContent = `${neighbors.representation} (${neighbors.representation_metric}), k=${neighbors.effective_k}: ${neighbors.shared_count} shared neighbors out of ${neighbors.representation_count} ${fingerprintNeighbors ? 'fingerprint' : 'representation'} neighbors and ${neighbors.grid_count} grid neighbors. Recall ${(100 * neighbors.recall).toFixed(1)}%.`;
     table(detail.neighbors, $('neighbor-table'));
@@ -722,9 +774,9 @@ async function inspect(query) {
     $('view-records').hidden = !detail.total_records;
     $('record-section').hidden = !detail.total_records;
     const priority = ['source_row','molecule_identity_key','activity_pchembl_raw','assay_chembl_id','document_chembl_id','assay_description'];
-    const ordered = detail.records.map(record => Object.fromEntries([...priority.filter(key => key in record),...Object.keys(record).filter(key => !priority.includes(key))].map(key => [key,record[key]])));
-    table(ordered,$('record-table'));
-    $('record-count').textContent = `${detail.total_records} records${detail.total_records > 100 ? ' · first 100 shown; CSV contains all records' : ''}`;
+    const ordered = genericRecords ? detail.records : detail.records.map(record => Object.fromEntries([...priority.filter(key => key in record),...Object.keys(record).filter(key => !priority.includes(key))].map(key => [key,record[key]])));
+    table(ordered,$('record-table'),999,genericRecords ? detail.record_columns : null);
+    $('record-count').textContent = `${detail.total_records} records${!genericRecords && detail.total_records > 100 ? ' · first 100 shown; CSV contains all records' : ''}`;
   } catch (error) { if (request === requestNumber) fail(error); }
 }
 async function download(path,name) {

@@ -291,8 +291,10 @@ query_id_col="query_id")` workflow. For pre-curated ChEMBL tables pass the
 curation report's actual structure policy as `query_structure_policy`.
 See [generated API](docs/API.md) and [output columns](docs/OUTPUT_COLUMNS.md)
 for parameters, conditional fields and audit outputs. These options are also
-available in the local browser. Its Data audit lists query-check counts and
-identifies an assumed σ; exported files include the query checks and neighbors.
+available in the local browser. Its Data audit lists query-check counts,
+excluded generic records and the evaluated evidence-unit pairs, and identifies
+an assumed σ; for generic records the inspector lists each compound's retained
+records. Exported files include the query checks and neighbors.
 
 ## Python API
 

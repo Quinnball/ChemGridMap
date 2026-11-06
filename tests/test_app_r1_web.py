@@ -26,7 +26,8 @@ def test_unmeasured_outline_stays_screen_sized_below_all_highlights():
         assert re.search(r"stroke-width:[^;]+!important", highlight[2])
 
 
-@pytest.mark.parametrize("scenario", ["neighbors", "summary", "groups", "plural", "outlines"])
+@pytest.mark.parametrize("scenario", ["neighbors", "summary", "groups", "plural", "outlines",
+                                      "audit", "input_reload", "support_legend", "generic_inspector"])
 def test_r1_browser_behavior_with_node_builtins(scenario):
     node = shutil.which("node")
     if node is None:

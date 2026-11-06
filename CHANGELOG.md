@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- List the retained records, record CSV and offset-pair notes for generic
+  activity records in the browser inspector; show their excluded records and
+  the evaluated evidence-unit pairs, flagged pairs first, in Data audit.
+- Reload a CSV chosen again, name the wide-range marker in the class-support
+  legend, and write group cards as measured members plus unmeasured molecules.
 - Add browser uploads for unmeasured CSV/TSV molecules, measured/unmeasured
   filtering, and a query inspector linking to measured Morgan neighbors.
 - Expose activity units, evidence-unit columns and explicit assumed σ in the

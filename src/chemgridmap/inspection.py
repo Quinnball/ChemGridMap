@@ -78,6 +78,51 @@ def verify_annotations(row, evidence, values, parameters):
     return calculated, rules, verified, quality_verified
 
 
+def offset_pair_details(evidence, document_column, confidence, touched):
+    """Describe flagged pairs involving any evidence unit listed for this entry."""
+    documents = set()
+    if document_column:
+        documents = {
+            str(value) for value in evidence[document_column].dropna().astype(str)
+            if str(value)
+        }
+    matched_offsets = []
+    offset_warnings = []
+    if touched:
+        offset_display = str(confidence.get("offset_display") or "uncertain")
+        for pair in confidence.get("document_offsets", []):
+            document_a, document_b = str(pair["document_a"]), str(pair["document_b"])
+            present = [document for document in (document_a, document_b) if document in documents]
+            if not present:
+                continue
+            matched_offsets.append(pair)
+            touched_count = pair.get("touched_entry_count")
+            touches = (
+                f"the pair touches {int(touched_count)} entries"
+                if touched_count is not None else "the pair touches an unrecorded number of entries"
+            )
+            record_text = ", ".join(present)
+            if offset_display == "uncertain":
+                display_rule = (
+                    f"This entry has records from {record_text}, so it is shown as uncertain."
+                )
+            else:
+                display_rule = (
+                    f"This entry has records from {record_text}; "
+                    "the display is unchanged because the offset rule is off."
+                )
+            offset_warnings.append(
+                "Offset document pair: {} vs {}, median difference {:.3g} log units, "
+                "n shared {}; {}. {}".format(
+                    document_a, document_b, float(pair["median_offset"]),
+                    int(pair["shared_entries"]), touches, display_rule,
+                )
+            )
+        if not matched_offsets:
+            offset_warnings.append("Offset document pair details are unavailable for this map.")
+    return matched_offsets, offset_warnings
+
+
 def inspect_entry(coordinates, records, *, molecule_id=None, cell=None, parameters=None,
                   activity_confidence=None, k=None):
     """Select one entry by exact ID or zero-based (row, column), then verify its records.
@@ -157,46 +202,8 @@ def inspect_entry(coordinates, records, *, molecule_id=None, cell=None, paramete
         status_reason = None if pd.isna(row.get("status_reason")) else row.get("status_reason")
     confidence = activity_confidence or {}
     document_column = columns["document_id"]
-    documents = set()
-    if document_column:
-        documents = {
-            str(value) for value in evidence[document_column].dropna().astype(str)
-            if str(value)
-        }
-    matched_offsets = []
-    offset_warnings = []
-    if touched:
-        offset_display = str(confidence.get("offset_display") or "uncertain")
-        for pair in confidence.get("document_offsets", []):
-            document_a, document_b = str(pair["document_a"]), str(pair["document_b"])
-            present = [document for document in (document_a, document_b) if document in documents]
-            if not present:
-                continue
-            matched_offsets.append(pair)
-            touched_count = pair.get("touched_entry_count")
-            touches = (
-                f"the pair touches {int(touched_count)} entries"
-                if touched_count is not None else "the pair touches an unrecorded number of entries"
-            )
-            record_text = ", ".join(present)
-            if offset_display == "uncertain":
-                display_rule = (
-                    f"This entry has records from {record_text}, so it is shown as uncertain."
-                )
-            else:
-                display_rule = (
-                    f"This entry has records from {record_text}; "
-                    "the display is unchanged because the offset rule is off."
-                )
-            offset_warnings.append(
-                "Offset document pair: {} vs {}, median difference {:.3g} log units, "
-                "n shared {}; {}. {}".format(
-                    document_a, document_b, float(pair["median_offset"]),
-                    int(pair["shared_entries"]), touches, display_rule,
-                )
-            )
-        if not matched_offsets:
-            offset_warnings.append("Offset document pair details are unavailable for this map.")
+    matched_offsets, offset_warnings = offset_pair_details(
+        evidence, document_column, confidence, touched)
     summary = {
         "molecule_identity_key": str(row.molecule_identity_key),
         "grid_row": int(row.grid_row), "grid_col": int(row.grid_col),

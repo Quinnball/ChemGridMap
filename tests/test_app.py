@@ -327,7 +327,7 @@ def test_inspector_uses_neutral_note_for_wide_record_range():
     script = (ASSETS / 'app.js').read_text(encoding='utf-8')
     stylesheet = (ASSETS / 'app.css').read_text(encoding='utf-8')
 
-    assert "marker.className = !summary.quality_annotations_verified && summary.median_verified ? 'flag' : summary.wide_record_range ? 'note' : 'micro'" in script
+    assert "marker.className = genericRecords ? 'micro' : !summary.quality_annotations_verified && summary.median_verified ? 'flag' : summary.wide_record_range ? 'note' : 'micro'" in script
     assert "warning.className = 'flag'" in script
     note_rule = re.search(r'\.note\s*\{([^}]*)\}', stylesheet)
     assert note_rule is not None
