@@ -268,8 +268,10 @@ function stat(value, label) {
 async function showResult() {
   restoreOptions(job.options);
   const report = job.report;
-  $('summary').replaceChildren(stat(report.input_rows, 'Input records'),stat(job.molecules, 'Mapped molecules'),
-    stat(report.retained_activity_records, 'Retained records'),stat(report.repeated_conflicted_molecules, 'Wide record ranges'));
+  const stats = [stat(report.input_rows, 'Input records'), stat(job.molecules, 'Mapped molecules')];
+  if (report.query_molecules?.mapped) stats.push(stat(report.query_molecules.mapped, 'Unmeasured molecules'));
+  stats.push(stat(report.retained_activity_records, 'Retained records'), stat(report.repeated_conflicted_molecules, 'Wide record ranges'));
+  $('summary').replaceChildren(...stats);
   $('summary').hidden = false; $('audit').hidden = false; $('preview').open = false;
   $('audit-body').replaceChildren();
   const note = document.createElement('p');
@@ -313,7 +315,7 @@ async function showResult() {
   const none = document.createElement('option'); none.value = ''; none.textContent = 'None'; $('group-select').append(none);
   for (const group of structureGroups) {
     const option = document.createElement('option'); option.value = group.structure_group;
-    option.textContent = `${group.structure_group} | ${group.size} members | core ${group.core_coverage_count}/${group.size}`;
+    option.textContent = `${group.structure_group} | ${countLabel(group.size, 'member')} | core ${group.core_coverage_count}/${group.size}`;
     $('group-select').append(option);
   }
   $('group-select').value = highlightedGroup;
@@ -390,6 +392,7 @@ function colorMap() {
     }
     const unmeasured = point.measurement_status === 'not_measured';
     if (point.measurement_status) el.dataset.measurementStatus = point.measurement_status;
+    el.classList.toggle('unmeasured-outline', unmeasured && ['activity','support'].includes(mode));
     let fill = mark.dataset.activityFill;
     if (mode === 'structure') fill = point.structure_group_color || '#B8C2CC';
     else if (mode === 'reliability') fill = reliabilityColor(point.neighbor_recall);
@@ -446,8 +449,9 @@ function renderLegend(mode) {
   const group = structureGroups.find(g => g.structure_group === highlightedGroup);
   if (group) {
     const note = document.createElement('span'); note.className = 'group-legend';
-    const queryMembers = points.filter(point => point.measurement_status === 'not_measured' && point.structure_group === group.structure_group).length;
-    note.textContent = `Outlined: ${group.structure_group}, ${group.size} ${hasQueries ? 'measured molecules' : 'molecules'}${queryMembers ? ` and ${queryMembers} not measured` : ''}. Others faded.`;
+    const members = points.filter(point => point.structure_group === group.structure_group);
+    const queryMembers = members.filter(point => point.measurement_status === 'not_measured').length;
+    note.textContent = `Outlined: ${group.structure_group}, ${countLabel(members.length, 'molecule')}${queryMembers ? ` (${queryMembers} unmeasured)` : ''}. Others faded.`;
     $('legend').append(note); $('legend').hidden = false;
   }
   if (hasQueries) {
@@ -558,6 +562,7 @@ function coreRule(group) {
       ? `FMCS matching at least ${Math.round(100 * group.core_coverage_target)}% of members${group.fmcs_timed_out ? '; the search timed out, so this partial core may vary with machine speed and load' : ''}.`
       : 'most frequent ring scaffold.';
 }
+function countLabel(count, noun) { return `${count} ${noun}${count === 1 ? '' : 's'}`; }
 async function selectGroup(groupId) {
   const request = ++groupRequestNumber;
   const group = structureGroups.find(g => g.structure_group === groupId);
@@ -565,10 +570,11 @@ async function selectGroup(groupId) {
   $('group-core-card').hidden = !group; $('group-core-svg').replaceChildren();
   highlight(); renderLegend($('color-mode').value); updateNavigation();
   if (!group) return;
-  $('group-core-title').textContent = `${group.structure_group} · ${group.size} members`;
+  const queryMembers = points.filter(point => point.measurement_status === 'not_measured' && point.structure_group === groupId).length;
+  $('group-core-title').textContent = `${group.structure_group} · ${countLabel(group.size, 'member')}${queryMembers ? ` · ${queryMembers} unmeasured` : ''}`;
   $('group-core-coverage').textContent = group.core_smiles
-    ? `Core in ${group.core_coverage_count} of ${group.size} members · exact scaffold in ${group.core_exact_scaffold_count}`
-    : `${group.size} members · no ring scaffold`;
+    ? `Core in ${group.core_coverage_count} of ${countLabel(group.size, 'member')} · exact scaffold in ${group.core_exact_scaffold_count}`
+    : `${countLabel(group.size, 'member')} · no ring scaffold`;
   $('group-core-rule').textContent = coreRule(group);
   $('group-core-svg').textContent = group.core_smiles ? 'Loading core...' : 'No ring scaffold';
   try {
@@ -588,11 +594,17 @@ function percentage(value) {
   if (value < 0.005) return '< 1%';
   return `${Math.round(100 * value)}%`;
 }
+function measuredLabel(identity) {
+  // Neighbor identities remain the click target; the visible ID matches the inspector.
+  const point = points.find(point => (point.molecule_identity_key || point.molecule_id) === identity);
+  const title = point?.molecule_id || identity;
+  return title === identity ? title : `${title} (parent ${identity})`;
+}
 function showQuerySelection(detail) {
   const row = detail.molecule;
   const stats = document.createElement('dl');
   const fields = [
-    ['Most similar measured molecule', `${row.nearest_measured_id} · Tanimoto ${format(row.nearest_measured_similarity)}`],
+    ['Most similar measured molecule', `${measuredLabel(row.nearest_measured_id)} · Tanimoto ${format(row.nearest_measured_similarity)}`],
     ['Structure group', row.structure_group || `No reference group within similarity ${format(detail.group_similarity ?? job.options.group_similarity)}`],
     ['Contains the group core', row.contains_group_core ? 'Yes' : 'No']
   ];
@@ -602,7 +614,7 @@ function showQuerySelection(detail) {
   }
   $('query-summary').replaceChildren(stats);
   const rows = detail.query_neighbors.map(neighbor => ({
-    Rank:neighbor.rank, ID:neighbor.measured_id, Tanimoto:format(neighbor.tanimoto),
+    Rank:neighbor.rank, ID:measuredLabel(neighbor.measured_id), Tanimoto:format(neighbor.tanimoto),
     'Display class':neighbor.activity_class, pActivity:format(neighbor.activity_pchembl),
     'Class support':percentage(neighbor.class_confidence), 'Class status':neighbor.class_status,
     'Evidence units':neighbor.n_evidence_units
@@ -629,7 +641,7 @@ async function inspect(query) {
     const group = structureGroups.find(g => g.structure_group === row.structure_group);
     $('selected-group').hidden = !group;
     if (group) {
-      $('selected-group-summary').textContent = `${group.structure_group} | ${group.size} members | core covers ${group.core_coverage_count}/${group.size}`;
+      $('selected-group-summary').textContent = `${group.structure_group} | ${countLabel(group.size, 'member')} | core covers ${group.core_coverage_count}/${group.size}`;
       $('selected-group-button').onclick = () => compareGroup(group.structure_group);
       $('selected-group-highlight').onclick = () => selectGroup(highlightedGroup === group.structure_group ? '' : group.structure_group);
     }
@@ -723,13 +735,13 @@ async function compareGroup(groupId) {
   try {
     const result = await getJSON('/api/compare?group=' + encodeURIComponent(groupId));
     const group = result.summary;
-    $('comparison-title').textContent = `${group.structure_group}: ${group.size} molecules`;
+    $('comparison-title').textContent = `${group.structure_group}: ${countLabel(group.size, 'molecule')}`;
     $('core-svg').innerHTML = result.drawings.core_smiles || '<p>No ring scaffold</p>';
     $('representative-svg').innerHTML = result.drawings.representative_smiles;
     const rule = 'Core rule: ' + coreRule(group) + (group.core_rule === 'coverage'
       ? ` The most frequent scaffold matches ${group.most_frequent_scaffold_coverage_count}/${group.size}.` : '');
-    $('core-coverage').textContent = `${group.core_status}. This core matches ${group.core_coverage_count}/${group.size} members; ${group.core_exact_scaffold_count} have exactly this scaffold. ${group.distinct_scaffolds} distinct ring scaffolds; ${group.acyclic_members} acyclic members. ${rule}`;
-    $('comparison-rule').textContent = `${result.selected_count}/${group.size} members shown. ${result.selection_rule} A scaffold summary is not a complete explanation of fingerprint similarity.`;
+    $('core-coverage').textContent = `${group.core_status}. This core matches ${group.core_coverage_count}/${countLabel(group.size, 'member')}; ${group.core_exact_scaffold_count} have exactly this scaffold. ${group.distinct_scaffolds} distinct ring scaffolds; ${countLabel(group.acyclic_members, 'acyclic member')}. ${rule}`;
+    $('comparison-rule').textContent = `${result.selected_count}/${countLabel(group.size, 'member')} shown. ${result.selection_rule} A scaffold summary is not a complete explanation of fingerprint similarity.`;
     $('comparison-svg').innerHTML = result.svg;
     const activityTerm = job.options.input_format === 'chembl' ? 'pChEMBL' : 'pActivity';
     const rows = result.members.map(m => ({ID:m.comparison_id, [activityTerm]:m.activity_pchembl, Class:m.activity_class, Core:group.core_member_ids.includes(m.comparison_id), Scaffold:m.scaffold_smiles, Row:m.grid_row, Column:m.grid_col}));

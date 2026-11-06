@@ -363,6 +363,12 @@ class AppSession:
                           "warnings": generic_report["warnings"]}
             elif generic_report is not None and generic_report["warnings"]:
                 report = {**report, "warnings": generic_report["warnings"]}
+            if generic_report is not None:
+                # The grid preparation counts molecules; the browser summary counts source records.
+                report = {**report,
+                          "input_rows": generic_report["input_rows"],
+                          "retained_activity_records": generic_report["retained_activity_records"],
+                          "repeated_conflicted_molecules": int(data["wide_record_range"].eq(1).sum())}
             if result.query_report:
                 report = {**report, "query_molecules": result.query_report}
             with self.lock:
