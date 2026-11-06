@@ -54,6 +54,13 @@ def point_rows(data):
     return json_rows(data[columns])
 
 
+def _group_drawing(summary, field):
+    molecule = summary.get("core_smiles_attached") if field == 'core_smiles' else summary[field]
+    molecule = molecule or summary[field]
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">'
+            + (_svg_molecule_content(molecule, 180) or '') + '</svg>') if molecule else ''
+
+
 class AppSession:
     """One local workspace; a single worker avoids concurrent chemistry/render jobs."""
 
@@ -69,6 +76,7 @@ class AppSession:
         self.activity_confidence = None
         self.files = {}
         self.group_cache = {}
+        self.group_detail_cache = {}
         self.job = {"state": "empty", "message": "Choose a CSV or open the example."}
 
     def load(self, content, filename):
@@ -93,6 +101,7 @@ class AppSession:
             self.result, self.curation, self.files = None, None, {}
             self.activity_confidence = None
             self.group_cache = {}
+            self.group_detail_cache = {}
             self.job = {"state": "ready", "message": "Input loaded. Review the options, then build the map."}
             return self.input_info()
 
@@ -116,6 +125,7 @@ class AppSession:
             self.result, self.curation, self.files = None, None, {}
             self.activity_confidence = None
             self.group_cache = {}
+            self.group_detail_cache = {}
             self.job = {"state": "running", "message": "Preparing input records...", "started": time.time()}
         if background:
             threading.Thread(target=self.run, args=(options,), daemon=True).start()
@@ -258,6 +268,19 @@ class AppSession:
         with self.lock:
             self.job.update(values)
 
+    def group_detail(self, group_id):
+        with self.lock:
+            if self.result is None:
+                raise ValueError("Build a map first.")
+            if group_id in self.group_detail_cache:
+                return self.group_detail_cache[group_id]
+            summary = next((g for g in self.result.structure_groups if g['structure_group'] == group_id), None)
+            if summary is None:
+                raise ValueError("Unknown structure group.")
+            payload = {'summary': summary, 'core_svg': _group_drawing(summary, 'core_smiles')}
+            self.group_detail_cache[group_id] = payload
+            return payload
+
     def compare_group(self, group_id):
         with self.lock:
             if self.result is None:
@@ -269,12 +292,7 @@ class AppSession:
                 raise ValueError("Unknown structure group.")
             selected, svg, atom_audit = group_comparison(self.result.data, summary)
             members = self.result.data[self.result.data.structure_group.eq(group_id)]
-            drawings = {}
-            for field in ('core_smiles', 'representative_smiles'):
-                molecule = summary.get("core_smiles_attached") if field == 'core_smiles' else summary[field]
-                molecule = molecule or summary[field]
-                drawings[field] = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">'
-                                   + (_svg_molecule_content(molecule, 180) or '') + '</svg>') if molecule else ''
+            drawings = {field: _group_drawing(summary, field) for field in ('core_smiles', 'representative_smiles')}
             payload = {'summary': summary, 'svg': svg, 'drawings': drawings,
                        'members': json_rows(members), 'selected_count': len(selected),
                        'selection_rule': 'Representative first; then scaffold, canonical SMILES and identifier. At most 12 cards; all members are exported.',
@@ -516,6 +534,8 @@ class LocalHandler(BaseHTTPRequestHandler):
                 if session.result is None:
                     raise ValueError("Build a map first.")
                 self.send({'groups': session.result.structure_groups, 'protocol': session.result.grouping_protocol})
+            elif path == "/api/group":
+                self.send(session.group_detail(parse_qs(parsed.query).get('group', [''])[0]))
             elif path == "/api/compare":
                 self.send(session.compare_group(parse_qs(parsed.query).get('group', [''])[0]))
             elif path == "/api/file":

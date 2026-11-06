@@ -92,9 +92,10 @@
       <section id="summary" class="stat-strip" hidden aria-label="Run summary"></section>
       <section id="group-controls" class="group-controls" hidden aria-label="Structural comparison">
         <label>Color by<select id="color-mode"><option value="activity">Observed activity</option><option value="support">Activity class support</option><option value="reliability">Neighbor reliability</option><option value="structure">Structure group</option></select></label>
-        <label data-group-only>Compare a structural group<select id="group-select"></select></label>
-        <button id="compare-group" class="secondary" data-group-only>Compare structures</button>
+        <label data-group-only>Structure group<select id="group-select"><option value="" selected>None</option></select></label>
+        <button id="compare-group" class="secondary" data-group-only disabled>Compare structures</button>
         <label class="checkbox"><input id="show-neighbor-links" type="checkbox" checked> Mark neighbor agreement</label>
+        <div id="group-core-card" class="group-core-card" hidden aria-live="polite"><div id="group-core-svg" class="group-core-image"></div><div><strong id="group-core-title"></strong><p id="group-core-coverage"></p><p id="group-core-rule" class="micro"></p></div></div>
         <span id="group-method" class="micro" data-group-only></span>
       </section>
       <div class="map-and-inspector" id="map-layout">
@@ -109,7 +110,7 @@
         <aside id="inspector" class="inspector" hidden aria-label="Selected molecule">
           <div class="inspector-heading"><span class="eyebrow">MOLECULE INSPECTOR</span><button id="close-inspector" class="icon-button" aria-label="Close molecule inspector">×</button></div>
           <p id="selection-hint" class="muted">Select a molecule on the map.</p>
-          <div id="selected-group" class="group-link" hidden><span id="selected-group-summary"></span><button id="selected-group-button" class="secondary full">Compare this structural group</button></div>
+          <div id="selected-group" class="group-link" hidden><span id="selected-group-summary"></span><button id="selected-group-highlight" class="secondary full">Highlight on map</button><button id="selected-group-button" class="secondary full">Compare this structural group</button></div>
           <div id="neighbor-key" class="neighbor-key" hidden><span class="shared">Shared neighbor</span><span class="grid-only">Grid only</span><span class="representation-only">Representation only</span><p class="micro">Outlines mark neighborhood membership, not confidence.</p></div>
           <div id="selection" hidden><h2 id="selected-id"></h2><div id="cell-location" class="micro"></div><div id="molecule-svg"></div><div id="evidence-summary"></div><details><summary>Local grid window</summary><div id="neighborhood-svg"></div><p class="micro">Occupied cells in a 3 × 3 grid window, not necessarily high-dimensional nearest neighbors.</p></details><details><summary id="neighbor-title">Representation vs grid neighbors</summary><p id="neighbor-summary" class="micro"></p><p class="micro">All distance ties are included. Layout adjacency alone is not evidence of chemical or biological similarity.</p><div id="neighbor-table" class="table-scroll"></div></details><button id="view-records" class="secondary full">View source records</button><button id="download-evidence" class="quiet full">Download source records CSV</button><button id="download-audit" class="secondary full">Download checked evidence ZIP</button></div>
         </aside>

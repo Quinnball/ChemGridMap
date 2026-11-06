@@ -84,6 +84,8 @@ chemgridmap-app
 
 The browser keeps files on the computer, lets you choose CSV columns, displays
 all three reliability layers, and exports the source-record audit with the map.
+Select a structure group to highlight its members on any color layer in the grid
+or 2D projection, and see its selected core structure and coverage.
 
 The package also contains a CA II smoke test:
 

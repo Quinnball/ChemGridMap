@@ -8,6 +8,7 @@ let transform = {s: 1, x: 0, y: 0}, drawingSize = {w: 1, h: 1};
 let tileWidth = 100, hasStructures = false;
 let inputInfo = null, page = 'import', umapAvailable = false, demoAvailable = false;
 let structureGroups = [], neighborRelations = new Map();
+let highlightedGroup = '', groupRequestNumber = 0, mapCells = [];
 const colors = {active: '#2a9d8f', medium: '#e6a23c', inactive: '#c44e52', unlabelled: '#b8c2cc'};
 // Uncertain classes keep their hue at reduced saturation; reliability uses one sequential blue scale.
 const fadedColors = {active: '#b8e0db', medium: '#f6dfb8', inactive: '#ebc0c1', unlabelled: '#dfe4e9'};
@@ -42,6 +43,7 @@ function updateNavigation() {
   $('projection').querySelector('[value=umap]').disabled = !umapAvailable;
   document.querySelectorAll('#find-molecule input,#find-molecule button,.tabs button,.zoom-tools button').forEach(el => el.disabled = !job || busy);
   document.querySelectorAll('#group-controls input,#group-controls select,#group-controls button').forEach(el => el.disabled = !job || busy);
+  $('compare-group').disabled = !job || busy || !highlightedGroup;
 }
 function densityPreview() {
   $('occupancy-value').textContent = $('occupancy').value + '%';
@@ -103,6 +105,8 @@ function selectColumns(id, columns, preferred, optional = false) {
 function resetResult() {
   job = null; currentCell = null; points = []; gridSVG = ''; requestNumber++;
   structureGroups = []; neighborRelations.clear(); $('group-controls').hidden = true;
+  highlightedGroup = ''; groupRequestNumber++; mapCells = [];
+  $('group-select').value = ''; $('group-core-card').hidden = true; $('group-core-svg').replaceChildren();
   if ($('comparison-dialog').open) $('comparison-dialog').close();
   ['summary','audit','metrics','selection','record-section','download-all'].forEach(id => $(id).hidden = true);
   $('selection-hint').hidden = false; $('downloads').replaceChildren(); $('map-stage').replaceChildren();
@@ -236,11 +240,13 @@ async function showResult() {
   structureOption.disabled = structureOption.hidden = !structureGroups.length;
   if (structureOption.disabled && $('color-mode').value === 'structure') $('color-mode').value = 'activity';
   $('group-select').replaceChildren();
+  const none = document.createElement('option'); none.value = ''; none.textContent = 'None'; $('group-select').append(none);
   for (const group of structureGroups) {
     const option = document.createElement('option'); option.value = group.structure_group;
     option.textContent = `${group.structure_group} | ${group.size} members | core ${group.core_coverage_count}/${group.size}`;
     $('group-select').append(option);
   }
+  $('group-select').value = highlightedGroup;
   $('group-method').textContent = `${grouping.protocol.method} groups are defined before projection. Colors may repeat; group IDs are authoritative.`;
   $('neighbor-key').querySelector('.representation-only').textContent =
     job.options.representation === 'morgan' ? 'Fingerprint only' : 'Representation only';
@@ -293,6 +299,7 @@ function setView(name) {
   const svg = $('map-stage').querySelector('svg'), box = svg.viewBox.baseVal;
   tileWidth = Number(svg.querySelector('g[data-grid-row] > rect')?.getAttribute('width') || 100);
   hasStructures = !!svg.querySelector('g[data-grid-row] > g');
+  mapCells = Array.from(svg.querySelectorAll('[data-grid-row]'));
   drawingSize = {w:box.width,h:box.height}; svg.setAttribute('width',box.width); svg.setAttribute('height',box.height);
   colorMap(); fit(); highlight();
 }
@@ -344,10 +351,18 @@ function legendItem(color, text) {
   swatch.style.background = color; item.append(swatch, document.createTextNode(text)); return item;
 }
 function renderLegend(mode) {
-  $('legend').hidden = mode === 'structure';
+  renderColorLegend(mode);
+  const group = structureGroups.find(g => g.structure_group === highlightedGroup);
+  if (group) {
+    const note = document.createElement('span'); note.className = 'group-legend';
+    note.textContent = `Outlined: ${group.structure_group}, ${group.size} molecules. Others faded.`;
+    $('legend').append(note); $('legend').hidden = false;
+  }
+}
+function renderColorLegend(mode) {
+  $('legend').replaceChildren(); $('legend').hidden = mode === 'structure';
   if (!job || mode === 'structure') return;
   const lower = job.options.lower_threshold, upper = job.options.upper_threshold;
-  $('legend').replaceChildren();
   if (job.options.input_format === 'molecule' && mode !== 'reliability') {
     $('legend').textContent = 'Colors follow supplied class labels, or the selected pChEMBL thresholds; gray = unlabelled.';
     return;
@@ -397,13 +412,64 @@ function zoom(factor,x=$('map-viewport').clientWidth/2,y=$('map-viewport').clien
   transform = {s,x:x-(x-transform.x)*ratio,y:y-(y-transform.y)*ratio}; applyTransform();
 }
 function highlight() {
-  $('map-stage').querySelectorAll('[data-grid-row]').forEach(el => {
+  $('map-stage').querySelector('[data-map-outlines]')?.remove();
+  const groups = new Map(points.map(p => [`${p.grid_row},${p.grid_col}`, p.structure_group]));
+  const layers = [[], [], [], []];
+  const outlines = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  outlines.dataset.mapOutlines = 'true'; outlines.setAttribute('pointer-events', 'none');
+  mapCells.forEach(el => {
+    const member = !!highlightedGroup && groups.get(`${el.dataset.gridRow},${el.dataset.gridCol}`) === highlightedGroup;
+    el.classList.toggle('group-highlight', member);
+    el.classList.toggle('group-faded', !!highlightedGroup && !member);
     const selected = currentCell && Number(el.dataset.gridRow) === currentCell.row && Number(el.dataset.gridCol) === currentCell.col;
     el.classList.toggle('selected-cell',!!selected);
     const relation = $('show-neighbor-links').checked ? neighborRelations.get(`${el.dataset.gridRow},${el.dataset.gridCol}`) : null;
     for (const category of ['shared','grid_only','representation_only']) el.classList.toggle('neighbor-' + category, relation === category);
     if (el.tagName === 'circle') { el.setAttribute('stroke',selected ? '#183e92' : 'none'); el.setAttribute('stroke-width','3'); }
+    if (!el.classList.length) el.removeAttribute('class');
+    layers[selected ? 3 : relation ? 2 : member ? 1 : 0].push(el);
   });
+  // Paint group outlines above adjacent cells, then neighbors and the selection.
+  layers.flat().forEach(el => {
+    el.parentNode.append(el);
+    if (!el.classList.contains('group-faded')) return;
+    const relation = $('show-neighbor-links').checked ? neighborRelations.get(`${el.dataset.gridRow},${el.dataset.gridCol}`) : null;
+    if (!el.classList.contains('selected-cell') && !relation) return;
+    // Keep inspection outlines opaque while the entire underlying cell is faded.
+    const outline = (el.tagName === 'circle' ? el : el.querySelector(':scope > rect')).cloneNode(false);
+    for (const attribute of ['class', 'data-grid-row', 'data-grid-col']) outline.removeAttribute(attribute);
+    outline.setAttribute('fill', 'none'); outline.dataset.outline = el.classList.contains('selected-cell') ? 'selected' : relation;
+    outlines.append(outline);
+  });
+  if (outlines.children.length) mapCells[0].parentNode.append(outlines);
+  const selectedGroup = currentCell && groups.get(`${currentCell.row},${currentCell.col}`);
+  $('selected-group-highlight').textContent = selectedGroup && selectedGroup === highlightedGroup ? 'Clear highlight' : 'Highlight on map';
+}
+function coreRule(group) {
+  return group.core_rule === 'coverage'
+    ? `largest scaffold or ring fragment matching at least ${Math.round(100 * group.core_coverage_target)}% of members (${group.core_target_met ? 'target met' : 'target not met; highest-coverage core shown'}).`
+    : group.core_rule === 'fmcs'
+      ? `FMCS matching at least ${Math.round(100 * group.core_coverage_target)}% of members${group.fmcs_timed_out ? '; the search timed out, so this partial core may vary with machine speed and load' : ''}.`
+      : 'most frequent ring scaffold.';
+}
+async function selectGroup(groupId) {
+  const request = ++groupRequestNumber;
+  const group = structureGroups.find(g => g.structure_group === groupId);
+  highlightedGroup = group ? groupId : ''; $('group-select').value = highlightedGroup;
+  $('group-core-card').hidden = !group; $('group-core-svg').replaceChildren();
+  highlight(); renderLegend($('color-mode').value); updateNavigation();
+  if (!group) return;
+  $('group-core-title').textContent = `${group.structure_group} · ${group.size} members`;
+  $('group-core-coverage').textContent = group.core_smiles
+    ? `Core in ${group.core_coverage_count} of ${group.size} members · exact scaffold in ${group.core_exact_scaffold_count}`
+    : `${group.size} members · no ring scaffold`;
+  $('group-core-rule').textContent = coreRule(group);
+  $('group-core-svg').textContent = group.core_smiles ? 'Loading core...' : 'No ring scaffold';
+  try {
+    const result = await getJSON('/api/group?group=' + encodeURIComponent(groupId));
+    if (request !== groupRequestNumber) return;
+    if (result.core_svg) $('group-core-svg').innerHTML = result.core_svg;
+  } catch (error) { if (request === groupRequestNumber) { $('group-core-svg').textContent = 'Core unavailable'; fail(error); } }
 }
 function format(value) { return value == null ? '—' : typeof value === 'number' ? Number(value.toFixed(3)).toString() : String(value); }
 function ordinal(n) {
@@ -432,7 +498,7 @@ async function inspect(query) {
     if (group) {
       $('selected-group-summary').textContent = `${group.structure_group} | ${group.size} members | core covers ${group.core_coverage_count}/${group.size}`;
       $('selected-group-button').onclick = () => compareGroup(group.structure_group);
-      $('group-select').value = group.structure_group;
+      $('selected-group-highlight').onclick = () => selectGroup(highlightedGroup === group.structure_group ? '' : group.structure_group);
     }
     const wasClosed = $('inspector').hidden;
     $('inspector').hidden = false; $('map-layout').classList.add('has-selection');
@@ -507,11 +573,8 @@ async function compareGroup(groupId) {
     $('comparison-title').textContent = `${group.structure_group}: ${group.size} molecules`;
     $('core-svg').innerHTML = result.drawings.core_smiles || '<p>No ring scaffold</p>';
     $('representative-svg').innerHTML = result.drawings.representative_smiles;
-    const rule = group.core_rule === 'coverage'
-      ? `Core rule: largest scaffold or ring fragment matching at least ${Math.round(100 * group.core_coverage_target)}% of members (${group.core_target_met ? 'target met' : 'target not met; highest-coverage core shown'}). The most frequent scaffold matches ${group.most_frequent_scaffold_coverage_count}/${group.size}.`
-      : group.core_rule === 'fmcs'
-        ? `Core rule: FMCS matching at least ${Math.round(100 * group.core_coverage_target)}% of members${group.fmcs_timed_out ? '; the search timed out, so this partial core may vary with machine speed and load' : ''}.`
-        : 'Core rule: most frequent ring scaffold.';
+    const rule = 'Core rule: ' + coreRule(group) + (group.core_rule === 'coverage'
+      ? ` The most frequent scaffold matches ${group.most_frequent_scaffold_coverage_count}/${group.size}.` : '');
     $('core-coverage').textContent = `${group.core_status}. This core matches ${group.core_coverage_count}/${group.size} members; ${group.core_exact_scaffold_count} have exactly this scaffold. ${group.distinct_scaffolds} distinct ring scaffolds; ${group.acyclic_members} acyclic members. ${rule}`;
     $('comparison-rule').textContent = `${result.selected_count}/${group.size} members shown. ${result.selection_rule} A scaffold summary is not a complete explanation of fingerprint similarity.`;
     $('comparison-svg').innerHTML = result.svg;
@@ -527,6 +590,7 @@ async function compareGroup(groupId) {
   } catch (error) { fail(error); }
 }
 $('compare-group').addEventListener('click', () => compareGroup($('group-select').value));
+$('group-select').addEventListener('change', () => selectGroup($('group-select').value));
 $('color-mode').addEventListener('change', colorMap);
 $('show-neighbor-links').addEventListener('change', highlight);
 $('demo').addEventListener('click', () => loadInput(true));

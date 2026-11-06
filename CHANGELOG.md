@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Highlight a selected structure group across browser color layers and views,
+  with a core structure and coverage card and an inspector highlight toggle.
+
 ## 0.5.0 — 2026-10-29
 
 - Make `offset_display="none"` the default in the Python API, CLI and browser.
