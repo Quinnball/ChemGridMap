@@ -4,6 +4,17 @@
 
 - Highlight a selected structure group across browser color layers and views,
   with a core structure and coverage card and an inspector highlight toggle.
+- Convert molar concentration units in generic record and molecule tables,
+  preserve original values/units, and report exclusion reasons.
+- Add explicit assumed-sigma class support for ChEMBL and generic records,
+  including one evidence unit per compound when document IDs are unavailable.
+- Map unmeasured query molecules with measured references, export input checks
+  and tie-inclusive Morgan neighbors, and keep query activity/support blank.
+- Preserve reference evidence, groups and cores when queries are added; assign
+  queries to eligible reference centers and count query members separately.
+- Render unmeasured activity/support cells with a white fill and gray border;
+  keep structural diagnostics over all molecules and activity diagnostics over
+  measured references. Document the public API, CLI and optional audit outputs.
 
 ## 0.5.0 — 2026-10-29
 

@@ -7,7 +7,14 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
-from chemgridmap.plotting import RELIABILITY_BINS, render_grid_map
+from chemgridmap.plotting import (
+    DEFAULT_COLORS,
+    FADED_COLORS,
+    NOT_MEASURED_COLOR,
+    NOT_MEASURED_EDGE_COLOR,
+    RELIABILITY_BINS,
+    render_grid_map,
+)
 
 
 DEUTERANOPIA_1_0 = np.array([
@@ -124,3 +131,19 @@ def test_rendered_class_support_and_recall_colors(tmp_path):
         for cell in cells
     ]
     assert set(cell_fills) <= set(swatches)
+
+
+def test_not_measured_color_is_distinct_from_observed_classes():
+    observed_colors = [*DEFAULT_COLORS.values(),
+                       *(FADED_COLORS[label] for label in ("inactive", "medium", "active"))]
+    for color in observed_colors:
+        assert delta_e_100(NOT_MEASURED_COLOR, color) >= 10
+        assert delta_e_100(
+            simulate_deuteranopia(NOT_MEASURED_COLOR), simulate_deuteranopia(color)
+        ) >= 10
+    # The outline also makes white tiles visible against the white map background.
+    assert delta_e_100(NOT_MEASURED_COLOR, NOT_MEASURED_EDGE_COLOR) >= 30
+    assert delta_e_100(
+        simulate_deuteranopia(NOT_MEASURED_COLOR),
+        simulate_deuteranopia(NOT_MEASURED_EDGE_COLOR),
+    ) >= 30

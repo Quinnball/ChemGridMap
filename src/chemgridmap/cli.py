@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import math
 import sys
 import zipfile
 from pathlib import Path
@@ -41,6 +43,13 @@ def _positive_float(value: str) -> float:
     number = float(value)
     if not number > 0:
         raise argparse.ArgumentTypeError("Value must be greater than 0.")
+    return number
+
+
+def _assumed_sigma(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number) or number <= 0:
+        raise argparse.ArgumentTypeError("Assumed sigma must be finite and greater than 0.")
     return number
 
 
@@ -94,6 +103,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--value-col", "--value-column", dest="value_col",
         help="Activity value column in molecule-table input.",
     )
+    units = parser.add_mutually_exclusive_group()
+    units.add_argument(
+        "--value-unit", choices=["p", "M", "mM", "uM", "nM", "pM"], default="p",
+        help="Activity unit; p means an existing -log10 molar value.",
+    )
+    units.add_argument(
+        "--unit-column", help="Per-record concentration unit column (M, mM, uM, µM, μM, nM, pM).",
+    )
+    parser.add_argument(
+        "--assumed-sigma", type=_assumed_sigma,
+        help="Use this positive finite log-unit SD for record-table class support; it is not estimated.",
+    )
+    parser.add_argument("--query-file", type=Path, help="Unmeasured molecules in a CSV or TSV file.")
+    parser.add_argument("--query-smiles-column", help="Query SMILES column; detected automatically when omitted.")
+    parser.add_argument("--query-id-column", help="Query identifier column; otherwise generate Q00001, Q00002, ...")
     parser.add_argument(
         "--label-col",
         help="Optional activity-class label column in molecule-table input.",
@@ -104,7 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--document-column",
-        help="Source-document column for a generic activity-record CSV.",
+        help="Evidence-unit column: document, batch, date or laboratory; repeats within one unit are not independent.",
     )
     parser.add_argument(
         "--relation-column",
@@ -343,6 +367,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         args.target_id = "CHEMBL205"
     elif args.input is None:
         parser.error("an input file or --example is required.")
+    if args.assumed_sigma is not None:
+        if args.no_activity_confidence:
+            parser.error("--assumed-sigma cannot be combined with --no-activity-confidence.")
+        if args.input_format != "chembl" and not args.compound_column:
+            parser.error("--assumed-sigma requires an activity-record table; use --compound-column with record-table input.")
+    if args.input_format == "chembl" and (args.value_unit != "p" or args.unit_column):
+        parser.error("Unit conversion is for generic record or molecule tables; ChEMBL input uses its existing pChEMBL fields.")
+    if not args.query_file and (args.query_smiles_column or args.query_id_column):
+        parser.error("Query column options require --query-file.")
     data = pd.read_csv(args.input, sep=None, engine="python", encoding="utf-8-sig")
     source = {"input_file": args.input.name,
               "input_file_sha256": hashlib.sha256(args.input.read_bytes()).hexdigest(),
@@ -355,6 +388,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                          "offset_threshold": args.offset_min_difference,
                                          "offset_sign_agreement": args.offset_sign_agreement}}
     curation_files = {}
+    query_structure_policy = "canonical"
     if args.input_format == "chembl":
         curation = curate_chembl_activity_data(
             data,
@@ -373,8 +407,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         curation.report["input_file"] = str(args.input.resolve())
         curation.report["input_file_sha256"] = source["input_file_sha256"]
         source["curation_parameters"] = curation.report["parameters"]
-        document_column = curation.report["detected_columns"].get("document_id")
-        if not args.no_activity_confidence and document_column:
+        query_structure_policy = curation.report["parameters"]["structure_policy"]
+        document_column = args.document_column or curation.report["detected_columns"].get("document_id")
+        if not args.no_activity_confidence and (document_column or args.assumed_sigma is not None):
             try:
                 curation.molecules, fit = annotate_activity_confidence(
                     curation.molecules, curation.retained_records, lower=args.lower_threshold,
@@ -385,15 +420,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     offset_display=args.offset_display,
                     offset_min_shared=args.offset_min_shared,
                     offset_threshold=args.offset_min_difference,
-                    offset_sign_agreement=args.offset_sign_agreement)
+                    offset_sign_agreement=args.offset_sign_agreement,
+                    assumed_sigma=args.assumed_sigma)
                 curation.report["activity_confidence"] = fit
                 source["activity_confidence"] = fit
                 curation.report["warnings"].extend(fit.get("warnings", []))
             except ValueError as exc:
+                if args.assumed_sigma is not None or args.document_column:
+                    raise
                 curation.report["warnings"].append(f"Activity class support was not estimated: {exc}")
         elif not args.no_activity_confidence:
             curation.report["warnings"].append(
-                "Activity class support was not estimated: the input has no document identifiers.")
+                "Activity class support was not estimated: the input has no document identifiers. "
+                "Use --assumed-sigma to calculate support with an explicitly assumed log-unit SD.")
         curation_files = save_chembl_curation(
             curation,
             output_dir=args.output_dir,
@@ -416,7 +455,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.compound_column:
             if not value_col:
                 raise ValueError("--value-column is required with --compound-column.")
-            confidence = bool(args.document_column and not args.no_activity_confidence)
+            confidence = bool((args.document_column or args.assumed_sigma is not None) and not args.no_activity_confidence)
             data, records, fit, generic_report = prepare_generic_activity_records(
                 data,
                 compound_column=args.compound_column,
@@ -435,6 +474,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 offset_min_shared=args.offset_min_shared,
                 offset_threshold=args.offset_min_difference,
                 offset_sign_agreement=args.offset_sign_agreement,
+                value_unit=args.value_unit,
+                unit_column=args.unit_column,
+                assumed_sigma=args.assumed_sigma,
             )
             source["generic_activity"] = generic_report
             generic_audit = generic_report
@@ -444,6 +486,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             value_col = "activity_pchembl"
             label_col = "activity_class"
             duplicate_policy = "error"
+            if args.value_unit != "p" or args.unit_column or args.assumed_sigma is not None or args.query_file:
+                args.output_dir.mkdir(parents=True, exist_ok=True)
+                if "activity_pchembl_raw" not in records:
+                    records["activity_pchembl_raw"] = records["pchembl_value"]
+                for key, table in (("retained_records", records), ("molecule_level", data)):
+                    path = args.output_dir / f"{args.name}_{key}.csv"
+                    table.to_csv(path, index=False, encoding="utf-8", lineterminator="\n")
+                    curation_files[key] = str(path)
+                path = args.output_dir / f"{args.name}_curation_report.json"
+                path.write_text(json.dumps(generic_report, indent=2), encoding="utf-8", newline="\n")
+                curation_files["curation_report"] = str(path)
+                from .provenance import file_digests
+                source["curation_outputs"] = file_digests(curation_files)
+
+    query_data = None
+    if args.query_file:
+        query_data = pd.read_csv(args.query_file, sep=None, engine="python", encoding="utf-8-sig",
+                                 dtype={args.query_id_column: str} if args.query_id_column else None)
+        source["query_file"] = args.query_file.name
+        source["query_file_sha256"] = hashlib.sha256(args.query_file.read_bytes()).hexdigest()
 
     result = build_grid_map(
         data,
@@ -488,6 +550,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         offset_threshold=args.offset_min_difference,
         offset_sign_agreement=args.offset_sign_agreement,
         map_color_modes=args.map_color_modes,
+        value_unit=args.value_unit if args.input_format == "molecule" and not args.compound_column else "p",
+        unit_column=args.unit_column if args.input_format == "molecule" and not args.compound_column else None,
+        query_data=query_data,
+        query_smiles_col=args.query_smiles_column,
+        query_id_col=args.query_id_column,
+        query_structure_policy=query_structure_policy,
     )
     result.output_files.update(curation_files)
     archive = args.output_dir / (args.name + "_results.zip")
@@ -501,6 +569,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "Prepared {output_rows} molecules from {input_rows} input rows "
         "({invalid_smiles} invalid SMILES).".format(**report)
     )
+    if report.get("excluded_reasons"):
+        print("Activity/structure exclusions: " + json.dumps(report["excluded_reasons"], sort_keys=True))
+    if result.query_report:
+        print("Query checks: " + json.dumps({key: result.query_report[key] for key in (
+            "input_rows", "mapped", "invalid_smiles", "duplicate_query", "in_reference")}, sort_keys=True))
+        for warning in result.query_report.get("warnings", []):
+            print("Warning: {}".format(warning))
     if curation is not None:
         audit = curation.report
         print(

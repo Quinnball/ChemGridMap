@@ -276,6 +276,36 @@ COLUMNS: Dict[str, dict] = {
 }
 
 
+# Optional own-data fields are emitted only when their feature is requested.
+COLUMNS.update({
+    "n_measured": _entry(("metrics.csv",), "Measured reference molecules used for activity/class diagnostics in a query run.", "count"),
+    "n_query": _entry(("metrics.csv",), "Unmeasured molecules included in structural/layout diagnostics.", "count"),
+    "raw_activity_value": _entry(MAP_FILES + RECORD_FILES, "Original activity value before unit conversion; the input column is also retained.", "input unit"),
+    "raw_activity_unit": _entry(MAP_FILES + RECORD_FILES, "Original per-row unit, or the selected common unit, before conversion.", "M, mM, uM, µM, μM, nM, pM"),
+    "sigma_doc": _entry(MAP_FILES, "Assumed between-unit SD, only emitted for assumed_sigma.", "log units"),
+    "sigma_doc_degrees_of_freedom": _entry(MAP_FILES, "Empty for assumed_sigma because the SD was not estimated.", "empty"),
+    "measurement_status": _entry(MAP_FILES + ("structure_members.csv",), "Whether the molecule belongs to measured reference data or the unmeasured query set.", "measured or not_measured"),
+    "query_id": _entry(MAP_FILES + ("query_check.csv", "query_neighbors.csv", "structure_members.csv"), "User query identifier or generated Q00001-style identifier; empty for measured rows."),
+    "input_smiles": _entry(("query_check.csv",), "Original query SMILES before structure preparation.", "SMILES"),
+    "status": _entry(("query_check.csv",), "Query inclusion decision, one row per input row.", "mapped, invalid_smiles, duplicate_query or in_reference"),
+    "first_query_id": _entry(("query_check.csv",), "First query identifier with the same canonical structure; empty otherwise."),
+    "reference_id": _entry(("query_check.csv",), "Measured molecule with the same canonical structure; empty otherwise."),
+    "rank": _entry(("query_neighbors.csv",), "Similarity rank among measured neighbors, including every tie at the fifth neighbor.", "integer starting at 1"),
+    "measured_id": _entry(("query_neighbors.csv",), "Measured reference molecule identifier."),
+    "tanimoto": _entry(("query_neighbors.csv",), "Morgan fingerprint Tanimoto using the map radius and bit count, including for descriptor maps.", "similarity 0–1"),
+    "nearest_measured_id": _entry(MAP_FILES, "Most similar measured molecule in Morgan fingerprint space; no activity is inferred."),
+    "nearest_measured_similarity": _entry(MAP_FILES, "Morgan Tanimoto to the nearest measured molecule.", "similarity 0–1"),
+    "query_group_center_similarity": _entry(MAP_FILES + ("structure_members.csv",), "Morgan Tanimoto to the assigned reference group center; empty when unassigned.", "similarity 0–1"),
+    "contains_group_core": _entry(MAP_FILES + ("structure_members.csv",), "Whether the unmeasured molecule contains its assigned reference group's core; empty when no core/group applies.", "boolean or empty"),
+})
+for _column in ("source_row", "canonical_smiles"):
+    COLUMNS[_column]["files"] += ("query_check.csv",)
+for _column in ("activity_class", "activity_pchembl", "class_confidence", "class_status", "n_evidence_units"):
+    COLUMNS[_column]["files"] += ("query_neighbors.csv",)
+COLUMNS["name"]["files"] += MAP_FILES
+COLUMNS["activity_class"]["unit_or_values"] = "inactive, medium, active; not_measured for unmeasured map rows"
+
+
 def describe(columns, files):
     """Return one dictionary entry per emitted column, expanding class patterns."""
     rows = []
@@ -319,6 +349,30 @@ def output_columns_markdown(frames=None) -> str:
             if file_name == filename:
                 lines.append(f"| `{column}` | {description} | {unit} |")
         lines.append("")
+    lines.extend([
+        "## Optional own-data outputs and metadata", "",
+        "Filenames have the run's `<name>_` prefix. `query_check.csv` and `query_neighbors.csv`",
+        "are written only with query input. `structure_groups.json` adds `n_query_members`",
+        "per group; member counts, core selection and core coverage still refer to measured references.",
+        "Generic records with unit conversion, assumed sigma or query input also export",
+        "`retained_records.csv`, `molecule_level.csv` and `curation_report.json`.", "",
+        "Unit-conversion reports contain `excluded_reasons` counts and the selected unit/column.",
+        "Fits and manifests identify assumed SDs with `method=assumed_sigma`, `assumed_sigma`,",
+        "and `evidence_unit_source` (the supplied column or `one unit per compound`).",
+        "With no evidence-unit column, `document_offset_detection` is `not applicable`.",
+        "The existing automatic `literature_fallback` remains a separate method.", "",
+        "Query manifests add `query_molecules` counts, `query_table_sha256` and `metric_populations`.",
+        "Structure/layout metrics use all mapped molecules; activity differences and class purity",
+        "use measured molecules only. Query neighbors supply observed reference evidence, never predictions.", "",
+        "## Own-data CLI options", "",
+        "| Option | Meaning |", "|---|---|",
+        "| `--value-unit {p,M,mM,uM,nM,pM}` | Default `p` preserves existing pActivity values; concentrations become −log10 mol/L. |",
+        "| `--unit-column COL` | Per-row concentration units, also accepting µM and μM; case sensitive, whitespace trimmed. Mutually exclusive with explicit `--value-unit`. |",
+        "| `--assumed-sigma S` | Finite positive SD in log units for record-table support; incompatible with molecule-only input or disabled support. |",
+        "| `--query-file PATH` | Unmeasured molecules as CSV or TSV; requires at least two measured references. |",
+        "| `--query-smiles-column COL` | Override automatic SMILES-column detection. |",
+        "| `--query-id-column COL` | Query IDs, unique within the input; default generated IDs preserve input order. |", "",
+    ])
     return "\n".join(lines)
 
 

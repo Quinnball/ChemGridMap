@@ -41,10 +41,24 @@ FADED_COLORS = {"active": "#b8e0db", "medium": "#f6dfb8",
                 "inactive": "#ebc0c1", "unlabelled": "#dfe4e9"}
 RELIABILITY_BINS = ((0, "#cde1f5"), (.2, "#a0bdda"), (.4, "#7599bf"),
                     (.6, "#4a77a4"), (.8, "#1d5689"))
+NOT_MEASURED_COLOR = "#FFFFFF"
+NOT_MEASURED_EDGE_COLOR = "#8A99A6"
+
+
+def _not_measured(row):
+    return (str(row.get("measurement_status")) == "not_measured"
+            or str(row.get("activity_class")) == "not_measured")
+
+
+def _not_measured_mask(data):
+    return (data.get("measurement_status", pd.Series("", index=data.index)).eq("not_measured")
+            | data.get("activity_class", pd.Series("", index=data.index)).eq("not_measured"))
 
 
 def _tile_color(row, colors, label_col, color_by):
     label = str(row[label_col]).lower()
+    if color_by in {"activity", "class_support"} and _not_measured(row):
+        return NOT_MEASURED_COLOR
     if color_by == "class_support" and row.get("class_status") == "uncertain":
         return FADED_COLORS.get(label, colors[label])
     if color_by == "neighbor_recall":
@@ -80,6 +94,8 @@ def _color_legend(data, color_by):
         if data.get("offset_pair_touched", pd.Series(dtype=bool)).fillna(False).astype(bool).any():
             suffix = "" if offset_display == "uncertain" else " (display unchanged)"
             entries.append(("#172536", "◣ offset document pair" + suffix))
+        if _not_measured_mask(data).any():
+            entries.append((NOT_MEASURED_COLOR, "Not measured"))
         offset_text = ", or an offset document pair" if offset_display == "uncertain" else ""
         return (
             f"Pale: uncertain (class support below {threshold_text}{offset_text}).",
@@ -89,11 +105,16 @@ def _color_legend(data, color_by):
         if "structure_group_color" not in data:
             return "Structure groups", [(DEFAULT_COLORS["unlabelled"], "No grouping")]
         entries = []
-        for color, rows in data.groupby("structure_group_color", sort=False):
+        has_queries = _not_measured_mask(data).any()
+        for color, rows in data.groupby("structure_group_color", sort=False, dropna=not has_queries):
+            if has_queries and (pd.isna(color) or not color):
+                entries.append((DEFAULT_COLORS["unlabelled"], "No group"))
+                continue
             groups = rows.structure_group.astype(str).drop_duplicates().tolist()
             entries.append((color, ", ".join(groups[:3]) + (", …" if len(groups) > 3 else "")))
         return "Structure groups (colors may repeat; IDs identify groups)", entries
-    return "", []
+    return "", ([(NOT_MEASURED_COLOR, "Not measured")]
+                if _not_measured_mask(data).any() else [])
 
 EXTRA_COLORS = [
     "#2B6CB0",
@@ -205,6 +226,7 @@ def render_svg(
         y = (max_row - min_row - grid_row) * tile_size
         label = str(row[label_col]).lower()
         color = _tile_color(row, colors, label_col, color_by)
+        unmeasured_tile = color_by in {"activity", "class_support"} and _not_measured(row)
         identity = row.get("molecule_identity_key", row.get("name", row[smiles_col]))
         fields = ["molecule_id", "activity_pchembl", "n_records", "pchembl_min",
                   "pchembl_max", "is_conflicted", "has_class_boundary_crossing", "source_rows"]
@@ -216,12 +238,14 @@ def render_svg(
         parts.append("<title>{}</title>".format(html.escape(str(title))))
         parts.append(
             '<rect x="{x}" y="{y}" width="{size}" height="{size}" '
-            'fill="{color}" fill-opacity="1" stroke="#FFFFFF" '
-            'stroke-opacity="0.95" stroke-width="1" shape-rendering="crispEdges"/>'.format(
-                x=x,
-                y=y,
-                size=tile_size,
+            'fill="{color}" fill-opacity="1" stroke="{edge}" '
+            'stroke-opacity="{edge_opacity}" stroke-width="1" shape-rendering="crispEdges"/>'.format(
+                x=x + .5 if unmeasured_tile else x,
+                y=y + .5 if unmeasured_tile else y,
+                size=tile_size - 1 if unmeasured_tile else tile_size,
                 color=color,
+                edge=NOT_MEASURED_EDGE_COLOR if unmeasured_tile else "#FFFFFF",
+                edge_opacity="1" if unmeasured_tile else "0.95",
             )
         )
         if draw_molecules:
@@ -241,14 +265,14 @@ def render_svg(
                 f'<rect width="{inner}" height="{inner}" fill="#FFFFFF"/>'
                 f'{molecule_group}</g>'
             )
-        if pd.notna(row.get("is_conflicted")) and row.get("is_conflicted") == 1:
+        if not unmeasured_tile and pd.notna(row.get("is_conflicted")) and row.get("is_conflicted") == 1:
             if color_by in {"activity", "class_support"}:
                 corner = tile_size * CORNER_MARKER_FRACTION
                 parts.append(
                     f'<path data-conflict-marker="true" d="M{x+tile_size-corner},{y} '
                     f'L{x+tile_size},{y} L{x+tile_size},{y+corner} Z" fill="#172536"/>'
                 )
-        if color_by == "class_support" and bool(row.get("offset_pair_touched", False)):
+        if color_by == "class_support" and not unmeasured_tile and bool(row.get("offset_pair_touched", False)):
             corner = tile_size * CORNER_MARKER_FRACTION
             parts.append(
                 f'<path data-offset-pair-marker="true" d="M{x},{y+tile_size-corner} '
@@ -260,7 +284,8 @@ def render_svg(
         parts.append(f'<text x="12" y="{map_height + 24}">{html.escape(legend_title)}</text>')
         for index, (color, text) in enumerate(legend_entries):
             x, y = 12 + (index % 3) * 200, map_height + 40 + (index // 3) * 25
-            parts.append(f'<rect x="{x}" y="{y}" width="14" height="14" fill="{color}"/>')
+            edge = f' stroke="{NOT_MEASURED_EDGE_COLOR}" stroke-width="1"' if text == "Not measured" else ""
+            parts.append(f'<rect x="{x}" y="{y}" width="14" height="14" fill="{color}"{edge}/>')
             parts.append(f'<text x="{x + 20}" y="{y + 12}">{html.escape(text)}</text>')
         parts.append("</g>")
     parts.append("</svg>")
@@ -317,15 +342,16 @@ def render_raster_and_pdf(
             x = int(row["grid_col"]) - min_col
             y = int(row["grid_row"]) - min_row
             label = str(row[label_col]).lower()
+            unmeasured_tile = color_by in {"activity", "class_support"} and _not_measured(row)
             axis.add_patch(
                 Rectangle(
                     (x - 0.5, y - 0.5),
                     1,
                     1,
                     facecolor=_tile_color(row, colors, label_col, color_by),
-                    edgecolor="white",
-                    linewidth=0.4,
-                    zorder=1,
+                    edgecolor=NOT_MEASURED_EDGE_COLOR if unmeasured_tile else "white",
+                    linewidth=0.5 if unmeasured_tile else 0.4,
+                    zorder=1.5 if unmeasured_tile else 1,
                 )
             )
             frame = STRUCTURE_FRAME_FRACTION
@@ -351,6 +377,7 @@ def render_raster_and_pdf(
                 pd.notna(row.get("is_conflicted"))
                 and row.get("is_conflicted") == 1
                 and color_by in {"activity", "class_support"}
+                and not unmeasured_tile
             ):
                 corner = CORNER_MARKER_FRACTION
                 axis.add_patch(Polygon(
@@ -358,7 +385,7 @@ def render_raster_and_pdf(
                      (x + .5, y + .5 - corner)),
                     closed=True, facecolor="#172536", edgecolor="none", zorder=5,
                 ))
-            if color_by == "class_support" and bool(row.get("offset_pair_touched", False)):
+            if color_by == "class_support" and not unmeasured_tile and bool(row.get("offset_pair_touched", False)):
                 corner = CORNER_MARKER_FRACTION
                 axis.add_patch(Polygon(
                     ((x - .5, y - .5 + corner), (x - .5, y - .5),
@@ -379,9 +406,18 @@ def render_raster_and_pdf(
             origin="lower",
             interpolation="nearest",
         )
+        if color_by in {"activity", "class_support"}:
+            for _, row in data[_not_measured_mask(data)].iterrows():
+                x = int(row["grid_col"]) - min_col
+                y = int(row["grid_row"]) - min_row
+                axis.add_patch(Rectangle(
+                    (x - .5, y - .5), 1, 1, facecolor="none",
+                    edgecolor=NOT_MEASURED_EDGE_COLOR, linewidth=.5, zorder=2,
+                ))
         touched_rows = data[
             data.get("offset_pair_touched", pd.Series(False, index=data.index))
             .fillna(False).astype(bool)
+            & ~_not_measured_mask(data)
         ] if color_by == "class_support" else data.iloc[0:0]
         for _, row in touched_rows.iterrows():
             x = int(row["grid_col"]) - min_col
@@ -396,6 +432,7 @@ def render_raster_and_pdf(
             flagged_rows = data[
                 data.get("is_conflicted", pd.Series(False, index=data.index))
                 .fillna(False).astype(bool)
+                & ~_not_measured_mask(data)
             ]
             for _, row in flagged_rows.iterrows():
                 x = int(row["grid_col"]) - min_col
@@ -413,6 +450,10 @@ def render_raster_and_pdf(
     axis.axis("off")
     if legend_entries:
         handles = [Rectangle((0, 0), 1, 1, facecolor=color, label=text) for color, text in legend_entries]
+        for handle, (_, text) in zip(handles, legend_entries):
+            if text == "Not measured":
+                handle.set_edgecolor(NOT_MEASURED_EDGE_COLOR)
+                handle.set_linewidth(.5)
         figure.legend(handles=handles, loc="lower center", ncol=legend_columns, frameon=False,
                       title=legend_title, fontsize=8, title_fontsize=9)
     Path(png_path).parent.mkdir(parents=True, exist_ok=True)

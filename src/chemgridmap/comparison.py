@@ -340,7 +340,8 @@ def save_group_outputs(data, summaries, protocol, output_dir, name="map"):
     ]
     grid_columns = ["grid_x", "grid_y", "grid_row", "grid_col"]
     grouping_columns = [
-        "structure_group", "structure_group_color", "scaffold_smiles"
+        "structure_group", "structure_group_color", "scaffold_smiles",
+        "query_id", "measurement_status", "query_group_center_similarity", "contains_group_core",
     ]
     member_columns = [
         column
@@ -366,7 +367,7 @@ def save_group_outputs(data, summaries, protocol, output_dir, name="map"):
             summary_frame, left_on="structure_group", right_on="structure_group", how="left"
         )
         members["core_member"] = [
-            comparison_id in set(member_ids)
+            comparison_id in set(member_ids if isinstance(member_ids, list) else [])
             for comparison_id, member_ids in zip(
                 members["comparison_id"], members["core_member_ids"]
             )
