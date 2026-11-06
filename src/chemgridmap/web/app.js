@@ -6,7 +6,7 @@ history.replaceState(null, '', location.pathname);
 let busy = false, job = null, points = [], gridSVG = '', view = 'grid', currentCell = null, requestNumber = 0;
 let transform = {s: 1, x: 0, y: 0}, drawingSize = {w: 1, h: 1};
 let tileWidth = 100, hasStructures = false;
-let inputInfo = null, page = 'import', umapAvailable = false, demoAvailable = false;
+let inputInfo = null, queryInputInfo = null, page = 'import', umapAvailable = false, demoAvailable = false;
 let structureGroups = [], neighborRelations = new Map();
 let highlightedGroup = '', groupRequestNumber = 0, mapCells = [];
 const colors = {active: '#2a9d8f', medium: '#e6a23c', inactive: '#c44e52', unlabelled: '#b8c2cc'};
@@ -80,7 +80,7 @@ function setBusy(value) {
   document.querySelectorAll('#options input,#options select,#options button,#csv,#demo').forEach(el => el.disabled = value);
   $('quit').disabled = value;
   $('build').textContent = value ? 'Building map...' : 'Generate map →';
-  updateNavigation();
+  updateNavigation(); updateEvidenceOptions();
 }
 function table(rows, container, columnLimit = 999) {
   container.replaceChildren();
@@ -107,6 +107,7 @@ function resetResult() {
   structureGroups = []; neighborRelations.clear(); $('group-controls').hidden = true;
   highlightedGroup = ''; groupRequestNumber++; mapCells = [];
   $('group-select').value = ''; $('group-core-card').hidden = true; $('group-core-svg').replaceChildren();
+  $('measurement-filter').value = 'all'; $('measurement-filter-control').hidden = true;
   if ($('comparison-dialog').open) $('comparison-dialog').close();
   ['summary','audit','metrics','selection','record-section','download-all'].forEach(id => $(id).hidden = true);
   $('selection-hint').hidden = false; $('downloads').replaceChildren(); $('map-stage').replaceChildren();
@@ -123,7 +124,7 @@ async function loadInput(demo = false, droppedFile = null) {
     const input = await getJSON(demo ? '/api/demo' : '/api/input', {
       method: 'POST', body: demo ? '' : file, headers: demo ? {} : {'X-Filename': encodeURIComponent(file.name)}
     });
-    resetResult(); showInput(input, demo);
+    resetResult(); showQueryInput(null); showInput(input, demo);
     status(input.targets.length > 1 ? 'Multiple targets detected. Select a target before building; they will not be pooled.' : '');
     setBusy(false);
     showPage('configure');
@@ -144,7 +145,9 @@ function showInput(input, demo = false) {
     selectColumns('document-column', input.columns, input.detected.document_id || '', true);
     selectColumns('relation-column', input.columns, input.detected.standard_relation || '', true);
     selectColumns('label-col', input.columns, 'activity_class', true);
-    $('input-format').value = demo || (input.detected.pchembl && (input.detected.standard_type || input.detected.target_id)) ? 'chembl' : 'molecule';
+    selectColumns('unit-column', input.columns, '', true);
+    $('value-unit').value = 'p'; $('use-assumed-sigma').checked = false; $('assumed-sigma').value = .64;
+    $('input-format').value = demo || (input.detected.pchembl && (input.detected.standard_type || input.detected.target_id)) ? 'chembl' : input.detected.molecule_id ? 'generic' : 'molecule';
     updateInputType();
     table(input.preview, $('preview-table'), 12); $('preview').hidden = false;
     updateNavigation();
@@ -152,7 +155,48 @@ function showInput(input, demo = false) {
 function updateInputType() {
   const chembl = $('input-format').value === 'chembl';
   $('chembl-options').hidden = !chembl; $('molecule-options').hidden = chembl;
-  $('find-molecule').hidden = !chembl;
+  $('lower-label').textContent = `Lower ${chembl ? 'pChEMBL' : 'pActivity'}`;
+  $('upper-label').textContent = `Upper ${chembl ? 'pChEMBL' : 'pActivity'}`;
+  updateEvidenceOptions();
+}
+function updateEvidenceOptions() {
+  const moleculeTable = $('input-format').value === 'molecule';
+  $('compound-column').disabled = busy || moleculeTable;
+  $('compound-column').required = $('input-format').value === 'generic';
+  $('value-unit').disabled = busy || !!$('unit-column').value;
+  if (moleculeTable) $('use-assumed-sigma').checked = false;
+  $('use-assumed-sigma').disabled = busy || moleculeTable;
+  $('assumed-sigma').disabled = busy || moleculeTable || !$('use-assumed-sigma').checked;
+  $('assumed-sigma').setCustomValidity(Number($('assumed-sigma').value) > 0 ? '' : 'Assumed σ must be greater than zero.');
+  $('assumed-sigma-unavailable').hidden = !moleculeTable;
+}
+function showQueryInput(input) {
+  queryInputInfo = input;
+  $('query-input-info').hidden = !input;
+  if (!input) { $('query-csv').value = ''; return; }
+  $('query-input-name').textContent = input.filename;
+  $('query-input-rows').textContent = `${input.rows.toLocaleString()} rows`;
+  selectColumns('query-smiles-col', input.columns, input.detected.smiles || 'smiles');
+  selectColumns('query-id-col', input.columns, input.columns.includes('query_id') ? 'query_id' : '', true);
+}
+async function loadQueryInput() {
+  if (busy || !$('query-csv').files[0]) return;
+  try {
+    const file = $('query-csv').files[0]; setBusy(true);
+    const input = await getJSON('/api/query-input', {method:'POST', body:file, headers:{'X-Filename':encodeURIComponent(file.name)}});
+    resetResult(); showQueryInput(input); showPage('configure');
+    status('Unmeasured molecules loaded. Generate the map to apply this input.');
+  } catch (error) { fail(error); }
+  finally { setBusy(false); }
+}
+async function removeQueryInput() {
+  if (busy) return;
+  try {
+    setBusy(true); await getJSON('/api/query-input/clear', {method:'POST'});
+    resetResult(); showQueryInput(null); showPage('configure');
+    status('Unmeasured molecules removed. Generate the map to update the result.');
+  } catch (error) { fail(error); }
+  finally { setBusy(false); }
 }
 function updateGrouping() {
   const grouping = $('grouping').value;
@@ -162,10 +206,10 @@ function updateGrouping() {
   document.querySelectorAll('[data-fmcs-setting]').forEach(el => el.hidden = grouping === 'none' || $('core-rule').value !== 'fmcs');
 }
 function options() {
-  return {input_format: $('input-format').value, target_id: $('target').value.trim() || null,
+  const config = {input_format: $('input-format').value === 'generic' ? 'molecule' : $('input-format').value, target_id: $('target').value.trim() || null,
     activity_type: $('activity-type').value, smiles_col: $('smiles-col').value,
     value_col: $('value-col').value || null, label_col: $('label-col').value || null,
-    compound_column: $('compound-column').value || null, document_column: $('document-column').value || null,
+    compound_column: $('input-format').value === 'molecule' ? null : $('compound-column').value || null, document_column: $('document-column').value || null,
     relation_column: $('relation-column').value || null,
     representation: $('representation').value, projection: $('projection').value,
     lower_threshold: Number($('lower').value), upper_threshold: Number($('upper').value),
@@ -184,6 +228,16 @@ function options() {
     offset_sign_agreement: Number($('offset-sign-agreement').value),
     identity_conflicts: $('identity-conflicts').value,
     output_formats: $('raster').checked ? ['svg','png','pdf'] : ['svg']};
+  if (config.input_format !== 'chembl') {
+    if ($('unit-column').value) config.unit_column = $('unit-column').value;
+    else if ($('value-unit').value !== 'p') config.value_unit = $('value-unit').value;
+  }
+  if (!$('use-assumed-sigma').disabled && $('use-assumed-sigma').checked) config.assumed_sigma = Number($('assumed-sigma').value);
+  if (queryInputInfo) {
+    config.query_smiles_col = $('query-smiles-col').value;
+    if ($('query-id-col').value) config.query_id_col = $('query-id-col').value;
+  }
+  return config;
 }
 async function build(event) {
   event.preventDefault();
@@ -219,8 +273,23 @@ async function showResult() {
   $('summary').hidden = false; $('audit').hidden = false; $('preview').open = false;
   $('audit-body').replaceChildren();
   const note = document.createElement('p');
-  note.textContent = job.options.input_format === 'chembl' ? 'All retained records are summarized by median pChEMBL. A wide record range is retained, not converted to Medium or silently removed. Aggregation does not harmonize assay conditions. An entry without a wide record range is not proof of experimental agreement.' : 'This map uses the supplied molecule-level annotations. It does not create an assay-record provenance trail.';
+  note.textContent = job.options.input_format === 'chembl' ? 'All retained records are summarized by median pChEMBL. A wide record range is retained, not converted to Medium or silently removed. Aggregation does not harmonize assay conditions. An entry without a wide record range is not proof of experimental agreement.' : job.options.compound_column ? 'Retained activity records are converted to pActivity and summarized by compound. Evidence units describe the supplied document, batch or run identifiers.' : 'This map uses the supplied molecule-level annotations. It does not create an assay-record provenance trail.';
   $('audit-body').append(note);
+  if (job.options.assumed_sigma != null) {
+    const sigma = document.createElement('p'); sigma.dataset.assumedSigma = 'true';
+    const source = report.activity_confidence?.evidence_unit_source || job.options.document_column || 'one per compound';
+    sigma.textContent = `σ (assumed) ${format(job.options.assumed_sigma)} log units. Evidence units: ${source === 'one unit per compound' ? 'one per compound' : source}.`;
+    $('audit-body').append(sigma);
+  }
+  if (report.query_molecules) {
+    const section = document.createElement('section'), heading = document.createElement('h3');
+    heading.textContent = 'Unmeasured molecules'; section.append(heading);
+    for (const [key, label] of [['mapped','mapped'],['invalid_smiles','invalid SMILES'],['duplicate_query','duplicates'],['in_reference','already measured']]) {
+      const count = document.createElement('p'); count.dataset.queryStatus = key;
+      count.dataset.queryCount = report.query_molecules[key]; count.textContent = `${label}: ${report.query_molecules[key]}`; section.append(count);
+    }
+    $('audit-body').append(section);
+  }
   const exclusions = report.exclusion_counts || {};
   if (Object.keys(exclusions).length) {
     const reasons = document.createElement('p'); reasons.textContent = 'Exclusion reasons (may overlap): ' + Object.entries(exclusions).map(([k,v]) => `${k}: ${v}`).join('; '); $('audit-body').append(reasons);
@@ -233,6 +302,7 @@ async function showResult() {
   const svgFile = job.files.find(name => name === 'map.svg');
   gridSVG = await (await api('/api/file?name=' + encodeURIComponent(svgFile))).text();
   points = await getJSON('/api/points');
+  $('measurement-filter-control').hidden = !points.some(point => point.measurement_status === 'not_measured');
   const grouping = await getJSON('/api/groups'); structureGroups = grouping.groups;
   $('group-controls').hidden = false;
   document.querySelectorAll('[data-group-only]').forEach(el => el.hidden = !structureGroups.length);
@@ -297,6 +367,8 @@ function setView(name) {
   if (name === 'grid') $('map-stage').innerHTML = gridSVG;
   else $('map-stage').replaceChildren(projectionSVG());
   const svg = $('map-stage').querySelector('svg'), box = svg.viewBox.baseVal;
+  // The browser legend follows the selected layer; exports keep their own legend.
+  if (points.some(point => point.measurement_status === 'not_measured')) svg.querySelector('[data-color-legend]')?.remove();
   tileWidth = Number(svg.querySelector('g[data-grid-row] > rect')?.getAttribute('width') || 100);
   hasStructures = !!svg.querySelector('g[data-grid-row] > g');
   mapCells = Array.from(svg.querySelectorAll('[data-grid-row]'));
@@ -312,11 +384,25 @@ function colorMap() {
     const mark = el.tagName === 'circle' ? el : el.querySelector(':scope > rect');
     if (!mark) return;
     if (!mark.dataset.activityFill) mark.dataset.activityFill = mark.getAttribute('fill');
+    if (!('activityStroke' in mark.dataset)) {
+      mark.dataset.activityStroke = mark.getAttribute('stroke') || '';
+      mark.dataset.activityStrokeWidth = mark.getAttribute('stroke-width') || '';
+    }
+    const unmeasured = point.measurement_status === 'not_measured';
+    if (point.measurement_status) el.dataset.measurementStatus = point.measurement_status;
     let fill = mark.dataset.activityFill;
     if (mode === 'structure') fill = point.structure_group_color || '#B8C2CC';
     else if (mode === 'reliability') fill = reliabilityColor(point.neighbor_recall);
+    else if (unmeasured) fill = '#FFFFFF';
     else if (mode === 'support' && point.class_status === 'uncertain') fill = fadedColors[point.activity_class] || fill;
     mark.setAttribute('fill', fill);
+    if (unmeasured && ['activity','support'].includes(mode)) {
+      mark.setAttribute('stroke', '#8A99A6'); mark.setAttribute('stroke-width', '1');
+    } else {
+      for (const [attribute, value] of [['stroke',mark.dataset.activityStroke],['stroke-width',mark.dataset.activityStrokeWidth]]) {
+        if (value) mark.setAttribute(attribute, value); else mark.removeAttribute(attribute);
+      }
+    }
     let offsetMarker = el.querySelector(':scope > [data-offset-pair-marker]');
     if (mode === 'support' && point.offset_pair_touched) {
       if (!offsetMarker) {
@@ -352,10 +438,21 @@ function legendItem(color, text) {
 }
 function renderLegend(mode) {
   renderColorLegend(mode);
+  const hasQueries = points.some(point => point.measurement_status === 'not_measured');
+  if (hasQueries && ['activity','support'].includes(mode)) {
+    const item = legendItem('#FFFFFF', 'Not measured'); item.firstElementChild.style.border = '1px solid #8A99A6';
+    $('legend').append(item);
+  }
   const group = structureGroups.find(g => g.structure_group === highlightedGroup);
   if (group) {
     const note = document.createElement('span'); note.className = 'group-legend';
-    note.textContent = `Outlined: ${group.structure_group}, ${group.size} molecules. Others faded.`;
+    const queryMembers = points.filter(point => point.measurement_status === 'not_measured' && point.structure_group === group.structure_group).length;
+    note.textContent = `Outlined: ${group.structure_group}, ${group.size} ${hasQueries ? 'measured molecules' : 'molecules'}${queryMembers ? ` and ${queryMembers} not measured` : ''}. Others faded.`;
+    $('legend').append(note); $('legend').hidden = false;
+  }
+  if (hasQueries) {
+    const note = document.createElement('span'); note.className = 'measurement-legend';
+    note.textContent = `Show: ${$('measurement-filter').selectedOptions[0].textContent}${$('measurement-filter').value === 'all' ? '.' : '. Other molecules faded.'}`;
     $('legend').append(note); $('legend').hidden = false;
   }
 }
@@ -363,8 +460,8 @@ function renderColorLegend(mode) {
   $('legend').replaceChildren(); $('legend').hidden = mode === 'structure';
   if (!job || mode === 'structure') return;
   const lower = job.options.lower_threshold, upper = job.options.upper_threshold;
-  if (job.options.input_format === 'molecule' && mode !== 'reliability') {
-    $('legend').textContent = 'Colors follow supplied class labels, or the selected pChEMBL thresholds; gray = unlabelled.';
+  if (job.options.input_format === 'molecule' && !job.options.compound_column && mode !== 'reliability') {
+    $('legend').textContent = 'Colors follow supplied class labels, or the selected pActivity thresholds; gray = unlabelled.';
     return;
   }
   if (mode === 'reliability') {
@@ -414,18 +511,27 @@ function zoom(factor,x=$('map-viewport').clientWidth/2,y=$('map-viewport').clien
 function highlight() {
   $('map-stage').querySelector('[data-map-outlines]')?.remove();
   const groups = new Map(points.map(p => [`${p.grid_row},${p.grid_col}`, p.structure_group]));
+  const measurements = new Map(points.map(p => [`${p.grid_row},${p.grid_col}`, p.measurement_status || 'measured']));
+  const measurementFilter = $('measurement-filter').value;
   const layers = [[], [], [], []];
   const outlines = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   outlines.dataset.mapOutlines = 'true'; outlines.setAttribute('pointer-events', 'none');
   mapCells.forEach(el => {
     const member = !!highlightedGroup && groups.get(`${el.dataset.gridRow},${el.dataset.gridCol}`) === highlightedGroup;
+    const unmeasured = measurements.get(`${el.dataset.gridRow},${el.dataset.gridCol}`) === 'not_measured';
+    const measurementFaded = measurementFilter !== 'all' && measurements.get(`${el.dataset.gridRow},${el.dataset.gridCol}`) !== measurementFilter;
     el.classList.toggle('group-highlight', member);
-    el.classList.toggle('group-faded', !!highlightedGroup && !member);
+    el.classList.toggle('measurement-faded', measurementFaded);
+    el.classList.toggle('group-faded', !!highlightedGroup && !member || measurementFaded);
     const selected = currentCell && Number(el.dataset.gridRow) === currentCell.row && Number(el.dataset.gridCol) === currentCell.col;
     el.classList.toggle('selected-cell',!!selected);
     const relation = $('show-neighbor-links').checked ? neighborRelations.get(`${el.dataset.gridRow},${el.dataset.gridCol}`) : null;
     for (const category of ['shared','grid_only','representation_only']) el.classList.toggle('neighbor-' + category, relation === category);
-    if (el.tagName === 'circle') { el.setAttribute('stroke',selected ? '#183e92' : 'none'); el.setAttribute('stroke-width','3'); }
+    if (el.tagName === 'circle') {
+      const queryOutline = unmeasured && ['activity','support'].includes($('color-mode').value);
+      el.setAttribute('stroke', selected ? '#183e92' : queryOutline ? '#8A99A6' : 'none');
+      el.setAttribute('stroke-width',selected ? '3' : queryOutline ? '1' : '3');
+    }
     if (!el.classList.length) el.removeAttribute('class');
     layers[selected ? 3 : relation ? 2 : member ? 1 : 0].push(el);
   });
@@ -482,6 +588,32 @@ function percentage(value) {
   if (value < 0.005) return '< 1%';
   return `${Math.round(100 * value)}%`;
 }
+function showQuerySelection(detail) {
+  const row = detail.molecule;
+  const stats = document.createElement('dl');
+  const fields = [
+    ['Most similar measured molecule', `${row.nearest_measured_id} · Tanimoto ${format(row.nearest_measured_similarity)}`],
+    ['Structure group', row.structure_group || `No reference group within similarity ${format(detail.group_similarity ?? job.options.group_similarity)}`],
+    ['Contains the group core', row.contains_group_core ? 'Yes' : 'No']
+  ];
+  for (const [label, value] of fields) {
+    const dt = document.createElement('dt'), dd = document.createElement('dd');
+    dt.textContent = label; dd.textContent = value; stats.append(dt, dd);
+  }
+  $('query-summary').replaceChildren(stats);
+  const rows = detail.query_neighbors.map(neighbor => ({
+    Rank:neighbor.rank, ID:neighbor.measured_id, Tanimoto:format(neighbor.tanimoto),
+    'Display class':neighbor.activity_class, pActivity:format(neighbor.activity_pchembl),
+    'Class support':percentage(neighbor.class_confidence), 'Class status':neighbor.class_status,
+    'Evidence units':neighbor.n_evidence_units
+  }));
+  table(rows, $('query-neighbor-table'));
+  $('query-neighbor-table').querySelectorAll('tbody tr').forEach((tr, i) => {
+    tr.tabIndex = 0; tr.setAttribute('role','button');
+    const locate = () => inspect('id=' + encodeURIComponent(detail.query_neighbors[i].measured_id));
+    tr.onclick = locate; tr.onkeydown = event => { if (event.key === 'Enter') locate(); };
+  });
+}
 async function inspect(query) {
   const request = ++requestNumber;
   try {
@@ -490,9 +622,10 @@ async function inspect(query) {
     if (request !== requestNumber) return;
     status('');
     const row = detail.molecule, summary = detail.summary;
+    const unmeasured = row.measurement_status === 'not_measured';
     currentCell = {row:row.grid_row,col:row.grid_col};
-    neighborRelations = new Map(detail.neighbors.map(p => [`${p.grid_row},${p.grid_col}`, p.neighbor_relation])); highlight();
-    $('neighbor-key').hidden = false;
+    neighborRelations = new Map((detail.neighbors || []).map(p => [`${p.grid_row},${p.grid_col}`, p.neighbor_relation])); highlight();
+    $('neighbor-key').hidden = unmeasured;
     const group = structureGroups.find(g => g.structure_group === row.structure_group);
     $('selected-group').hidden = !group;
     if (group) {
@@ -504,18 +637,36 @@ async function inspect(query) {
     $('inspector').hidden = false; $('map-layout').classList.add('has-selection');
     if (wasClosed) requestAnimationFrame(fit);
     $('selection').hidden = false; $('selection-hint').hidden = true;
-    $('molecule-svg').innerHTML = detail.svg; $('neighborhood-svg').innerHTML = detail.neighborhood_svg;
-    $('selected-id').textContent = row.molecule_id || row.molecule_identity_key || row.canonical_smiles;
+    $('molecule-svg').innerHTML = detail.svg;
+    $('selected-id').textContent = row.query_id || row.molecule_id || row.molecule_identity_key || row.canonical_smiles;
     $('cell-location').textContent = `Grid row ${row.grid_row} · column ${row.grid_col} (zero-based)`;
+    $('measurement-badge').hidden = !unmeasured; $('query-selection').hidden = !unmeasured;
+    $('measured-selection').hidden = unmeasured;
+    if (unmeasured) {
+      $('evidence-summary').replaceChildren(); $('record-table').replaceChildren(); $('record-section').hidden = true;
+      $('view-records').hidden = $('download-evidence').hidden = $('download-audit').hidden = true;
+      showQuerySelection(detail); return;
+    }
+    $('neighborhood-svg').innerHTML = detail.neighborhood_svg;
     $('evidence-summary').replaceChildren();
     const stats = document.createElement('dl');
     const neighbors = summary.neighborhood;
     const fingerprintNeighbors = job.options.representation === 'morgan';
-    const fields = [['Median pChEMBL',summary.median_pchembl],['pChEMBL range',summary.minimum_pchembl == null ? null : `${format(summary.minimum_pchembl)}–${format(summary.maximum_pchembl)}`],['Source records',summary.n_records],['Distinct assays',summary.n_assays],['Distinct documents',summary.n_documents]];
-    if (!summary.median_verified) fields.splice(0,fields.length,['Activity class',row.activity_class],['Source-record audit','Not available']);
+    const activityTerm = job.options.input_format === 'chembl' ? 'pChEMBL' : 'pActivity';
+    const assumedSigma = summary.method === 'assumed_sigma' || summary.assumed_sigma != null;
+    const fields = [[`Median ${activityTerm}`,summary.median_pchembl],[`${activityTerm} range`,summary.minimum_pchembl == null ? null : `${format(summary.minimum_pchembl)}–${format(summary.maximum_pchembl)}`],['Source records',summary.n_records],['Distinct assays',summary.n_assays],['Distinct documents',summary.n_documents]];
+    if (!summary.median_verified) {
+      fields.splice(0,fields.length,['Activity class',row.activity_class],['Source-record audit','Not available']);
+      if (job.options.input_format !== 'chembl') {
+        const activity = row.activity_pchembl ?? row[job.options.value_col];
+        if (job.options.compound_column) {
+          fields.unshift(['Median pActivity', activity], ['pActivity range', row.pchembl_min == null ? null : `${format(row.pchembl_min)}–${format(row.pchembl_max)}`], ['Source records', row.n_records]);
+        } else if (activity != null) fields.unshift(['Activity (pActivity)', activity]);
+      }
+    }
     if (row.class_confidence != null) {
-      fields.push(['Evidence units', `${row.n_evidence_units} (${row.n_documents} documents)`],
-      ['Document-balanced pChEMBL', row.document_balanced_pchembl],
+      fields.push(['Evidence units', assumedSigma ? (summary.evidence_unit_source === 'one unit per compound' ? 'one per compound' : summary.evidence_unit_source) : `${row.n_evidence_units} (${row.n_documents} documents)`],
+      [`Document-balanced ${activityTerm}`, row.document_balanced_pchembl],
       ['Class support', `${percentage(row.class_confidence)} ${row.activity_class} · ${row.class_status}`]);
       if (summary.status_reason != null) {
         const threshold = summary.confidence_threshold == null ? (job.options.support_level ?? 0.8) : summary.confidence_threshold;
@@ -525,7 +676,8 @@ async function inspect(query) {
         fields.push(['Support status', supportText]);
       }
     }
-    if (summary.sigma_doc != null) fields.push(
+    if (assumedSigma) fields.push(['σ (assumed)', format(summary.assumed_sigma ?? summary.sigma_doc)]);
+    else if (summary.sigma_doc != null) fields.push(
       ['σ_doc', format(summary.sigma_doc)],
       ['σ_doc degrees of freedom', summary.sigma_doc_degrees_of_freedom == null ? 'not estimated (fallback)' : summary.sigma_doc_degrees_of_freedom],
       ['Entries with multiple units', summary.multi_unit_entry_count]);
@@ -552,6 +704,7 @@ async function inspect(query) {
     $('neighbor-title').textContent = `${fingerprintNeighbors ? 'Fingerprint' : 'Representation'} vs grid neighbors`;
     $('neighbor-summary').textContent = `${neighbors.representation} (${neighbors.representation_metric}), k=${neighbors.effective_k}: ${neighbors.shared_count} shared neighbors out of ${neighbors.representation_count} ${fingerprintNeighbors ? 'fingerprint' : 'representation'} neighbors and ${neighbors.grid_count} grid neighbors. Recall ${(100 * neighbors.recall).toFixed(1)}%.`;
     table(detail.neighbors, $('neighbor-table'));
+    $('download-audit').hidden = !detail.audit_file;
     $('download-audit').onclick = () => download('/api/file?name=' + encodeURIComponent(detail.audit_file), detail.audit_file);
     $('download-evidence').hidden = !detail.total_records;
     $('view-records').hidden = !detail.total_records;
@@ -578,7 +731,8 @@ async function compareGroup(groupId) {
     $('core-coverage').textContent = `${group.core_status}. This core matches ${group.core_coverage_count}/${group.size} members; ${group.core_exact_scaffold_count} have exactly this scaffold. ${group.distinct_scaffolds} distinct ring scaffolds; ${group.acyclic_members} acyclic members. ${rule}`;
     $('comparison-rule').textContent = `${result.selected_count}/${group.size} members shown. ${result.selection_rule} A scaffold summary is not a complete explanation of fingerprint similarity.`;
     $('comparison-svg').innerHTML = result.svg;
-    const rows = result.members.map(m => ({ID:m.comparison_id, pChEMBL:m.activity_pchembl, Class:m.activity_class, Core:group.core_member_ids.includes(m.comparison_id), Scaffold:m.scaffold_smiles, Row:m.grid_row, Column:m.grid_col}));
+    const activityTerm = job.options.input_format === 'chembl' ? 'pChEMBL' : 'pActivity';
+    const rows = result.members.map(m => ({ID:m.comparison_id, [activityTerm]:m.activity_pchembl, Class:m.activity_class, Core:group.core_member_ids.includes(m.comparison_id), Scaffold:m.scaffold_smiles, Row:m.grid_row, Column:m.grid_col}));
     table(rows, $('group-members'));
     $('group-members').querySelectorAll('tbody tr').forEach((tr, i) => {
       tr.tabIndex = 0; tr.setAttribute('role','button');
@@ -591,11 +745,17 @@ async function compareGroup(groupId) {
 }
 $('compare-group').addEventListener('click', () => compareGroup($('group-select').value));
 $('group-select').addEventListener('change', () => selectGroup($('group-select').value));
+$('measurement-filter').addEventListener('change', () => { highlight(); renderLegend($('color-mode').value); });
 $('color-mode').addEventListener('change', colorMap);
 $('show-neighbor-links').addEventListener('change', highlight);
 $('demo').addEventListener('click', () => loadInput(true));
 $('csv').addEventListener('change', () => loadInput());
+$('query-csv').addEventListener('change', loadQueryInput);
+$('remove-query-input').addEventListener('click', removeQueryInput);
 $('input-format').addEventListener('change',updateInputType);
+$('unit-column').addEventListener('change', updateEvidenceOptions);
+$('use-assumed-sigma').addEventListener('change', updateEvidenceOptions);
+$('assumed-sigma').addEventListener('input', updateEvidenceOptions);
 $('grouping').addEventListener('change', updateGrouping);
 $('occupancy').addEventListener('input', densityPreview);
 $('options').addEventListener('submit',build);
@@ -661,6 +821,13 @@ function restoreOptions(config) {
   $('identity-conflicts').value = config.identity_conflicts || 'error';
   const fields = {'input-format':'input_format',target:'target_id','activity-type':'activity_type',representation:'representation',projection:'projection',lower:'lower_threshold',upper:'upper_threshold',seed:'random_state',detail:'render_detail','conflict-range':'conflict_range_threshold',identity:'molecule_identity','structure-policy':'structure_policy','compound-column':'compound_column','smiles-col':'smiles_col','value-col':'value_col','document-column':'document_column','relation-column':'relation_column','label-col':'label_col'};
   for (const [id,key] of Object.entries(fields)) $(id).value = config[key] ?? '';
+  if (config.input_format === 'molecule' && config.compound_column) $('input-format').value = 'generic';
+  $('value-unit').value = config.value_unit || 'p'; $('unit-column').value = config.unit_column || '';
+  $('use-assumed-sigma').checked = config.assumed_sigma != null; $('assumed-sigma').value = config.assumed_sigma ?? .64;
+  if (queryInputInfo) {
+    $('query-smiles-col').value = config.query_smiles_col || queryInputInfo.detected.smiles || queryInputInfo.columns[0];
+    $('query-id-col').value = config.query_id_col || '';
+  }
   $('occupancy').value = config.grid_occupancy*100; densityPreview();
   $('raster').checked = config.output_formats.includes('png'); updateInputType();
   updateGrouping();
@@ -672,6 +839,7 @@ getJSON('/api/session').then(async info => {
   if (!info.umap) { $('projection').querySelector('[value=umap]').disabled=true; $('projection').querySelector('[value=umap]').textContent='UMAP (not installed)'; }
   $('demo').disabled = !info.demo_available;
   if (info.input) { showInput(info.input); showPage('configure'); }
+  if (info.query_input) showQueryInput(info.query_input);
   updateNavigation();
   if (info.job.state === 'running') { setBusy(true); showPage('explore'); poll(); }
   else if (info.job.state === 'done') {

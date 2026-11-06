@@ -113,8 +113,18 @@ def _color_legend(data, color_by):
             groups = rows.structure_group.astype(str).drop_duplicates().tolist()
             entries.append((color, ", ".join(groups[:3]) + (", …" if len(groups) > 3 else "")))
         return "Structure groups (colors may repeat; IDs identify groups)", entries
-    return "", ([(NOT_MEASURED_COLOR, "Not measured")]
-                if _not_measured_mask(data).any() else [])
+    if _not_measured_mask(data).any():
+        thresholds = data.attrs.get("activity_thresholds", {})
+        fit = data.attrs.get("activity_confidence_fit", {})
+        lower = thresholds.get("lower", fit.get("lower_threshold", 6.0))
+        upper = thresholds.get("upper", fit.get("upper_threshold", 7.0))
+        return "", [
+            (DEFAULT_COLORS["inactive"], f"Inactive ≤ {lower:g}"),
+            (DEFAULT_COLORS["medium"], f"Medium ({lower:g}, {upper:g})"),
+            (DEFAULT_COLORS["active"], f"Active ≥ {upper:g}"),
+            (NOT_MEASURED_COLOR, "Not measured"),
+        ]
+    return "", []
 
 EXTRA_COLORS = [
     "#2B6CB0",

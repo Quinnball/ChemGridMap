@@ -525,6 +525,9 @@ def build_grid_map(
         result_data = pd.concat([result_data.iloc[:n_measured], query_rows], ignore_index=True)
     if query_data is not None:
         result_data.attrs["representation_type"] = representation_name
+        result_data.attrs["activity_thresholds"] = {
+            "lower": lower_threshold, "upper": upper_threshold,
+        }
         if confidence_fit is not None:
             result_data.attrs["activity_confidence_fit"] = confidence_fit
 

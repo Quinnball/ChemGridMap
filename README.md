@@ -86,6 +86,13 @@ The browser keeps files on the computer, lets you choose CSV columns, displays
 all three reliability layers, and exports the source-record audit with the map.
 Select a structure group to highlight its members on any color layer in the grid
 or 2D projection, and see its selected core structure and coverage.
+For your own records, choose **Generic activity records**, select the activity
+unit or a unit column, and optionally supply evidence-unit identifiers or an
+assumed σ in Advanced settings. Add an optional unmeasured CSV/TSV in
+**Data & activity** to map it with the measured references. **Show** filters
+measured/unmeasured cells and combines with structure-group highlighting;
+select an unmeasured molecule to inspect its Morgan-nearest measured molecules.
+No activity is predicted, and grid adjacency is not evidence.
 
 The package also contains a CA II smoke test:
 
@@ -283,8 +290,9 @@ Python uses the same public `prepare_query_molecules` function and
 query_id_col="query_id")` workflow. For pre-curated ChEMBL tables pass the
 curation report's actual structure policy as `query_structure_policy`.
 See [generated API](docs/API.md) and [output columns](docs/OUTPUT_COLUMNS.md)
-for parameters, conditional fields and audit outputs. These new options apply
-to the library and CLI; browser controls are a separate follow-up.
+for parameters, conditional fields and audit outputs. These options are also
+available in the local browser. Its Data audit lists query-check counts and
+identifies an assumed σ; exported files include the query checks and neighbors.
 
 ## Python API
 

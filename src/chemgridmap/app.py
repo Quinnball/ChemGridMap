@@ -10,6 +10,7 @@ import io
 import json
 import mimetypes
 from pathlib import Path
+import re
 import secrets
 import threading
 import time
@@ -29,6 +30,7 @@ from .provenance import file_digests
 from .neighborhoods import neighborhood_evidence
 from .comparison import group_comparison
 from .plotting import _svg_molecule_content
+from .units import validate_assumed_sigma
 
 ASSETS = Path(__file__).with_name("web")
 DEMO = Path(__file__).with_name("data") / "chembl205_ic50.csv"
@@ -51,7 +53,46 @@ POINT_COLUMNS = (
 
 def point_rows(data):
     columns = [name for name in POINT_COLUMNS if name in data]
+    if "measurement_status" in data:
+        columns.append("measurement_status")
     return json_rows(data[columns])
+
+
+def _read_input(content, *, dtype=None):
+    if not content or len(content) > MAX_UPLOAD:
+        raise ValueError("Choose a non-empty CSV smaller than 50 MB.")
+    try:
+        sample = content.decode("utf-8-sig", errors="strict")[:65536]
+        try:
+            delimiter = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+        except csv.Error:
+            delimiter = ","
+        frame = pd.read_csv(io.BytesIO(content), sep=delimiter, encoding="utf-8-sig", dtype=dtype)
+    except (UnicodeError, pd.errors.ParserError, pd.errors.EmptyDataError) as exc:
+        raise ValueError("Could not read this UTF-8 CSV. Check its delimiter and encoding.") from exc
+    if frame.empty:
+        raise ValueError("The CSV has no data rows.")
+    return frame
+
+
+def _select_molecule(data, row, col, molecule_id):
+    if molecule_id is None:
+        chosen = data[data.grid_row.eq(row) & data.grid_col.eq(col)]
+    else:
+        wanted = str(molecule_id).strip()
+        chembl_id = re.fullmatch(r"CHEMBL\d+", wanted, flags=re.IGNORECASE) is not None
+        if chembl_id:
+            wanted = wanted.upper()
+        matches = pd.Series(False, index=data.index)
+        for field in ("molecule_identity_key", "molecule_id", "parent_molecule_id", "query_id", "name"):
+            if field in data:
+                matches |= data[field].fillna("").astype(str).map(
+                    lambda value: wanted in {v.strip().upper() if chembl_id else v.strip()
+                                             for v in value.split(";")})
+        chosen = data[matches]
+    if len(chosen) != 1:
+        raise ValueError(f"Selection matched {len(chosen)} entries; one occupied cell is required.")
+    return chosen
 
 
 def _group_drawing(summary, field):
@@ -71,6 +112,9 @@ class AppSession:
         self.frame = None
         self.raw = b""
         self.filename = ""
+        self.query_frame = None
+        self.query_raw = b""
+        self.query_filename = ""
         self.result = None
         self.curation = None
         self.activity_confidence = None
@@ -83,27 +127,55 @@ class AppSession:
         with self.lock:
             if self.job["state"] == "running":
                 raise ValueError("A map is running. Wait for it to finish before replacing the input.")
-            if not content or len(content) > MAX_UPLOAD:
-                raise ValueError("Choose a non-empty CSV smaller than 50 MB.")
-            try:
-                sample = content.decode("utf-8-sig", errors="strict")[:65536]
-                try:
-                    delimiter = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
-                except csv.Error:
-                    delimiter = ","
-                frame = pd.read_csv(io.BytesIO(content), sep=delimiter, encoding="utf-8-sig")
-            except (UnicodeError, pd.errors.ParserError, pd.errors.EmptyDataError) as exc:
-                raise ValueError("Could not read this UTF-8 CSV. Check its delimiter and encoding.") from exc
-            if frame.empty:
-                raise ValueError("The CSV has no data rows.")
+            frame = _read_input(content)
             self.frame, self.raw = frame, content
             self.filename = Path(filename.replace("\\", "/")).name
+            self.query_frame, self.query_raw, self.query_filename = None, b"", ""
             self.result, self.curation, self.files = None, None, {}
             self.activity_confidence = None
             self.group_cache = {}
             self.group_detail_cache = {}
             self.job = {"state": "ready", "message": "Input loaded. Review the options, then build the map."}
             return self.input_info()
+
+    def load_query(self, content, filename):
+        with self.lock:
+            if self.job["state"] == "running":
+                raise ValueError("A map is running. Wait for it to finish before replacing the input.")
+            if self.frame is None:
+                raise ValueError("Load the measured data first.")
+            # Query IDs remain text, including leading zeroes.
+            frame = _read_input(content, dtype=str)
+            self.query_frame, self.query_raw = frame, content
+            self.query_filename = Path(filename.replace("\\", "/")).name
+            self._discard_map()
+            return self.query_input_info()
+
+    def clear_query(self):
+        with self.lock:
+            if self.job["state"] == "running":
+                raise ValueError("A map is running. Wait for it to finish before replacing the input.")
+            self.query_frame, self.query_raw, self.query_filename = None, b"", ""
+            self._discard_map()
+            return {"query_input": None}
+
+    def _discard_map(self):
+        self.result, self.curation, self.files = None, None, {}
+        self.activity_confidence = None
+        self.group_cache, self.group_detail_cache = {}, {}
+        self.job = {"state": "ready" if self.frame is not None else "empty",
+                    "message": "Input updated. Review the options, then build the map."}
+
+    def query_input_info(self):
+        if self.query_frame is None:
+            return None
+        columns = self.query_frame.columns.tolist()
+        available = {str(column).strip().lower(): column for column in columns}
+        smiles = next((available[name] for name in (
+            "smiles", "canonical_smiles", "canonical smiles", "representation_smiles"
+        ) if name in available), None)
+        return {"filename": self.query_filename, "rows": len(self.query_frame), "columns": columns,
+                "detected": {"smiles": smiles}, "sha256": hashlib.sha256(self.query_raw).hexdigest()}
 
     def input_info(self):
         if self.frame is None:
@@ -122,6 +194,12 @@ class AppSession:
             if self.job["state"] == "running":
                 raise ValueError("A map is already running.")
             options = validate_options(options)
+            for key in ("query_smiles_col", "query_id_col"):
+                column = options.get(key)
+                if column and (self.query_frame is None or column not in self.query_frame):
+                    raise ValueError(f"{key} requires a column in the unmeasured-molecule input.")
+            if options.get("unit_column") and options["unit_column"] not in self.frame:
+                raise ValueError("The selected unit column was not found.")
             self.result, self.curation, self.files = None, None, {}
             self.activity_confidence = None
             self.group_cache = {}
@@ -141,6 +219,10 @@ class AppSession:
                 json.dumps(options, indent=2), encoding="utf-8", newline="\n")
             source = {"input_file": self.filename, "input_file_sha256": hashlib.sha256(self.raw).hexdigest(),
                       "interface": "local-browser", "chemgridmap_version": __version__}
+            if self.query_frame is not None:
+                (directory / "query_input.csv").write_bytes(self.query_raw)
+                source.update(query_file=self.query_filename,
+                              query_file_sha256=hashlib.sha256(self.query_raw).hexdigest())
             source["reliability_parameters"] = {
                 "activity_confidence": options["activity_confidence"],
                 "evidence_model": options["evidence_model"],
@@ -153,6 +235,10 @@ class AppSession:
             }
             data = self.frame.copy()
             curation, curation_files = None, {}
+            generic_report = None
+            assumed_sigma = options.get("assumed_sigma")
+            value_unit, unit_column = options.get("value_unit", "p"), options.get("unit_column")
+            query_structure_policy = "canonical"
             if options["input_format"] == "chembl":
                 self.update(message="Validating structures and auditing repeated measurements...")
                 curation = curate_chembl_activity_data(
@@ -164,8 +250,9 @@ class AppSession:
                 )
                 curation.report.update(source)
                 source["curation_parameters"] = curation.report["parameters"]
-                document_column = curation.report["detected_columns"].get("document_id")
-                if options["activity_confidence"] and document_column:
+                query_structure_policy = curation.report["parameters"]["structure_policy"]
+                document_column = options["document_column"] or curation.report["detected_columns"].get("document_id")
+                if options["activity_confidence"] and (document_column or assumed_sigma is not None):
                     self.update(message="Estimating how well source documents support each activity class...")
                     try:
                         curation.molecules, fit = annotate_activity_confidence(
@@ -177,15 +264,21 @@ class AppSession:
                             offset_display=options["offset_display"],
                             offset_min_shared=options["offset_min_shared"],
                             offset_threshold=options["offset_min_difference"],
-                            offset_sign_agreement=options["offset_sign_agreement"])
+                            offset_sign_agreement=options["offset_sign_agreement"],
+                            assumed_sigma=assumed_sigma)
                         curation.report["activity_confidence"] = fit
                         source["activity_confidence"] = fit
                         self.activity_confidence = fit
+                        if assumed_sigma is not None:
+                            curation.report["warnings"].extend(fit.get("warnings", []))
                     except ValueError as exc:
+                        if assumed_sigma is not None or options["document_column"]:
+                            raise
                         curation.report["warnings"].append(f"Activity class support was not estimated: {exc}")
                 elif options["activity_confidence"]:
                     curation.report["warnings"].append(
-                        "Activity class support was not estimated: the input has no document identifiers.")
+                        "Activity class support was not estimated: the input has no document identifiers. "
+                        "Use an assumed σ to calculate support with an explicitly assumed log-unit SD.")
                 curation_files = save_chembl_curation(curation, directory, "map")
                 source["curation_outputs"] = file_digests(curation_files)
                 data = curation.molecules
@@ -195,7 +288,8 @@ class AppSession:
                 if options["compound_column"]:
                     if not value_col:
                         raise ValueError("A pActivity column is required for generic activity records.")
-                    confidence = bool(options["document_column"] and options["activity_confidence"])
+                    confidence = bool((options["document_column"] or assumed_sigma is not None)
+                                      and options["activity_confidence"])
                     data, _, fit, report = prepare_generic_activity_records(
                         data,
                         compound_column=options["compound_column"],
@@ -214,8 +308,10 @@ class AppSession:
                         offset_min_shared=options["offset_min_shared"],
                         offset_threshold=options["offset_min_difference"],
                         offset_sign_agreement=options["offset_sign_agreement"],
+                        value_unit=value_unit, unit_column=unit_column, assumed_sigma=assumed_sigma,
                     )
                     source["generic_activity"] = report
+                    generic_report = report
                     if fit is not None:
                         source["activity_confidence"] = fit
                         self.activity_confidence = fit
@@ -245,16 +341,30 @@ class AppSession:
                 offset_threshold=options["offset_min_difference"],
                 offset_sign_agreement=options["offset_sign_agreement"],
                 map_color_modes=color_modes, map_color_formats=["svg"],
+                value_unit=value_unit if options["input_format"] == "molecule" and not options["compound_column"] else "p",
+                unit_column=unit_column if options["input_format"] == "molecule" and not options["compound_column"] else None,
+                query_data=self.query_frame, query_smiles_col=options.get("query_smiles_col"),
+                query_id_col=options.get("query_id_col"), query_structure_policy=query_structure_policy,
             )
             result.output_files.update(curation_files)
             files = {Path(path).name: Path(path) for path in result.output_files.values()}
             files.update({name: directory / name for name in ("input.csv", "app_options.json")})
+            if self.query_frame is not None:
+                files["query_input.csv"] = directory / "query_input.csv"
             archive = directory / "chemgridmap_results.zip"
             with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
                 for name, path in files.items():
                     bundle.write(path, name)
             files[archive.name] = archive
             report = curation.report if curation else result.preprocessing
+            if generic_report is not None and (value_unit != "p" or unit_column or assumed_sigma is not None):
+                report = {**report, "generic_activity": generic_report,
+                          "activity_confidence": self.activity_confidence,
+                          "warnings": generic_report["warnings"]}
+            elif generic_report is not None and generic_report["warnings"]:
+                report = {**report, "warnings": generic_report["warnings"]}
+            if result.query_report:
+                report = {**report, "query_molecules": result.query_report}
             with self.lock:
                 self.result, self.curation, self.files = result, curation, files
                 self.job.update(state="done", message="Map ready. Select a cell to inspect its evidence.",
@@ -324,6 +434,16 @@ class AppSession:
             if self.result is None:
                 raise ValueError("Build a map first.")
             data, curation = self.result.data, self.curation
+            if "measurement_status" in data:
+                selected = _select_molecule(data, row, col, molecule_id)
+                if selected.iloc[0].measurement_status == "not_measured":
+                    query = selected.iloc[0]
+                    neighbors = self.result.query_neighbors[
+                        self.result.query_neighbors.query_id.eq(query.query_id)]
+                    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320">'
+                           + (_svg_molecule_content(query.canonical_smiles, 320) or '') + '</svg>')
+                    return {"molecule": json_rows(selected)[0], "query_neighbors": json_rows(neighbors),
+                            "group_similarity": self.job["options"]["group_similarity"], "svg": svg}, pd.DataFrame()
             if curation is not None:
                 _, run_bound, binding_warnings, manifest = load_audit_context(
                     Path(self.result.output_files['coordinates']),
@@ -338,11 +458,7 @@ class AppSession:
                 summary['run_binding_verified'] = run_bound
                 summary['warnings'].extend(binding_warnings)
             else:
-                if molecule_id is not None:
-                    raise ValueError("For molecule-table input, select a cell on the map.")
-                chosen = data[data.grid_row.eq(row) & data.grid_col.eq(col)]
-                if len(chosen) != 1:
-                    raise ValueError("Select one occupied cell.")
+                chosen = _select_molecule(data, row, col, molecule_id)
                 records = pd.DataFrame()
                 summary = {"interpretation": "Molecule-table input: no assay-record audit is available.",
                            "record_count_verified": False, "median_verified": False,
@@ -354,6 +470,11 @@ class AppSession:
                            "multi_unit_entry_count": (
                                self.activity_confidence or {}
                            ).get("multi_unit_entry_count")}
+            fit = self.activity_confidence or {}
+            if fit.get("method") == "assumed_sigma":
+                summary.update(method="assumed_sigma", assumed_sigma=fit["assumed_sigma"],
+                               evidence_unit_source=fit["evidence_unit_source"])
+                summary.pop("sigma_doc_degrees_of_freedom", None)
             selected = chosen.iloc[0]
             row, col = int(selected.grid_row), int(selected.grid_col)
             neighbors = data[data.grid_row.sub(row).abs().le(1) & data.grid_col.sub(col).abs().le(1)]
@@ -406,9 +527,27 @@ def validate_options(options):
                 "support_level": .8, "offset_display": "none",
                 "offset_min_shared": 3, "offset_min_difference": 1.0,
                 "offset_sign_agreement": .8, "identity_conflicts": "error"}
-    if not isinstance(options, dict) or set(options) - set(defaults):
+    optional = {"value_unit", "unit_column", "assumed_sigma", "query_smiles_col", "query_id_col"}
+    if not isinstance(options, dict) or set(options) - set(defaults) - optional:
         raise ValueError("Unknown map option.")
     values = {**defaults, **options}
+    if values.get("value_unit", "p") not in {"p", "M", "mM", "uM", "nM", "pM"}:
+        raise ValueError("Invalid value_unit.")
+    for key in ("unit_column", "query_smiles_col", "query_id_col"):
+        if key in values and values[key] is not None:
+            if not isinstance(values[key], str) or not values[key].strip():
+                raise ValueError(f"{key} must be a non-empty column name.")
+    if values.get("unit_column") and "value_unit" in options:
+        raise ValueError("Unit and unit column cannot be used together.")
+    if values["input_format"] == "chembl" and (values.get("value_unit", "p") != "p" or values.get("unit_column")):
+        raise ValueError("ChEMBL input already contains pChEMBL values; units apply to generic input.")
+    if values.get("assumed_sigma") is not None:
+        values["assumed_sigma"] = float(values["assumed_sigma"])
+        validate_assumed_sigma(values["assumed_sigma"])
+        if values["input_format"] == "molecule" and not values["compound_column"]:
+            raise ValueError("Assumed σ requires activity records; select Generic activity records and a compound column.")
+        if not values["activity_confidence"]:
+            raise ValueError("Assumed σ requires activity class support.")
     choices = {"input_format": {"chembl", "molecule"}, "representation": {"morgan", "descriptors"},
                "projection": {"pca", "tsne", "umap"}, "render_detail": {"auto", "full", "overview"},
                "structure_policy": {"auto", "parent", "as-recorded"},
@@ -521,9 +660,12 @@ class LocalHandler(BaseHTTPRequestHandler):
                 asset = ASSETS / ("index.html" if path == "/" else path[1:])
                 self.send(asset.read_bytes(), mimetypes.guess_type(asset.name)[0] or "text/plain")
             elif path == "/api/session":
-                self.send({"version": __version__, "umap": importlib.util.find_spec("umap") is not None,
+                payload = {"version": __version__, "umap": importlib.util.find_spec("umap") is not None,
                            "output_root": str(session.output_root), "demo_available": DEMO.exists(),
-                           "input": session.input_info(), "job": session.snapshot()})
+                           "input": session.input_info(), "job": session.snapshot()}
+                if session.query_frame is not None:
+                    payload["query_input"] = session.query_input_info()
+                self.send(payload)
             elif path == "/api/job":
                 self.send(session.snapshot())
             elif path == "/api/points":
@@ -571,6 +713,10 @@ class LocalHandler(BaseHTTPRequestHandler):
             path = urlsplit(self.path).path
             if path == "/api/input":
                 self.send(session.load(content, unquote(self.headers.get("X-Filename", "input.csv"))))
+            elif path == "/api/query-input":
+                self.send(session.load_query(content, unquote(self.headers.get("X-Filename", "queries.csv"))))
+            elif path == "/api/query-input/clear":
+                self.send(session.clear_query())
             elif path == "/api/demo":
                 self.send(session.load(DEMO.read_bytes(), DEMO.name))
             elif path == "/api/build":

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add browser uploads for unmeasured CSV/TSV molecules, measured/unmeasured
+  filtering, and a query inspector linking to measured Morgan neighbors.
+- Expose activity units, evidence-unit columns and explicit assumed σ in the
+  browser, with query-check counts and the σ source in Data audit.
+- Include all three activity classes and the actual thresholds before
+  `Not measured` in static activity legends when queries are present.
 - Highlight a selected structure group across browser color layers and views,
   with a core structure and coverage card and an inspector highlight toggle.
 - Convert molar concentration units in generic record and molecule tables,
