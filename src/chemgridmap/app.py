@@ -25,12 +25,13 @@ from . import __version__
 from .chembl import curate_chembl_activity_data, detect_chembl_columns, save_chembl_curation
 from .evidence import annotate_activity_confidence, prepare_generic_activity_records
 from .inspection import (build_sources, document_coverage, enrich_source_records,
-                         inspect_entry, load_audit_context, offset_pair_details)
+                         inspect_entry, load_audit_context, offset_pair_details,
+                         match_source_lookup, validate_source_lookup)
 from .pipeline import build_grid_map
 from .plotting import render_svg
 from .provenance import file_digests
 from .neighborhoods import neighborhood_evidence
-from .comparison import group_comparison
+from .comparison import group_comparison, molecule_keys
 from .plotting import _svg_molecule_content
 from .units import validate_assumed_sigma
 
@@ -135,6 +136,9 @@ class AppSession:
         self.query_frame = None
         self.query_raw = b""
         self.query_filename = ""
+        self.source_frame = None
+        self.source_filename = ""
+        self.possible_sources = None
         self.result = None
         self.curation = None
         self.generic_records = None
@@ -152,6 +156,7 @@ class AppSession:
             self.frame, self.raw = frame, content
             self.filename = Path(filename.replace("\\", "/")).name
             self.query_frame, self.query_raw, self.query_filename = None, b"", ""
+            self.source_frame, self.source_filename, self.possible_sources = None, "", None
             self.result, self.curation, self.files = None, None, {}
             self.generic_records = None
             self.activity_confidence = None
@@ -181,10 +186,38 @@ class AppSession:
             self._discard_map()
             return {"query_input": None}
 
+    def load_source(self, content, filename):
+        with self.lock:
+            if self.job["state"] == "running":
+                raise ValueError("A map is running. Wait for it to finish before replacing the input.")
+            if self.frame is None:
+                raise ValueError("Load the measured data first.")
+            frame = _read_input(content, dtype=str)
+            validate_source_lookup(frame)
+            self.source_frame = frame
+            self.source_filename = Path(filename.replace("\\", "/")).name
+            self._discard_map()
+            return self.source_input_info()
+
+    def clear_source(self):
+        with self.lock:
+            if self.job["state"] == "running":
+                raise ValueError("A map is running. Wait for it to finish before replacing the input.")
+            self.source_frame, self.source_filename = None, ""
+            self._discard_map()
+            return {"source_input": None}
+
+    def source_input_info(self):
+        if self.source_frame is None:
+            return None
+        return {"filename": self.source_filename, "rows": len(self.source_frame),
+                "columns": self.source_frame.columns.tolist()}
+
     def _discard_map(self):
         self.result, self.curation, self.files = None, None, {}
         self.generic_records = None
         self.activity_confidence = None
+        self.possible_sources = None
         self.group_cache, self.group_detail_cache = {}, {}
         self.job = {"state": "ready" if self.frame is not None else "empty",
                     "message": "Input updated. Review the options, then build the map."}
@@ -228,6 +261,7 @@ class AppSession:
             self.result, self.curation, self.files = None, None, {}
             self.generic_records = None
             self.activity_confidence = None
+            self.possible_sources = None
             self.group_cache = {}
             self.group_detail_cache = {}
             self.job = {"state": "running", "message": "Preparing input records...", "started": time.time()}
@@ -419,9 +453,17 @@ class AppSession:
             if result.query_report:
                 report = {**report, "query_reference_matches": self._query_reference_matches(
                     result, curation, generic_records, options)}
+            possible_sources = None
+            if generic_records is not None and self.source_frame is not None:
+                self.update(message="Matching structures to the source lookup file...")
+                possible_sources, lookup_summary = match_source_lookup(
+                    data, generic_records, self.source_frame)
+                report = {**report, "source_lookup": {
+                    "file": self.source_filename, **lookup_summary}}
             with self.lock:
                 self.result, self.curation, self.files = result, curation, files
                 self.generic_records = generic_records
+                self.possible_sources = possible_sources
                 self.job.update(state="done", message="Map ready. Select a cell to inspect its evidence.",
                                 output_dir=str(directory), molecules=len(result.data),
                                 report=report, metrics=json_rows(result.metrics)[0],
@@ -504,15 +546,32 @@ class AppSession:
                            if curation is not None else options["document_column"])
         if records is not None:
             records = self._reference_records(records, options)
+            if document_column:
+                columns = list(dict.fromkeys(["molecule_identity_key", document_column,
+                                              *([options["reference_column"]]
+                                                if options.get("reference_column") else [])]))
+                records = records[columns]
+        # Query references already contain exact keys from the prepared map.
+        molecules = dict(zip(molecule_keys(result.data), json_rows(result.data)))
+        retained_groups = (dict(tuple(records.groupby("molecule_identity_key", sort=False)))
+                           if records is not None and document_column else {})
+        source_cache = {}
         matches = []
         for check in checks.itertuples(index=False):
-            selected = _select_molecule(result.data, None, None, check.reference_id)
-            molecule = json_rows(selected)[0]
+            molecule = molecules[check.reference_id]
             sources = []
             # Reference-only text must not invent document identifiers or counts.
             if records is not None and document_column:
-                retained = records[records.molecule_identity_key.eq(check.reference_id)]
-                sources = build_sources(retained, document_column, options.get("reference_column"))
+                retained = retained_groups[check.reference_id]
+                # Counts depend on distinct document/reference pairs, not repeated rows.
+                # Many compounds share a paper; resolve those same links only once.
+                reference_column = options.get("reference_column")
+                signature = (frozenset(retained[[document_column, reference_column]].itertuples(
+                    index=False, name=None)) if reference_column else frozenset(retained[document_column]))
+                if signature not in source_cache:
+                    source_cache[signature] = build_sources(
+                        retained, document_column, options.get("reference_column"))
+                sources = source_cache[signature]
             matches.append({"query_id": check.query_id, "reference_id": check.reference_id,
                             "molecule_id": molecule.get("molecule_id") or check.reference_id,
                             "parent_molecule_id": molecule.get("parent_molecule_id") or "",
@@ -658,6 +717,10 @@ class AppSession:
                     "neighborhood_svg": neighborhood.read_text(encoding="utf-8")}
             if self.generic_records is not None:
                 detail["record_columns"] = display_records.columns.tolist()
+            if self.possible_sources is not None and not any(source["links"] for source in sources):
+                detail["possible_sources"] = self.possible_sources.get(
+                    str(selected.molecule_identity_key), [])
+                detail["source_lookup_file"] = self.source_filename
             if query_match is not None:
                 detail["query_match"] = query_match
             return detail, records
@@ -822,6 +885,8 @@ class LocalHandler(BaseHTTPRequestHandler):
                            "input": session.input_info(), "job": session.snapshot()}
                 if session.query_frame is not None:
                     payload["query_input"] = session.query_input_info()
+                if session.source_frame is not None:
+                    payload["source_input"] = session.source_input_info()
                 self.send(payload)
             elif path == "/api/job":
                 self.send(session.snapshot())
@@ -874,6 +939,10 @@ class LocalHandler(BaseHTTPRequestHandler):
                 self.send(session.load_query(content, unquote(self.headers.get("X-Filename", "queries.csv"))))
             elif path == "/api/query-input/clear":
                 self.send(session.clear_query())
+            elif path == "/api/source-input":
+                self.send(session.load_source(content, unquote(self.headers.get("X-Filename", "sources.csv"))))
+            elif path == "/api/source-input/clear":
+                self.send(session.clear_source())
             elif path == "/api/demo":
                 self.send(session.load(DEMO.read_bytes(), DEMO.name))
             elif path == "/api/build":

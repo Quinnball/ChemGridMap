@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add optional local source lookup from a user-supplied ChEMBL activity export
+  for generic records, with parent-structure matches, same-pChEMBL marks and
+  bilingual possible-source and audit notes; preserve calculations and exports.
 - Resolve unmeasured IDs through existing structure matches to measured sources
   or the first duplicate; add bilingual inspector notes and a source-count table
   in Data audit without changing calculations or exports.

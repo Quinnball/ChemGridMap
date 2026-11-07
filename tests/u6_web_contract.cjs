@@ -32,7 +32,7 @@ async function setup() {
   Object.assign(env.context, {$, URL, t: env.api.t, translateServer: env.api.translateServer,
     job: {options: {input_format: 'chembl', representation: 'morgan'}, report: report()},
     points: [measured], structureGroups: [], highlightedGroup: '', currentCell: null,
-    requestNumber: 0, busy: false, inputInfo: null, queryInputInfo: null, umapAvailable: null,
+    requestNumber: 0, busy: false, inputInfo: null, queryInputInfo: null, sourceInputInfo: null, umapAvailable: null,
     highlight() {}, fit() {}, updateInputType() {}, applyTransform() {}, translateSVGText() {}, refreshValidation() {},
     showResult: () => env.context.showDataAudit(env.context.job.report),
     getJSON: async url => { requests.push(url); return detail(); },

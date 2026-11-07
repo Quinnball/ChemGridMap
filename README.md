@@ -231,6 +231,18 @@ The reference column defaults to None and does not change evidence units,
 activity, σ or class support; it is recorded in `app_options.json` only when
 selected.
 
+If your generic records have no document identifiers, the optional browser
+**Source lookup: ChEMBL export** accepts an activity export for the same target.
+Matching uses standardized parent structures: salts can match their parent,
+while stereoisomers remain distinct. **Possible sources** lists documents that
+measured the same structure; it does not prove that your data came from them.
+**Same value** means that a document reports a pChEMBL within 0.005 of at least
+one retained record for that molecule, after your activity values are converted
+to pChEMBL. All matching runs locally, usually adding a few seconds for a single
+target export. The file is used only for the browser inspector and Data audit;
+it does not change the map, calculations or exports. See
+[`docs/SOURCE_DOCUMENTS.md`](docs/SOURCE_DOCUMENTS.md) for matching details.
+
 A curated one-row-per-molecule table remains supported through `--smiles-col`,
 `--value-col` and `--label-col`.
 

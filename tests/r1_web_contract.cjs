@@ -49,7 +49,7 @@ $('color-mode').value = 'activity'; $('measurement-filter').value = 'all';
 $('measurement-filter').selectedOptions = [{textContent: 'All molecules'}];
 const names = ['stat', 'countLabel', 'measuredLabel', 'showQuerySelection', 'selectGroup',
   'format', 'percentage', 'legendItem', 'renderLegend', 'applyTransform', 'showDataAudit',
-  'loadInput', 'showInput', 'selectColumns', 'showSources'];
+  'showSourceInput', 'loadInput', 'showInput', 'selectColumns', 'showSources'];
 const summaryBody = fragment('showResult', '  const report = job.report;', "  $('summary').hidden = false;");
 const dropdownBody = fragment('showResult', "  $('group-select').replaceChildren();", "  $('group-select').value = highlightedGroup;");
 const inspectorBody = fragment('inspect', '    const group = structureGroups.find', '    const wasClosed');

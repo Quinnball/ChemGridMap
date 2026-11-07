@@ -15,6 +15,8 @@ import numpy as np
 import pandas as pd
 
 from .chembl import detect_chembl_columns
+from .core import canonicalize_smiles
+from .structures import parent_structure
 from .plotting import render_svg
 from .activity import RULE_KEYS, RULE_COLUMNS, activity_annotations
 from .provenance import file_digests
@@ -132,6 +134,106 @@ def build_sources(records, document_column, reference_column=None):
                         "links": links, "references": references})
     return sorted(sources, key=lambda source: (
         int(source["year"]) if source["year"].isdigit() else float("inf"), source["id"]))
+
+
+SOURCE_LOOKUP_COLUMNS_ERROR = (
+    "The source lookup file needs SMILES and ChEMBL document ID columns, "
+    "as in a ChEMBL activity export."
+)
+
+
+def validate_source_lookup(frame):
+    """Detect supported ChEMBL columns and require structure/document fields."""
+    columns = detect_chembl_columns(frame)
+    if not columns["smiles"] or not columns["document_id"]:
+        raise ValueError(SOURCE_LOOKUP_COLUMNS_ERROR)
+    return columns
+
+
+def match_source_lookup(molecules, retained_records, lookup_frame):
+    """Return possible documents per molecule and counts for the session audit.
+
+    Parent normalization is shared across both inputs and evaluated once per
+    distinct SMILES. Neither molecular IDs, targets nor activity types filter
+    the match. Values only mark documents; they never select or reject sources.
+    """
+    columns = validate_source_lookup(lookup_frame)
+    smiles_cache = {}
+    parent_cache = {}
+
+    def normalized_parent(value):
+        raw = "" if pd.isna(value) else str(value).strip()
+        if raw not in smiles_cache:
+            canonical = canonicalize_smiles(raw)
+            if canonical and canonical not in parent_cache:
+                try:
+                    parent_cache[canonical] = parent_structure(canonical)[0]
+                except (ValueError, RuntimeError):
+                    parent_cache[canonical] = None
+            smiles_cache[raw] = parent_cache.get(canonical)
+        return smiles_cache[raw]
+
+    document_ids = lookup_frame[columns["document_id"]].fillna("").astype(str).str.strip()
+    valid_ids = document_ids.str.fullmatch(r"CHEMBL\d+")
+    lookup = pd.DataFrame({
+        "document_id": document_ids[valid_ids],
+        "parent": lookup_frame.loc[valid_ids, columns["smiles"]].map(normalized_parent),
+    })
+    lookup["pchembl"] = (pd.to_numeric(lookup_frame.loc[valid_ids, columns["pchembl"]], errors="coerce")
+                         if columns["pchembl"] else np.nan)
+    lookup = lookup.dropna(subset=["parent"])
+
+    # Resolve the bundled metadata once per document, then reuse the safe links.
+    documents = {source["id"]: source for source in build_sources(lookup, "document_id")}
+    for identifier, source in documents.items():
+        if not any(link["kind"] == "chembl" for link in source["links"]):
+            source["links"].append({
+                "kind": "chembl", "label": "ChEMBL " + identifier,
+                "url": "https://www.ebi.ac.uk/chembl/explore/document/" + identifier,
+            })
+    by_parent = {}
+    for (parent, identifier), group in lookup.groupby(["parent", "document_id"], sort=False):
+        values = group["pchembl"].to_numpy(float)
+        by_parent.setdefault(parent, []).append((
+            identifier, len(group), np.unique(values[np.isfinite(values)]),
+        ))
+
+    value_column = ("activity_pchembl_raw" if "activity_pchembl_raw" in retained_records
+                    else "pchembl_value")
+    measured_values = {
+        str(identity): pd.to_numeric(group[value_column], errors="coerce").to_numpy(float)
+        for identity, group in retained_records.groupby("molecule_identity_key", sort=False)
+    }
+    by_molecule_id = {}
+    for row in molecules.itertuples(index=False):
+        identity = str(row.molecule_identity_key)
+        parent = normalized_parent(row.canonical_smiles)
+        values = measured_values.get(identity, np.array([], dtype=float))
+        values = values[np.isfinite(values)]
+        sources = []
+        for identifier, count, reported in by_parent.get(parent, []):
+            # A tiny float allowance keeps the inclusive 0.005 boundary exact.
+            same = reported[(np.abs(reported[:, None] - values) <= .005 + 1e-12).any(axis=1)]
+            source = {**documents[identifier], "n_records": count,
+                      "same_values": sorted({f"{value:.2f}" for value in same}, key=float)}
+            sources.append(source)
+        by_molecule_id[identity] = sorted(sources, key=lambda source: (
+            not bool(source["same_values"]),
+            int(source["year"]) if source["year"].isdigit() else float("inf"),
+            source["id"],
+        ))
+
+    targets = (lookup_frame[columns["target_id"]].dropna().astype(str).str.strip()
+               if columns["target_id"] else pd.Series(dtype=str))
+    summary = {
+        "found": sum(bool(sources) for sources in by_molecule_id.values()),
+        "total": len(molecules),
+        "same": sum(any(source["same_values"] for source in sources)
+                    for sources in by_molecule_id.values()),
+        "target_count": int(targets[targets.ne("")].nunique()),
+    }
+    return by_molecule_id, summary
+
 
 
 def document_coverage(sources):

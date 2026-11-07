@@ -237,7 +237,7 @@ history.replaceState(null, '', location.pathname);
 let busy = false, job = null, points = [], gridSVG = '', view = 'grid', currentCell = null, requestNumber = 0;
 let transform = {s: 1, x: 0, y: 0}, drawingSize = {w: 1, h: 1};
 let tileWidth = 100, hasStructures = false;
-let inputInfo = null, queryInputInfo = null, page = 'import', umapAvailable = null, demoAvailable = false;
+let inputInfo = null, queryInputInfo = null, sourceInputInfo = null, page = 'import', umapAvailable = null, demoAvailable = false;
 let structureGroups = [], neighborRelations = new Map();
 let highlightedGroup = '', groupRequestNumber = 0, mapCells = [];
 const colors = {active: '#2a9d8f', medium: '#e6a23c', inactive: '#c44e52', unlabelled: '#b8c2cc'};
@@ -364,7 +364,7 @@ async function loadInput(demo = false, droppedFile = null) {
     const input = await getJSON(demo ? '/api/demo' : '/api/input', {
       method: 'POST', body: demo ? '' : file, headers: demo ? {} : {'X-Filename': encodeURIComponent(file.name)}
     });
-    resetResult(); showQueryInput(null); showInput(input, demo);
+    resetResult(); showQueryInput(null); showSourceInput(null); showInput(input, demo);
     status(input.targets.length > 1 ? 'Multiple targets detected. Select a target before building; they will not be pooled.' : '');
     setBusy(false);
     showPage('configure');
@@ -409,6 +409,9 @@ function updateEvidenceOptions() {
   const moleculeTable = $('input-format').value === 'molecule';
   $('reference-column-control').hidden = $('input-format').value !== 'generic';
   $('reference-column').disabled = busy || $('input-format').value !== 'generic';
+  $('source-input-control').hidden = $('input-format').value !== 'generic';
+  $('source-csv').disabled = busy || $('input-format').value !== 'generic';
+  $('remove-source-input').disabled = busy || $('input-format').value !== 'generic';
   $('compound-column').disabled = busy || moleculeTable;
   $('compound-column').required = $('input-format').value === 'generic';
   $('value-unit').disabled = busy || !!$('unit-column').value;
@@ -446,6 +449,33 @@ async function removeQueryInput() {
     setBusy(true); await getJSON('/api/query-input/clear', {method:'POST'});
     resetResult(); showQueryInput(null); showPage('configure');
     status("Unmeasured molecules removed. Generate the map to update the result.");
+  } catch (error) { fail(error); }
+  finally { setBusy(false); }
+}
+function showSourceInput(input) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
+  sourceInputInfo = input;
+  $('source-input-info').hidden = !input;
+  $('source-csv').value = '';
+  $('source-input-name').textContent = input ? input.filename : '';
+  $('source-input-rows').textContent = input ? t('d.{count} rows', {count: input.rows.toLocaleString()}) : '';
+}
+async function loadSourceInput() {
+  if (busy || !$('source-csv').files[0]) return;
+  try {
+    const file = $('source-csv').files[0]; setBusy(true);
+    const input = await getJSON('/api/source-input', {method:'POST', body:file, headers:{'X-Filename':encodeURIComponent(file.name)}});
+    resetResult(); showSourceInput(input); showPage('configure');
+    status('Source lookup file loaded. Generate the map to apply this input.');
+  } catch (error) { fail(error); }
+  finally { setBusy(false); $('source-csv').value = ''; }
+}
+async function removeSourceInput() {
+  if (busy) return;
+  try {
+    setBusy(true); await getJSON('/api/source-input/clear', {method:'POST'});
+    resetResult(); showSourceInput(null); showPage('configure');
+    status('Source lookup file removed. Generate the map to update the result.');
   } catch (error) { fail(error); }
   finally { setBusy(false); }
 }
@@ -530,12 +560,42 @@ function showDataAudit(report) {
     coverage.textContent = t(report.document_coverage.kind === 'chembl' ? 'u5.coverageChembl' : 'u5.coverageReference', report.document_coverage);
     $('audit-body').append(coverage);
   }
+  if (report.source_lookup) {
+    const lookup = report.source_lookup;
+    const coverage = document.createElement('p'); coverage.dataset.sourceLookup = 'true';
+    coverage.textContent = t('u7.coverage', lookup); $('audit-body').append(coverage);
+    if (lookup.target_count > 1) {
+      const warning = document.createElement('p'); warning.dataset.sourceLookupTargets = 'true';
+      warning.textContent = t('u7.multipleTargets', {n: lookup.target_count}); $('audit-body').append(warning);
+    }
+  }
   if (job.options.assumed_sigma != null) {
     const sigma = document.createElement('p'); sigma.dataset.assumedSigma = 'true';
     const source = report.activity_confidence?.evidence_unit_source || job.options.document_column || t("d.one per compound");
     sigma.textContent = t("d.σ (assumed) {sigma} log units. Evidence units: {source}.", {sigma: format(job.options.assumed_sigma), source: source === 'one unit per compound' ? t('d.one per compound') : source});
     if (job.options.input_format !== 'chembl' && !job.options.document_column) sigma.textContent += t("d. Offset detection needs an evidence-unit column, so it was not run.");
     $('audit-body').append(sigma);
+  }
+  const generic = report.generic_activity;
+  if (generic) {
+    const labels = {
+      non_exact_relation: t("d.censored or inexact values (relation other than =)"),
+      invalid_activity_value: t("d.empty or non-numeric activity values"),
+      nonpositive_activity_value: t("d.zero or negative values"),
+      unrecognized_activity_unit: t("d.unrecognized units"),
+      invalid_smiles: t("d.invalid SMILES"),
+      missing_compound_id: t("d.missing compound IDs")
+    };
+    const counts = generic.excluded_reasons || {non_exact_relation: generic.excluded_non_exact_relation_records};
+    const details = Object.entries(labels).filter(([key]) => counts[key] > 0).map(([key, label]) => t('d.{label}: {value}', {label, value: counts[key]})).join(t('d.; '));
+    const excluded = document.createElement('p'); excluded.dataset.excludedRecords = 'true';
+    excluded.textContent = t("d.Excluded records: {excluded} of {total}.", {excluded: generic.excluded_activity_records, total: generic.input_rows});
+    if (details) excluded.textContent = t('d.{first} {second}', {first: excluded.textContent, second: t('d.{details}.', {details: details[0].toUpperCase() + details.slice(1)})});
+    $('audit-body').append(excluded);
+  }
+  const exclusions = report.exclusion_counts || {};
+  if (Object.keys(exclusions).length) {
+    const reasons = document.createElement('p'); reasons.textContent = t("d.Exclusion reasons (may overlap): ") + Object.entries(exclusions).map(([k,v]) => t('d.{label}: {value}', {label: t('d.' + k), value: v})).join(t('d.; ')); $('audit-body').append(reasons);
   }
   if (report.query_molecules) {
     const section = document.createElement('section'), heading = document.createElement('h3');
@@ -578,33 +638,12 @@ function showDataAudit(report) {
     }
     $('audit-body').append(section);
   }
-  const generic = report.generic_activity;
-  if (generic) {
-    const labels = {
-      non_exact_relation: t("d.censored or inexact values (relation other than =)"),
-      invalid_activity_value: t("d.empty or non-numeric activity values"),
-      nonpositive_activity_value: t("d.zero or negative values"),
-      unrecognized_activity_unit: t("d.unrecognized units"),
-      invalid_smiles: t("d.invalid SMILES"),
-      missing_compound_id: t("d.missing compound IDs")
-    };
-    const counts = generic.excluded_reasons || {non_exact_relation: generic.excluded_non_exact_relation_records};
-    const details = Object.entries(labels).filter(([key]) => counts[key] > 0).map(([key, label]) => t('d.{label}: {value}', {label, value: counts[key]})).join(t('d.; '));
-    const excluded = document.createElement('p'); excluded.dataset.excludedRecords = 'true';
-    excluded.textContent = t("d.Excluded records: {excluded} of {total}.", {excluded: generic.excluded_activity_records, total: generic.input_rows});
-    if (details) excluded.textContent = t('d.{first} {second}', {first: excluded.textContent, second: t('d.{details}.', {details: details[0].toUpperCase() + details.slice(1)})});
-    $('audit-body').append(excluded);
-  }
-  const exclusions = report.exclusion_counts || {};
-  if (Object.keys(exclusions).length) {
-    const reasons = document.createElement('p'); reasons.textContent = t("d.Exclusion reasons (may overlap): ") + Object.entries(exclusions).map(([k,v]) => t('d.{label}: {value}', {label: t('d.' + k), value: v})).join(t('d.; ')); $('audit-body').append(reasons);
-  }
   const confidence = report.activity_confidence;
   if (confidence?.document_pair_count != null && confidence.document_offset_detection !== 'not applicable' && (!generic || job.options.document_column)) {
     const section = document.createElement('section'), heading = document.createElement('h3');
     heading.textContent = t("d.Evidence units and offsets"); section.append(heading);
     const description = document.createElement('p');
-    const source = job.options.input_format === 'chembl' ? t('d.document') : t("d.{column} column", {column: generic?.document_column || job.options.document_column});
+    const source = job.options.input_format === 'chembl' ? t('d.document') : (globalThis.ChemGridMapI18n?.getLanguage() === 'zh' ? ' ' : '') + t('d.{column} column', {column: generic?.document_column || job.options.document_column});
     description.textContent = t("d.Evidence units come from {source}; {pairs} pairs with at least {minimum} shared entries were evaluated, {flagged} pairs were flagged, using |median difference| ≥ {threshold} log units and sign agreement ≥ {agreement}%.", {source, pairs: confidence.document_pair_count, minimum: confidence.offset_min_shared, flagged: confidence.discordant_document_pair_count, threshold: format(confidence.offset_threshold), agreement: Math.round(100 * confidence.offset_sign_agreement)});
     section.append(description);
     const pairs = confidence.document_offsets_top10 || [], container = document.createElement('div');
@@ -989,40 +1028,54 @@ function showQuerySelection(detail) {
     tr.onclick = locate; tr.onkeydown = event => { if (event.key === 'Enter') locate(); };
   });
 }
-function showSources(sources = []) {
+function showSources(sources = [], lookup = {}) {
   var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
-  const section = $('sources'), list = $('source-list');
-  list.replaceChildren(); section.hidden = !sources.length;
-  for (const source of sources) {
-    const row = document.createElement('li'), heading = document.createElement('strong');
-    row.dataset.sourceId = source.id; heading.textContent = source.id; row.append(heading);
-    const metadata = document.createElement('p'); metadata.className = 'micro';
-    metadata.textContent = [source.doc_type ? t('u5.type.' + source.doc_type) : '', source.journal, source.year,
-      t('u5.retainedRecords', {count: source.n_records})].filter(value => value != null && value !== '').join(' · ');
-    row.append(metadata);
-    const links = document.createElement('div'); links.className = 'source-links';
-    for (const link of source.links || []) {
-      // 仅产生用户主动点击的 http(s) 导航，不发起文献查询或预加载。
-      let destination;
-      try { destination = new URL(link.url); } catch (_) { destination = null; }
-      if (!destination || !['http:', 'https:'].includes(destination.protocol)) continue;
-      const anchor = document.createElement('a');
-      const label = link.kind === 'patent' ? t('u5.patentLink', {id: link.label.replace(/^Patent /, '')}) : link.label;
-      anchor.textContent = label; anchor.setAttribute('href', link.url);
-      anchor.setAttribute('target', '_blank'); anchor.setAttribute('rel', 'noopener noreferrer');
-      anchor.setAttribute('aria-label', label + ' — ' + link.url);
-      links.append(anchor);
+  for (const possible of [false, true]) {
+    const entries = possible ? lookup.possible_sources || [] : sources;
+    const section = $(possible ? 'possible-sources' : 'sources');
+    const list = $(possible ? 'possible-source-list' : 'source-list');
+    list.replaceChildren();
+    section.hidden = possible ? !Object.hasOwn(lookup, 'source_lookup_file') : !entries.length;
+    if (possible) {
+      $('possible-sources-note').textContent = section.hidden ? '' : t('u7.sourceNote', {file: lookup.source_lookup_file});
+      $('possible-sources-empty').hidden = section.hidden || !!entries.length;
+      $('possible-sources-empty').textContent = section.hidden ? '' : t('u7.noMatch', {file: lookup.source_lookup_file});
     }
-    for (const reference of source.references || []) {
-      if (reference.url) continue;
-      const text = document.createElement('span'); text.className = 'source-reference';
-      text.textContent = reference.value; links.append(text);
+    for (const source of entries) {
+      const row = document.createElement('li'), heading = document.createElement('strong');
+      row.dataset.sourceId = source.id; heading.textContent = source.id; row.append(heading);
+      const metadata = document.createElement('p'); metadata.className = 'micro';
+      metadata.textContent = [source.doc_type ? t('u5.type.' + source.doc_type) : '', source.journal, source.year,
+        possible ? t('u7.chemblRecords', {n: source.n_records}) : t('u5.retainedRecords', {count: source.n_records})].filter(value => value != null && value !== '').join(' · ');
+      row.append(metadata);
+      if (possible && source.same_values?.length) {
+        const same = document.createElement('p'); same.className = 'micro source-same-value';
+        same.textContent = t('u7.sameValue', {values: source.same_values.join(', ')}); row.append(same);
+      }
+      const links = document.createElement('div'); links.className = 'source-links';
+      for (const link of source.links || []) {
+        // 仅产生用户主动点击的 http(s) 导航，不发起文献查询或预加载。
+        let destination;
+        try { destination = new URL(link.url); } catch (_) { destination = null; }
+        if (!destination || !['http:', 'https:'].includes(destination.protocol)) continue;
+        const anchor = document.createElement('a');
+        const label = link.kind === 'patent' ? t('u5.patentLink', {id: link.label.replace(/^Patent /, '')}) : link.label;
+        anchor.textContent = label; anchor.setAttribute('href', link.url);
+        anchor.setAttribute('target', '_blank'); anchor.setAttribute('rel', 'noopener noreferrer');
+        anchor.setAttribute('aria-label', label + ' — ' + link.url);
+        links.append(anchor);
+      }
+      for (const reference of source.references || []) {
+        if (reference.url) continue;
+        const text = document.createElement('span'); text.className = 'source-reference';
+        text.textContent = reference.value; links.append(text);
+      }
+      if (!links.querySelector('a')) {
+        const unavailable = document.createElement('span'); unavailable.className = 'micro';
+        unavailable.textContent = t('u5.noLinks'); links.append(unavailable);
+      }
+      row.append(links); list.append(row);
     }
-    if (!links.querySelector('a')) {
-      const unavailable = document.createElement('span'); unavailable.className = 'micro';
-      unavailable.textContent = t('u5.noLinks'); links.append(unavailable);
-    }
-    row.append(links); list.append(row);
   }
 }
 async function inspect(query) {
@@ -1142,7 +1195,7 @@ async function inspect(query) {
       $('evidence-summary').append(warning);
     }
     if (summary.median_verified && !genericRecords) { const verified = document.createElement('p'); verified.className = 'verified'; verified.textContent = summary.quality_annotations_verified ? t("d.Identity, counts, median, activity class and quality flags checked against retained records and saved rules.") : t("d.Record count and median verified; quality annotations remain unverified."); $('evidence-summary').append(verified); }
-    showSources(detail.sources);
+    showSources(detail.sources, detail);
     $('neighbor-title').textContent = `${fingerprintNeighbors ? 'Fingerprint' : 'Representation'} vs grid neighbors`;
     $('neighbor-title').textContent = translateServer($('neighbor-title').textContent);
     $('neighbor-summary').textContent = `${neighbors.representation} (${neighbors.representation_metric}), k=${neighbors.effective_k}: ${neighbors.shared_count} shared neighbors out of ${neighbors.representation_count} ${fingerprintNeighbors ? 'fingerprint' : 'representation'} neighbors and ${neighbors.grid_count} grid neighbors. Recall ${(100 * neighbors.recall).toFixed(1)}%.`;
@@ -1200,6 +1253,8 @@ $('demo').addEventListener('click', () => loadInput(true));
 $('csv').addEventListener('change', () => loadInput());
 $('query-csv').addEventListener('change', loadQueryInput);
 $('remove-query-input').addEventListener('click', removeQueryInput);
+$('source-csv').addEventListener('change', loadSourceInput);
+$('remove-source-input').addEventListener('click', removeSourceInput);
 $('input-format').addEventListener('change',updateInputType);
 $('unit-column').addEventListener('change', updateEvidenceOptions);
 $('use-assumed-sigma').addEventListener('change', updateEvidenceOptions);
@@ -1321,6 +1376,7 @@ async function refreshLanguage() {
     if (!inputInfo.preview.length) $('preview-table').textContent = t('d.No records available.');
   } else $('input-name').textContent = t('d.Your dataset');
   if (queryInputInfo) $('query-input-rows').textContent = t('d.{count} rows', {count: queryInputInfo.rows.toLocaleString()});
+  if (sourceInputInfo) $('source-input-rows').textContent = t('d.{count} rows', {count: sourceInputInfo.rows.toLocaleString()});
   for (const select of document.querySelectorAll('#molecule-options select,#query-input-info select')) {
     for (const option of select.options) if (!option.value) option.textContent = t('d.None');
   }
@@ -1356,6 +1412,7 @@ getJSON('/api/session').then(async info => {
   $('demo').disabled = !info.demo_available;
   if (info.input) { showInput(info.input); showPage('configure'); }
   if (info.query_input) showQueryInput(info.query_input);
+  if (info.source_input) showSourceInput(info.source_input);
   updateNavigation();
   if (info.job.state === 'running') { setBusy(true); showPage('explore'); poll(); }
   else if (info.job.state === 'done') {

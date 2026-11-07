@@ -9,7 +9,7 @@ const source = fs.readFileSync(path.join(assets, 'app.js'), 'utf8');
 const dictionaries = JSON.parse(fs.readFileSync(path.join(assets, 'i18n.json'), 'utf8'));
 const controls = ['input-format', 'target', 'activity-type', 'compound-column', 'smiles-col',
   'value-col', 'value-unit', 'unit-column', 'document-column', 'reference-column', 'relation-column', 'label-col',
-  'query-csv', 'query-smiles-col', 'query-id-col', 'representation', 'projection', 'occupancy',
+  'source-csv', 'query-csv', 'query-smiles-col', 'query-id-col', 'representation', 'projection', 'occupancy',
   'grouping', 'group-similarity', 'cluster-col', 'cluster-source', 'core-rule', 'core-coverage-target',
   'fmcs-timeout', 'grid-refinement', 'activity-confidence', 'merge-identical-documents',
   'use-assumed-sigma', 'assumed-sigma', 'evidence-model', 'support-level', 'offset-display',
@@ -302,7 +302,7 @@ const scenarios = {
         representation: 'morgan', projection: 'umap', grid_occupancy: .4, target_id: 'CHEMBL205',
         lower_threshold: 6, upper_threshold: 7, support_level: .8, offset_display: 'none'},
       files: ['map.svg', 'map_class_support.svg', 'map_metrics.csv'], metrics: {neighbor_recall: .75}, output_dir: '/saved/results'},
-      inputInfo: null, queryInputInfo: null, umapAvailable: null, busy: false, points: [measured],
+      inputInfo: null, queryInputInfo: null, sourceInputInfo: null, umapAvailable: null, busy: false, points: [measured],
       structureGroups: [group], highlightedGroup: '', transform, view: 'grid', tileWidth: 100, hasStructures: true,
       currentCell: {row: 3, col: 4}, neighborRelations: new Map(), requestNumber: 1, groupRequestNumber: 0,
       colors: {inactive: '#c44e52', medium: '#e6a23c', active: '#2a9d8f'},

@@ -47,3 +47,35 @@ for inspector CSV and evidence-ZIP downloads, separate from map output files.
 Existing same-named input fields stay in their original positions; the appended
 fields then have repeated CSV headings. The on-screen record table keeps its original schema.
 
+## Optional source lookup file
+
+For generic activity records without linked sources, the browser accepts a
+separate **Source lookup: ChEMBL export (optional)** file. Choose an activity
+export for the same target. It must contain recognizable SMILES and ChEMBL
+document ID columns. Matching uses rows with valid structures and document IDs
+of the form `CHEMBL` followed by digits. No extra dataset is bundled or fetched.
+
+Both input structures pass through `canonicalize_smiles` and
+`parent_structure(...)[0]`; each distinct SMILES is standardized once per map
+build. Salts match their parent structures, but stereoisomers remain distinct.
+The result lists every matching document, using the existing bundled document
+metadata and safe DOI, PubMed, patent and ChEMBL links. **Same value** marks a
+document only when a lookup record's `pchembl_value` is within 0.005 of one of
+the molecule's retained activity records after conversion to pChEMBL. Without a
+pChEMBL column, no document receives this mark. Marked documents sort first,
+then by ascending year and document ID, with missing years last.
+
+**Possible sources** means that the documents measured the same structure;
+matching does not establish where the user's measurements originated. Target
+and activity type do not filter matches. Data audit warns when the lookup file
+contains more than one target, because possible sources may concern other
+targets. The inspector shows this section only for measured molecules whose
+own sources have no links, including a message when no structure matches.
+
+Matching runs once during map generation and usually takes a few seconds for a
+single-target export. It runs locally without uploading data. Lookup results,
+counts and the file name remain in the browser session; neither the lookup file
+nor its name is added to map exports, manifests or `app_options.json`. Loading
+or removing a lookup file discards the current map. Changing measured input
+clears the lookup file. ChEMBL input ignores the optional file and hides its
+control, because its own document IDs already identify its sources.

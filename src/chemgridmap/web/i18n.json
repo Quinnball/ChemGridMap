@@ -745,7 +745,20 @@
     "u6.sourceCount": "Sources",
     "u6.linkedSourceCount": "Sources with links",
     "u6.remainingMatches": "{count} more rows. Full list: map_query_check.csv (Export)",
-    "server.query_invalid_smiles": "Unmeasured molecule {query_id} has invalid SMILES."
+    "server.query_invalid_smiles": "Unmeasured molecule {query_id} has invalid SMILES.",
+    "c.source-csv": "Source lookup: ChEMBL export (optional)",
+    "h.source-csv": "When your data has no document IDs, add a ChEMBL activity export for the same target. Structures are matched locally and documents with the same structure are listed as possible sources with links. The default is not to use a lookup file. Adding one shows a Possible sources section in the inspector; the map and exported files do not change. Your data is not uploaded. A typical single-target export adds only a few seconds.",
+    "u7.possibleSources": "Possible sources (same structure in the ChEMBL file)",
+    "u7.sourceNote": "Found by structure in {file}. These documents measured the same structure; this does not show that your values come from them. “Same value” marks a document that reports the same pChEMBL as one of your records.",
+    "u7.chemblRecords": "ChEMBL records: {n}",
+    "u7.sameValue": "Same value (pChEMBL {values})",
+    "u7.noMatch": "No record with the same structure in {file}.",
+    "u7.coverage": "Source lookup ({file}): {found} of {total} molecules have the same structure in the file; {same} of them match a reported pChEMBL.",
+    "u7.multipleTargets": "The source lookup file contains {n} targets; possible sources may come from other targets.",
+    "server.source_lookup_columns": "The source lookup file needs SMILES and ChEMBL document ID columns, as in a ChEMBL activity export.",
+    "server.source_lookup_match": "Matching structures to the source lookup file...",
+    "server.source_lookup_loaded": "Source lookup file loaded. Generate the map to apply this input.",
+    "server.source_lookup_removed": "Source lookup file removed. Generate the map to update the result."
   },
   "zh": {
     "s.001": "ChemGridMap | 分子工作台",
@@ -1235,7 +1248,7 @@
     "d.σ (assumed) {sigma} log units. Evidence units: {source}.": "σ（假定）{sigma} 对数单位。证据单元：{source}。",
     "d.Excluded records: {excluded} of {total}.": "被排除的记录：{excluded} 条，共 {total} 条。",
     "d.{column} column": "{column} 列",
-    "d.Evidence units come from {source}; {pairs} pairs with at least {minimum} shared entries were evaluated, {flagged} pairs were flagged, using |median difference| ≥ {threshold} log units and sign agreement ≥ {agreement}%.": "证据单元来自 {source}；评估了至少含 {minimum} 个共有条目的 {pairs} 个文献对，其中 {flagged} 个文献对被标出；判据为 |中位差| ≥ {threshold} 对数单位且同号比例 ≥ {agreement}%。",
+    "d.Evidence units come from {source}; {pairs} pairs with at least {minimum} shared entries were evaluated, {flagged} pairs were flagged, using |median difference| ≥ {threshold} log units and sign agreement ≥ {agreement}%.": "证据单元来自{source}；评估了至少含 {minimum} 个共有条目的 {pairs} 个文献对，其中 {flagged} 个文献对被标出；判据为 |中位差| ≥ {threshold} 对数单位且同号比例 ≥ {agreement}%。",
     "d.{id} | {members} | core {covered}/{size}": "{id} | {members} | 核心骨架 {covered}/{size}",
     "d.{method} groups are defined before projection. Colors may repeat; group IDs are authoritative.": "{method} 结构组在投影前定义。颜色可能重复，请以结构组 ID 为准。",
     "d.{value}% occupancy": "占用率 {value}%",
@@ -1493,6 +1506,19 @@
     "u6.sourceCount": "来源文献数",
     "u6.linkedSourceCount": "带链接的来源文献数",
     "u6.remainingMatches": "另有 {count} 行。完整列表：map_query_check.csv（导出）",
-    "server.query_invalid_smiles": "未测分子 {query_id} 的 SMILES 无效。"
+    "server.query_invalid_smiles": "未测分子 {query_id} 的 SMILES 无效。",
+    "c.source-csv": "来源文献查找：ChEMBL 导出文件（可选）",
+    "h.source-csv": "数据没有文献编号时，可加入同一靶标的 ChEMBL 活性导出文件。软件在本机按结构匹配，将结构相同的 ChEMBL 文献列为可能的来源文献，并给出链接。默认不使用。加入后，检查器多出“可能的来源文献”一节，地图与导出文件不变；数据不会上传；一般单个靶标的导出文件只增加几秒。",
+    "u7.possibleSources": "可能的来源文献（ChEMBL 文件中结构相同）",
+    "u7.sourceNote": "在 {file} 中按结构找到。这些文献测过同一结构，但不能说明本数据来自这些文献。标“数值相同”的文献，报告了与本数据某条记录相同的 pChEMBL。",
+    "u7.chemblRecords": "ChEMBL 记录：{n} 条",
+    "u7.sameValue": "数值相同（pChEMBL {values}）",
+    "u7.noMatch": "{file} 中没有结构相同的记录。",
+    "u7.coverage": "来源文献查找（{file}）：{total} 个分子中，{found} 个在该文件中有结构相同的记录，其中 {same} 个与某篇文献报告的 pChEMBL 相同。",
+    "u7.multipleTargets": "来源文献查找文件包含 {n} 个靶标，可能的来源文献也可能来自其他靶标。",
+    "server.source_lookup_columns": "来源文献查找文件需要 SMILES 列与 ChEMBL 文献编号列，即 ChEMBL 活性导出文件的格式。",
+    "server.source_lookup_match": "正在按结构匹配来源文献查找文件……",
+    "server.source_lookup_loaded": "来源文献查找文件已载入。请生成地图以应用此文件。",
+    "server.source_lookup_removed": "来源文献查找文件已移除。请生成地图以更新结果。"
   }
 }
