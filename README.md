@@ -94,6 +94,19 @@ measured/unmeasured cells and combines with structure-group highlighting;
 select an unmeasured molecule to inspect its Morgan-nearest measured molecules.
 No activity is predicted, and grid adjacency is not evidence.
 
+Use **EN / 中文** in the upper-right corner to switch the interface language.
+The question-mark buttons beside settings explain their defaults, choices and
+effects. Exported files always use English, regardless of the interface language.
+
+For measured molecules, the inspector's **Sources** section lists each source
+document and its retained-record count. DOI, PubMed, patent and ChEMBL links
+come from the bundled **ChEMBL 37 document table** (101,100 documents), so no
+network request is needed to look them up. Clicking a link opens its destination
+in a new browser tab. Documents without another identifier retain their ChEMBL
+document-page link; laboratory evidence units without references are shown as
+having no available links. Inspector source-record CSV downloads and evidence
+ZIPs include the document identifiers and ChEMBL document-page URL.
+
 The package also contains a CA II smoke test:
 
 ```bash
@@ -201,6 +214,15 @@ falls back to Gaussian support where no unit remains. Use
 `--no-merge-identical-documents` to keep re-reported identical values as
 separate evidence units. The support and offset criteria described above apply
 to generic records as well.
+
+In the browser, the optional **Reference column (DOI, PubMed ID or URL)** adds
+source links to generic records. Choose a column containing DOI values (bare or
+with a DOI URL/prefix), PubMed IDs (digits or `PMID:`), or `http`/`https` URLs.
+References are listed under their evidence unit, or grouped by reference value
+when no evidence-unit column is selected. Other values remain plain text.
+The reference column defaults to None and does not change evidence units,
+activity, σ or class support; it is recorded in `app_options.json` only when
+selected.
 
 A curated one-row-per-molecule table remains supported through `--smiles-col`,
 `--value-col` and `--label-col`.
@@ -468,6 +490,11 @@ version used for the analysis:
 ## License
 
 ChemGridMap source code is released under the BSD 3-Clause License; see
-[`LICENSE`](LICENSE). ChEMBL-derived data are distributed under the ChEMBL
-data license, CC BY-SA 3.0. Check the source snapshot and attribution before
-redistributing derived tables or maps.
+[`LICENSE`](LICENSE). The bundled CA II example and ChEMBL 37 document table
+are ChEMBL-derived data, distributed under the ChEMBL data license,
+[CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/), with attribution
+to [ChEMBL at EMBL-EBI](https://www.ebi.ac.uk/chembl/). The document table comes
+from the ChEMBL web service document resource, version ChEMBL_37 (released
+2026-05-01), downloaded on 2026-11-07. Its source, checksum and license are
+recorded in `chemgridmap/data/chembl37_documents.json`. Check each source snapshot
+and attribution before redistributing derived tables or maps.

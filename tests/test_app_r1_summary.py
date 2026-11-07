@@ -77,7 +77,12 @@ def test_chembl_summary_preserves_the_existing_curation_report(tmp_path):
     session.start({"projection": "pca", "grouping": "none", "output_formats": ["svg"]},
                   background=False)
     assert session.job["state"] == "done", session.job
-    assert session.job["report"] is session.curation.report
+    report = session.job["report"]
+    assert {key: value for key, value in report.items() if key != "document_coverage"} == session.curation.report
+    assert report["document_coverage"]["total"] == 0
+    saved = json.loads(session.files["map_curation_report.json"].read_text(encoding="utf-8"))
+    assert saved == session.curation.report
+    assert "document_coverage" not in saved
     assert session.job["report"]["input_rows"] == 4
     assert session.job["report"]["retained_activity_records"] == 4
     assert session.job["report"]["repeated_conflicted_molecules"] == 1

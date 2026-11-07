@@ -149,3 +149,14 @@ html[lang="zh-CN"] #query-csv { position: absolute; width: 1px; height: 1px; pad
 html[lang="zh-CN"] .localized-file-picker { display: block; width: max-content; max-width: 100%; margin-top: 9px; padding: 6px 10px; border: 1px solid #cad8ce; border-radius: 5px; background: #fff; cursor: pointer; }
 html[lang="zh-CN"] #query-csv:focus-visible + .localized-file-picker { outline: 3px solid #bd863f; outline-offset: 3px; }
 html[lang="zh-CN"] #query-csv:disabled + .localized-file-picker { opacity: .45; cursor: not-allowed; }
+
+/* 每份来源均保留在列表中；长列表可用键盘或指针滚动。 */
+#sources { margin: 18px 0; }
+#sources h3 { margin: 0 0 9px; font-size: 12px; }
+.source-list { list-style: none; padding: 0; margin: 0; max-height: 300px; overflow-y: auto; border: 1px solid var(--line); border-radius: 5px; }
+.source-list li { padding: 10px; font-size: 11px; overflow-wrap: anywhere; }
+.source-list li + li { border-top: 1px solid var(--line); }
+.source-list .micro { margin: 5px 0; font-size: 10px; }
+.source-links { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.source-links a { color: var(--green); text-decoration: underline; text-underline-offset: 2px; }
+.source-reference { flex-basis: 100%; }

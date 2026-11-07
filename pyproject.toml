@@ -57,7 +57,7 @@ chemgridmap = "chemgridmap.cli:main"
 chemgridmap-app = "chemgridmap.app:main"
 
 [tool.setuptools.package-data]
-chemgridmap = ["web/*.html", "web/*.css", "web/*.js", "web/*.svg", "data/*.csv", "data/*.json"]
+chemgridmap = ["web/*.html", "web/*.css", "web/*.js", "web/*.svg", "web/*.json", "data/*.csv", "data/*.csv.gz", "data/*.json"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

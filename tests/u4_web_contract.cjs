@@ -8,7 +8,7 @@ const html = fs.readFileSync(path.join(assets, 'index.html'), 'utf8');
 const source = fs.readFileSync(path.join(assets, 'app.js'), 'utf8');
 const dictionaries = JSON.parse(fs.readFileSync(path.join(assets, 'i18n.json'), 'utf8'));
 const controls = ['input-format', 'target', 'activity-type', 'compound-column', 'smiles-col',
-  'value-col', 'value-unit', 'unit-column', 'document-column', 'relation-column', 'label-col',
+  'value-col', 'value-unit', 'unit-column', 'document-column', 'reference-column', 'relation-column', 'label-col',
   'query-csv', 'query-smiles-col', 'query-id-col', 'representation', 'projection', 'occupancy',
   'grouping', 'group-similarity', 'cluster-col', 'cluster-source', 'core-rule', 'core-coverage-target',
   'fmcs-timeout', 'grid-refinement', 'activity-confidence', 'merge-identical-documents',
@@ -316,7 +316,7 @@ const scenarios = {
       fail(error) { throw error; },
     });
     const names = ['stat', 'format', 'ordinal', 'percentage', 'countLabel', 'legendItem', 'renderColorLegend',
-      'renderLegend', 'coreRule', 'selectGroup', 'table', 'selectColumns', 'showDataAudit', 'showResult', 'measuredLabel', 'showQuerySelection', 'inspect',
+      'renderLegend', 'coreRule', 'selectGroup', 'table', 'selectColumns', 'showDataAudit', 'showResult', 'measuredLabel', 'showQuerySelection', 'showSources', 'inspect',
       'updateInputType', 'updateEvidenceOptions', 'applyTransform', 'translateSVGText', 'refreshValidation', 'status', 'refreshLanguage'];
     vm.runInContext(names.map(realFunction).join('\n'), context);
     context.showResult.grouping = {groups: [group], protocol: {method: 'Butina'}};
@@ -407,7 +407,8 @@ const scenarios = {
   },
 };
 
-(async () => {
+module.exports = {environment, runtime, realFunction, dictionaries};
+if (require.main === module) (async () => {
   assert.ok(scenario in scenarios, `Unknown scenario: ${scenario}`);
   await scenarios[scenario]();
   console.log(`U4 ${scenario}: passed`);

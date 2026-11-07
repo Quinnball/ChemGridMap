@@ -75,8 +75,11 @@ def test_generic_records_counts_median_columns_offsets_and_csv(generic_session):
     detail, records = session.inspect(molecule_id="C1")
     expected_columns = ["source_row", "compound_id", "run_id", "ic50", "unit", "relation",
                         "activity_pchembl_raw", "note", "smiles"]
-    assert records.columns.tolist() == detail["record_columns"] == expected_columns
-    assert list(detail["records"][0]) == expected_columns
+    original_columns = expected_columns.copy()
+    expected_columns += ["document_doi", "document_pubmed_id", "document_patent_id", "document_url"]
+    assert records.columns.tolist() == expected_columns
+    assert detail["record_columns"] == original_columns
+    assert list(detail["records"][0]) == original_columns
     assert detail["total_records"] == detail["molecule"]["n_records"] == len(records) == 3
     assert records.source_row.tolist() == [0, 1, 2]
     assert set(records.unit) == {"nM", "µM"}
@@ -96,7 +99,10 @@ def test_generic_records_counts_median_columns_offsets_and_csv(generic_session):
         "the display is unchanged because the offset rule is off.",
     ]
     assert not {"n_assays", "n_documents"} & summary.keys()
-    pd.testing.assert_frame_equal(evidence_csv(session, "C1"), records.reset_index(drop=True))
+    downloaded = evidence_csv(session, "C1")
+    pd.testing.assert_frame_equal(downloaded[original_columns], records[original_columns].reset_index(drop=True))
+    assert downloaded.columns.tolist() == expected_columns
+    assert downloaded[expected_columns[-4:]].isna().all().all()
     # A compound represented only in R1 must not inherit the unrelated R2/R3 pair.
     single, _ = session.inspect(molecule_id="C6")
     assert len(single["summary"]["warnings"]) == 1

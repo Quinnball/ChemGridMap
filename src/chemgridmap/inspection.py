@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import csv
+from functools import lru_cache
+import gzip
 import hashlib
 import json
 from pathlib import Path
 import re
+from urllib.parse import quote, urlsplit
 
 import numpy as np
 import pandas as pd
@@ -14,6 +18,166 @@ from .chembl import detect_chembl_columns
 from .plotting import render_svg
 from .activity import RULE_KEYS, RULE_COLUMNS, activity_annotations
 from .provenance import file_digests
+
+
+@lru_cache(maxsize=1)
+def load_documents():
+    """Read the bundled ChEMBL 37 document table, keyed by document ID.
+
+    Values retain the CSV strings, including empty strings. The cached table is
+    shared by callers and must be treated as read-only. No network is used.
+    """
+    path = Path(__file__).with_name("data") / "chembl37_documents.csv.gz"
+    with gzip.open(path, "rt", encoding="utf-8", newline="") as handle:
+        return {row["document_chembl_id"]: row for row in csv.DictReader(handle)}
+
+
+def _reference_text(value):
+    if value is None or pd.isna(value):
+        return ""
+    if isinstance(value, (float, np.floating)) and float(value).is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def normalize_doi(value):
+    """Remove supported DOI prefixes and surrounding whitespace, preserving case."""
+    text = _reference_text(value).strip()
+    return re.sub(r"^(?:doi:\s*|https?://(?:dx\.)?doi\.org/)", "", text,
+                  flags=re.IGNORECASE).strip()
+
+
+def reference_link(value):
+    """Resolve a DOI, PMID or HTTP(S) reference into a link, or return ``None``.
+
+    The returned ``kind``, ``label`` and ``url`` are plain strings. Renderers
+    must escape labels and open links only after an explicit user click.
+    """
+    text = _reference_text(value).strip()
+    doi = normalize_doi(text)
+    if re.fullmatch(r"10\.\d{4,9}/.+", doi, flags=re.DOTALL):
+        return {"kind": "doi", "label": "DOI " + doi,
+                "url": "https://doi.org/" + quote(doi, safe="/")}
+    pmid = (re.fullmatch(r"PMID:\s*(\d+)", text, flags=re.IGNORECASE)
+            or re.fullmatch(r"(\d{1,9})", text))
+    if pmid:
+        identifier = pmid.group(1)
+        return {"kind": "pubmed", "label": "PubMed " + identifier,
+                "url": "https://pubmed.ncbi.nlm.nih.gov/" + identifier + "/"}
+    try:
+        parsed = urlsplit(text)
+    except ValueError:
+        return None
+    if parsed.scheme.lower() in {"http", "https"} and parsed.netloc:
+        return {"kind": "url", "label": text, "url": text}
+    return None
+
+
+def _document_links(document):
+    links = []
+    if document.get("doi"):
+        link = reference_link(document["doi"])
+        if link:
+            links.append(link)
+    if document.get("pubmed_id"):
+        link = reference_link("PMID:" + document["pubmed_id"])
+        if link:
+            links.append(link)
+    if document.get("patent_id"):
+        patent = document["patent_id"]
+        links.append({"kind": "patent", "label": "Patent " + patent,
+                      "url": "https://patents.google.com/patent/" +
+                             quote(patent.replace("-", ""), safe="")})
+    identifier = document["document_chembl_id"]
+    links.append({"kind": "chembl", "label": "ChEMBL " + identifier,
+                  "url": "https://www.ebi.ac.uk/chembl/explore/document/" + identifier})
+    return links
+
+
+def build_sources(records, document_column, reference_column=None):
+    """Group retained records into document/reference sources without changing them.
+
+    Evidence-unit IDs take precedence for grouping. Without an evidence column,
+    nonempty reference values form the groups. References remain visible even
+    when their protocol cannot become a link. Results sort by year then ID,
+    with unknown years last; all records and distinct references are retained.
+    """
+    group_column = document_column or reference_column
+    if not group_column or group_column not in records:
+        return []
+    documents = load_documents()
+    groups = records.groupby(records[group_column].map(_reference_text).str.strip(), sort=True)
+    sources = []
+    for identifier, group in groups:
+        if not identifier:
+            continue
+        document = documents.get(identifier, {}) if document_column else {}
+        links = _document_links(document) if document else []
+        references = []
+        seen_urls = {link["url"] for link in links}
+        if reference_column and reference_column in group:
+            values = dict.fromkeys(group[reference_column].map(_reference_text))
+            for value in values:
+                if not value.strip():
+                    continue
+                link = reference_link(value)
+                references.append({"value": value, **(link or {
+                    "kind": "text", "label": value, "url": ""})})
+                if link and link["url"] not in seen_urls:
+                    links.append(link)
+                    seen_urls.add(link["url"])
+        sources.append({"id": identifier, "doc_type": document.get("doc_type", ""),
+                        "journal": document.get("journal", ""),
+                        "year": document.get("year", ""), "n_records": len(group),
+                        "links": links, "references": references})
+    return sorted(sources, key=lambda source: (
+        int(source["year"]) if source["year"].isdigit() else float("inf"), source["id"]))
+
+
+def document_coverage(sources):
+    """Count linked sources and mutually exclusive ChEMBL coverage categories.
+
+    Patents take precedence over DOI/PubMed sources to avoid double-counting the
+    few ChEMBL patents with publication identifiers. ``linked`` also includes
+    safe user-supplied URLs; ``unlinked`` preserves evidence units without links.
+    """
+    coverage = {"total": len(sources), "doi_or_pubmed": 0, "patent": 0,
+                "chembl_only": 0, "linked": 0, "unlinked": 0}
+    for source in sources:
+        kinds = {link["kind"] for link in source["links"]}
+        coverage["linked" if kinds else "unlinked"] += 1
+        if "patent" in kinds:
+            coverage["patent"] += 1
+        elif kinds & {"doi", "pubmed"}:
+            coverage["doi_or_pubmed"] += 1
+        elif "chembl" in kinds:
+            coverage["chembl_only"] += 1
+    return coverage
+
+
+def enrich_source_records(records, document_column=None):
+    """Append four ChEMBL document fields to a copy of inspector source records.
+
+    Existing columns and their order are preserved. These fields are only for
+    inspector downloads, never for map calculation or normal run output files.
+    An input field with the same name remains in place, yielding a repeated CSV heading.
+    """
+    additions = pd.DataFrame(index=records.index)
+    if document_column is None and "document_chembl_id" in records:
+        document_column = "document_chembl_id"
+    documents = load_documents()
+    identifiers = (records[document_column].map(_reference_text).str.strip()
+                   if document_column and document_column in records
+                   else pd.Series("", index=records.index))
+    selected = [documents.get(identifier, {}) for identifier in identifiers]
+    for output, source in (("document_doi", "doi"), ("document_pubmed_id", "pubmed_id"),
+                           ("document_patent_id", "patent_id")):
+        additions[output] = [document.get(source, "") for document in selected]
+    additions["document_url"] = [
+        "https://www.ebi.ac.uk/chembl/explore/document/" + document["document_chembl_id"]
+        if document else "" for document in selected]
+    # CSV permits repeated headings: even existing same-named input fields stay untouched.
+    return pd.concat([records, additions], axis=1)
 
 
 def annotation_rules(row, parameters=None):

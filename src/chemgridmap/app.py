@@ -24,7 +24,8 @@ import pandas as pd
 from . import __version__
 from .chembl import curate_chembl_activity_data, detect_chembl_columns, save_chembl_curation
 from .evidence import annotate_activity_confidence, prepare_generic_activity_records
-from .inspection import inspect_entry, load_audit_context, offset_pair_details
+from .inspection import (build_sources, document_coverage, enrich_source_records,
+                         inspect_entry, load_audit_context, offset_pair_details)
 from .pipeline import build_grid_map
 from .plotting import render_svg
 from .provenance import file_digests
@@ -59,7 +60,7 @@ def point_rows(data):
     return json_rows(data[columns])
 
 
-def _read_input(content, *, dtype=None):
+def _read_input(content, *, dtype=None, keep_default_na=True):
     if not content or len(content) > MAX_UPLOAD:
         raise ValueError("Choose a non-empty CSV smaller than 50 MB.")
     try:
@@ -68,7 +69,8 @@ def _read_input(content, *, dtype=None):
             delimiter = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
         except csv.Error:
             delimiter = ","
-        frame = pd.read_csv(io.BytesIO(content), sep=delimiter, encoding="utf-8-sig", dtype=dtype)
+        frame = pd.read_csv(io.BytesIO(content), sep=delimiter, encoding="utf-8-sig", dtype=dtype,
+                            keep_default_na=keep_default_na)
     except (UnicodeError, pd.errors.ParserError, pd.errors.EmptyDataError) as exc:
         raise ValueError("Could not read this UTF-8 CSV. Check its delimiter and encoding.") from exc
     if frame.empty:
@@ -204,6 +206,8 @@ class AppSession:
                     raise ValueError(f"{key} requires a column in the unmeasured-molecule input.")
             if options.get("unit_column") and options["unit_column"] not in self.frame:
                 raise ValueError("The selected unit column was not found.")
+            if options.get("reference_column") and options["reference_column"] not in self.frame:
+                raise ValueError("The selected reference column was not found.")
             self.result, self.curation, self.files = None, None, {}
             self.generic_records = None
             self.activity_confidence = None
@@ -383,6 +387,18 @@ class AppSession:
                     str(pair["document_a"]), str(pair["document_b"])))[:10]
                 report = {**report, "activity_confidence": {
                     **confidence_report, "document_offsets_top10": top_pairs}}
+            # Literature annotations belong to the browser audit, never the map outputs or fit.
+            if curation is not None:
+                document_column = curation.report["detected_columns"].get("document_id")
+                sources = build_sources(curation.retained_records, document_column)
+                report = {**report, "document_coverage": {
+                    "kind": "chembl", **document_coverage(sources)}}
+            elif generic_records is not None and options.get("reference_column"):
+                reference_records = self._reference_records(generic_records, options)
+                sources = build_sources(reference_records, options["document_column"],
+                                        options["reference_column"])
+                report = {**report, "document_coverage": {
+                    "kind": "reference", **document_coverage(sources)}}
             with self.lock:
                 self.result, self.curation, self.files = result, curation, files
                 self.generic_records = generic_records
@@ -447,6 +463,16 @@ class AppSession:
     def snapshot(self):
         with self.lock:
             return dict(self.job)
+
+    def _reference_records(self, records, options):
+        """Recover selected reference strings without altering calculation records."""
+        column = options.get("reference_column")
+        if not column:
+            return records
+        references = _read_input(self.raw, dtype=str, keep_default_na=False)[column]
+        records = records.copy()
+        records[column] = records.source_row.map(references)
+        return records
 
     def _generic_record_audit(self, chosen, summary):
         row = chosen.iloc[0]
@@ -529,6 +555,15 @@ class AppSession:
                            ).get("multi_unit_entry_count")}
                 if self.generic_records is not None:
                     records = self._generic_record_audit(chosen, summary)
+            options = self.job["options"]
+            document_column = (curation.report["detected_columns"].get("document_id")
+                               if curation is not None else options["document_column"])
+            source_records = self._reference_records(records, options)
+            sources = build_sources(source_records, document_column, options.get("reference_column"))
+            # Keep the on-screen record schema intact; the four appended fields are downloads.
+            display_records = records
+            if not records.empty:
+                records = enrich_source_records(records, document_column)
             fit = self.activity_confidence or {}
             if fit.get("method") == "assumed_sigma":
                 summary.update(method="assumed_sigma", assumed_sigma=fit["assumed_sigma"],
@@ -565,13 +600,14 @@ class AppSession:
                     bundle.writestr(name, content)
             self.files[archive.name] = archive
             detail = {"molecule": json_rows(chosen)[0], "summary": summary,
-                    "records": json_rows(records if self.generic_records is not None else records.head(100)),
+                    "sources": sources,
+                    "records": json_rows(display_records if self.generic_records is not None else display_records.head(100)),
                     "total_records": len(records),
                     "neighbors": json_rows(neighbor_table), "audit_file": archive.name,
                     "svg": image.read_text(encoding="utf-8"),
                     "neighborhood_svg": neighborhood.read_text(encoding="utf-8")}
             if self.generic_records is not None:
-                detail["record_columns"] = records.columns.tolist()
+                detail["record_columns"] = display_records.columns.tolist()
             return detail, records
 
 
@@ -590,16 +626,22 @@ def validate_options(options):
                 "support_level": .8, "offset_display": "none",
                 "offset_min_shared": 3, "offset_min_difference": 1.0,
                 "offset_sign_agreement": .8, "identity_conflicts": "error"}
-    optional = {"value_unit", "unit_column", "assumed_sigma", "query_smiles_col", "query_id_col"}
+    optional = {"value_unit", "unit_column", "assumed_sigma", "query_smiles_col", "query_id_col",
+                "reference_column"}
     if not isinstance(options, dict) or set(options) - set(defaults) - optional:
         raise ValueError("Unknown map option.")
     values = {**defaults, **options}
+    # An unused reference selector must preserve the BASE app_options.json byte for byte.
+    if values.get("reference_column") is None or values.get("reference_column") == "":
+        values.pop("reference_column", None)
     if values.get("value_unit", "p") not in {"p", "M", "mM", "uM", "nM", "pM"}:
         raise ValueError("Invalid value_unit.")
-    for key in ("unit_column", "query_smiles_col", "query_id_col"):
+    for key in ("unit_column", "query_smiles_col", "query_id_col", "reference_column"):
         if key in values and values[key] is not None:
             if not isinstance(values[key], str) or not values[key].strip():
                 raise ValueError(f"{key} must be a non-empty column name.")
+    if values.get("reference_column") and (values["input_format"] != "molecule" or not values["compound_column"]):
+        raise ValueError("Reference columns require generic activity records.")
     if values.get("unit_column") and "value_unit" in options:
         raise ValueError("Unit and unit column cannot be used together.")
     if values["input_format"] == "chembl" and (values.get("value_unit", "p") != "p" or values.get("unit_column")):

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add inspector source-document links from the bundled ChEMBL 37 document table,
+  optional DOI/PubMed/URL references for generic records, link-coverage audit
+  summaries and document links in inspector record downloads; preserve map
+  calculations and default exports.
+- Add English/Chinese browser switching and question-mark setting explanations;
+  keep exports in English, correct Chinese punctuation and include the language
+  dictionary and document data in installed packages.
 - List the retained records, record CSV and offset-pair notes for generic
   activity records in the browser inspector; show their excluded records and
   the evaluated evidence-unit pairs, flagged pairs first, in Data audit.
