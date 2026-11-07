@@ -1,7 +1,7 @@
 :root {
   --ink: #173e34; --muted: #697d75; --line: #dce5df; --paper: #f5f7f3;
   --green: #25664e; --pale: #e9f1e9; --red: #a7474b;
-  --sans: 'Trebuchet MS', 'Helvetica Neue', sans-serif; --serif: Georgia, 'Times New Roman', serif;
+  --sans: 'Trebuchet MS', 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; --serif: Georgia, 'Times New Roman', 'Songti SC', 'Noto Serif CJK SC', serif;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -118,3 +118,34 @@ footer { display: flex; justify-content: space-between; gap: 15px; padding: 18px
 #map-stage .neighbor-representation_only>rect, #map-stage circle.neighbor-representation_only, #map-stage [data-outline=representation_only] { stroke: #7A5195 !important; stroke-width: calc(2.5 * var(--zoom-inverse, 1)) !important; stroke-dasharray: calc(1.5 * var(--zoom-inverse, 1)) calc(2.5 * var(--zoom-inverse, 1)); stroke-linecap: round; stroke-opacity: 1; }
 #map-stage g.selected-cell>rect, #map-stage circle.selected-cell, #map-stage [data-outline=selected] { stroke: #193e91 !important; stroke-width: calc(3.5 * var(--zoom-inverse, 1)) !important; stroke-opacity: 1 !important; stroke-dasharray: none; }
 @media(max-width:760px) { .core-summary { grid-template-columns: 1fr 1fr; }.core-summary>div { grid-column: 1 / -1; }.group-controls>label { flex: 1 1 40%; }.group-controls>button { width: 100%; } }
+
+/* Local language controls and help never alter input values or map data. */
+.language-switch { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.language-switch button { padding: 5px 3px; border-radius: 3px; font-size: 11px; }
+.language-switch button[aria-pressed="true"] { color: var(--green); font-weight: bold; background: var(--pale); }
+.language-switch>span { opacity: .5; }
+.parameter-help { display: inline-flex; width: 15px; height: 15px; min-width: 15px; align-items: center; justify-content: center; padding: 0; margin-left: 5px; border: 1px solid currentColor; border-radius: 50%; font: 10px/1 var(--sans); color: var(--muted); vertical-align: 1px; opacity: .5; cursor: help; }
+.parameter-help:hover, .parameter-help:focus { opacity: 1; color: var(--green); }
+.checkbox .parameter-help { flex: 0 0 15px; margin-left: 0; }
+.parameter-tooltip { position: fixed; z-index: 10000; width: max-content; max-width: min(320px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; padding: 11px 13px; background: #183e34; color: #fff; border: 1px solid #426759; border-radius: 7px; box-shadow: 0 6px 24px #173e3438; font: 12px/1.6 var(--sans); overflow-wrap: anywhere; white-space: pre-line; }
+html[lang="zh-CN"] .eyebrow, html[lang="zh-CN"] .brand-tag { letter-spacing: .08em; }
+html[lang="zh-CN"] h1 { letter-spacing: 0; }
+html[lang="zh-CN"] .form-row>label, html[lang="zh-CN"] .group-controls>label { min-width: 0; }
+html[lang="zh-CN"] .inspector dd { overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .topbar { height: auto; min-height: 76px; padding-top: 10px; padding-bottom: 10px; flex-wrap: wrap; gap: 7px; }
+  .top-actions { flex-basis: 100%; justify-content: flex-end; gap: 9px; }
+  .top-actions .quiet { padding: 4px; }
+  .settings-card .form-row { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .density-control { gap: 15px; }
+  html[lang="zh-CN"] .welcome h1 { font-size: clamp(35px, 11.8vw, 46px); }
+  html[lang="zh-CN"] .group-controls .checkbox { flex-basis: 100%; }
+}
+
+/* Native file buttons follow browser UI language. Keep them in English mode,
+   and retain the same keyboard-accessible input behind a Chinese label. */
+.localized-file-picker { display: none; }
+html[lang="zh-CN"] #query-csv { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); }
+html[lang="zh-CN"] .localized-file-picker { display: block; width: max-content; max-width: 100%; margin-top: 9px; padding: 6px 10px; border: 1px solid #cad8ce; border-radius: 5px; background: #fff; cursor: pointer; }
+html[lang="zh-CN"] #query-csv:focus-visible + .localized-file-picker { outline: 3px solid #bd863f; outline-offset: 3px; }
+html[lang="zh-CN"] #query-csv:disabled + .localized-file-picker { opacity: .45; cursor: not-allowed; }

@@ -1,12 +1,242 @@
+// BEGIN CHEMGRIDMAP I18N RUNTIME
+// 仅匹配软件已知的英文消息模板；未命中的服务器信息保持原文。
+function installServerTranslations(i18n) {
+  let templates;
+  const extraTemplates = [
+    'd.{term} vs grid neighbors',
+    'd.{representation} ({metric}), k={k}: {shared} shared neighbors out of {representationCount} {term} neighbors and {gridCount} grid neighbors. Recall {recall}%.',
+    'd.{ordinal} fingerprint neighbor', 'd.{ordinal} representation neighbor', 'd.distance {distance}'
+  ];
+  const translatedParameters = new Set(['reason', 'touches', 'display', 'term', 'representation', 'metric', 'activityClass']);
+  const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  i18n.translateServer = function translateServer(message) {
+    if (message == null || i18n.getLanguage() === 'en') return message;
+    const original = String(message), dictionary = i18n.dictionaries.en;
+    if (!templates) {
+      templates = Object.keys(dictionary).filter(key => key.startsWith('server.') || extraTemplates.includes(key)).map(key => {
+        const names = [], pattern = dictionary[key].split(/(\{\w+\})/g).map(part => {
+          if (!/^\{\w+\}$/.test(part)) return escape(part);
+          names.push(part.slice(1, -1)); return '(.+?)';
+        }).join('');
+        return {key, names, pattern: new RegExp('^' + pattern + '$')};
+      });
+    }
+    // 保留状态信息的秒数，并且仅在主消息已识别时翻译时间后缀。
+    const elapsed = original.match(/^(.*) \((\d+) s\)$/s);
+    if (elapsed) {
+      const body = translateServer(elapsed[1]);
+      if (body !== elapsed[1]) return body + i18n.t('server.elapsed', {seconds: elapsed[2]});
+    }
+    // SVG 仅在屏幕上替换说明，保留分子 ID 与源文件字节。
+    const projection = original.match(/^(.*) · (active|medium|inactive|unlabelled|not_measured)$/);
+    if (projection) return i18n.t('svg.projection_title', {id: projection[1], activityClass: translateServer(projection[2])});
+    const card = original.match(/^(pChEMBL [-\d.]+|activity not supplied) \| (.*?)(?: \| (core absent|unaligned: stereo safety))?$/);
+    if (card) return i18n.t('svg.card', {activity: translateServer(card[1]), activityClass: translateServer(card[2]), alignment: card[3] ? ' | ' + translateServer(card[3]) : ''});
+    const gridTitle = original.match(/^(.*) \| (molecule_id=.*)$/);
+    if (gridTitle) {
+      const details = gridTitle[2].split('; '), fields = new Set(['molecule_id', 'activity_pchembl', 'n_records', 'pchembl_min', 'pchembl_max', 'is_conflicted', 'has_class_boundary_crossing', 'source_rows']);
+      if (details.every(part => fields.has(part.split('=')[0]))) return i18n.t('svg.grid_title', {id: gridTitle[1], details: details.map(part => {
+        const at = part.indexOf('='), field = part.slice(0, at);
+        return i18n.t('d.' + field, {activityTerm: document.getElementById('input-format')?.value === 'chembl' ? 'pChEMBL' : 'pActivity'}) + part.slice(at);
+      }).join('; ')});
+    }
+    for (const template of templates) {
+      const match = original.match(template.pattern);
+      if (!match) continue;
+      const values = Object.fromEntries(template.names.map((name, index) => {
+        let value = match[index + 1];
+        if (name === 'ordinal') value = value.replace(/(st|nd|rd|th)$/, '');
+        else if (translatedParameters.has(name)) {
+          const nested = translateServer(value);
+          value = nested !== value ? nested : i18n.t('d.' + value);
+        }
+        return [name, value];
+      }));
+      return i18n.t(template.key, values);
+    }
+    // 已知类别和方法名可单独出现；ID、文件名和来源列名不经过此函数。
+    if (Object.hasOwn(dictionary, 'd.' + original)) return i18n.t('d.' + original);
+    return message;
+  };
+}
+
+(() => {
+  'use strict';
+  const dictionaries = {en: {}, zh: {}};
+  let language = 'en';
+  let activeHelp = null;
+  let helpPinned = false;
+  let tooltip = null;
+  const storageKey = 'chemgridmap.language';
+  function initialLanguage() {
+    let saved;
+    try { saved = window.localStorage.getItem(storageKey); } catch (_) { /* Private storage may be disabled. */ }
+    if (saved === 'en' || saved === 'zh') return saved;
+    return String(window.navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+  }
+  function t(key, values = {}) {
+    const template = dictionaries[language][key] ?? dictionaries.en[key] ?? (key.startsWith('d.') ? key.slice(2) : key);
+    return String(template).replace(/\{([\w]+)\}/g, (match, name) => Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : match);
+  }
+  function getLanguage() { return language; }
+  function activityName() {
+    return document.getElementById('input-format')?.value === 'chembl' ? 'pChEMBL' : 'pActivity';
+  }
+  function helpText(button) { return t(button.dataset.help, {activity: activityName()}); }
+  function updateHelpLabels() {
+    document.querySelectorAll('[data-help]').forEach(button => {
+      const id = button.dataset.helpControl;
+      const name = id === 'lower' || id === 'upper' ? t(`u.${id}`, {activity: activityName()}) : t(`c.${id}`);
+      button.setAttribute('aria-label', t('u.help', {name}));
+    });
+    if (activeHelp) {
+      tooltip.textContent = helpText(activeHelp);
+      positionHelp();
+    }
+  }
+  function applyTranslations(root = document) {
+    root.querySelectorAll('[data-i18n]').forEach(element => { element.textContent = t(element.dataset.i18n); });
+    // Translate direct text nodes only: icons, controls and live values remain intact.
+    root.querySelectorAll('[data-i18n-text]').forEach(element => {
+      const keys = element.dataset.i18nText.split('|');
+      const nodes = Array.from(element.childNodes).filter(node => node.nodeType === 3 && node.textContent.trim());
+      nodes.forEach((node, index) => {
+        if (keys[index] && keys[index] !== '-') {
+          const leading = node.textContent.match(/^\s*/)[0], trailing = node.textContent.match(/\s*$/)[0];
+          node.textContent = leading + t(keys[index]) + trailing;
+        }
+      });
+    });
+    for (const attribute of ['aria-label', 'placeholder', 'alt', 'title']) {
+      root.querySelectorAll(`[data-i18n-${attribute}]`).forEach(element => {
+        element.setAttribute(attribute, t(element.getAttribute(`data-i18n-${attribute}`)));
+      });
+    }
+    root.querySelectorAll('[data-i18n-child]').forEach(element => {
+      const [id, key] = element.dataset.i18nChild.split(':');
+      const child = document.getElementById(id);
+      if (child) child.textContent = t(key);
+    });
+    root.querySelectorAll('[data-i18n-option]').forEach(element => {
+      const [id, key] = element.dataset.i18nOption.split(':');
+      const select = document.getElementById(id);
+      if (select?.options.length) select.options[0].textContent = t(key);
+    });
+    updateHelpLabels();
+  }
+  function setLanguage(next) {
+    language = next === 'zh' || next === 'zh-CN' ? 'zh' : 'en';
+    try { window.localStorage.setItem(storageKey, language); } catch (_) { /* Language switching works without storage. */ }
+    document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en';
+    applyTranslations();
+    document.querySelectorAll('[data-language]').forEach(button => {
+      button.setAttribute('aria-pressed', String(button.dataset.language === language));
+    });
+    document.dispatchEvent(new CustomEvent('chemgridmap:languagechange', {detail: {language}}));
+    return language;
+  }
+  function positionHelp() {
+    if (!activeHelp || !tooltip || tooltip.hidden) return;
+    const viewport = window.visualViewport;
+    const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0;
+    const width = viewport?.width || window.innerWidth, height = viewport?.height || window.innerHeight;
+    const margin = 8, gap = 7;
+    tooltip.style.maxWidth = `${Math.max(0, Math.min(320, width - margin * 2))}px`;
+    tooltip.style.maxHeight = `${Math.max(0, height - margin * 2)}px`;
+    const anchor = activeHelp.getBoundingClientRect();
+    const box = tooltip.getBoundingClientRect();
+    const x = Math.min(Math.max(anchor.left, left + margin), left + width - box.width - margin);
+    const below = anchor.bottom + gap;
+    const preferred = below + box.height <= top + height - margin ? below : anchor.top - box.height - gap;
+    const y = Math.min(Math.max(preferred, top + margin), top + height - box.height - margin);
+    tooltip.style.left = `${x}px`;
+    tooltip.style.top = `${y}px`;
+  }
+  function closeHelp() {
+    activeHelp = null; helpPinned = false;
+    if (tooltip) tooltip.hidden = true;
+  }
+  function showHelp(button) {
+    if (!tooltip) return;
+    activeHelp = button; helpPinned = false;
+    tooltip.textContent = helpText(button);
+    tooltip.hidden = false;
+    positionHelp();
+  }
+  function initializeHelp() {
+    tooltip = document.createElement('div');
+    tooltip.id = 'parameter-tooltip'; tooltip.className = 'parameter-tooltip';
+    tooltip.setAttribute('role', 'tooltip'); tooltip.hidden = true;
+    document.body.append(tooltip);
+    document.querySelectorAll('[data-help]').forEach(button => {
+      button.addEventListener('pointerenter', event => {
+        if (event.pointerType !== 'touch') showHelp(button);
+      });
+      button.addEventListener('pointerleave', event => {
+        if (activeHelp === button && !helpPinned && document.activeElement !== button && !tooltip.contains(event.relatedTarget)) closeHelp();
+      });
+      button.addEventListener('focus', () => { showHelp(button); });
+      button.addEventListener('blur', event => { if (!tooltip.contains(event.relatedTarget)) closeHelp(); });
+      button.addEventListener('click', event => {
+        // Prevent the enclosing label from activating its checkbox/select.
+        event.preventDefault(); event.stopPropagation();
+        if (activeHelp === button && helpPinned) closeHelp();
+        else { showHelp(button); helpPinned = true; }
+      });
+    });
+    tooltip.addEventListener('pointerleave', event => {
+      if (!helpPinned && event.relatedTarget !== activeHelp && document.activeElement !== activeHelp) closeHelp();
+    });
+    document.addEventListener('pointerdown', event => {
+      if (activeHelp && !activeHelp.contains(event.target) && !tooltip.contains(event.target)) closeHelp();
+    });
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') closeHelp(); });
+    window.addEventListener('resize', positionHelp);
+    window.addEventListener('scroll', positionHelp, true);
+    window.visualViewport?.addEventListener('resize', positionHelp);
+    window.visualViewport?.addEventListener('scroll', positionHelp);
+    document.getElementById('input-format')?.addEventListener('change', updateHelpLabels);
+  }
+  function initialize() {
+    initializeHelp();
+    document.querySelectorAll('[data-language]').forEach(button => {
+      button.addEventListener('click', () => setLanguage(button.dataset.language));
+    });
+    setLanguage(initialLanguage());
+  }
+  // Server-template translation is supplied alongside the same dictionary.
+  function translateServer(value) { return value; }
+  const api = {t, setLanguage, getLanguage, applyTranslations, updateHelpLabels, closeHelp, showHelp, positionHelp, dictionaries, translateServer};
+  installServerTranslations(api);
+  window.ChemGridMapI18n = api;
+  api.ready = fetch('/i18n.json').then(response => {
+    if (!response.ok) throw new Error('Unable to load interface translations.');
+    return response.json();
+  }).then(data => {
+    Object.assign(dictionaries.en, data.en);
+    Object.assign(dictionaries.zh, data.zh);
+    if (document.readyState === 'loading') {
+      return new Promise(resolve => document.addEventListener('DOMContentLoaded', () => { initialize(); resolve(api); }, {once: true}));
+    }
+    initialize();
+    return api;
+  });
+})();
+// END CHEMGRIDMAP I18N RUNTIME
+
+async function initializeWorkspace() {
+await window.ChemGridMapI18n.ready;
 'use strict';
 const $ = id => document.getElementById(id);
+const t = (key, values) => window.ChemGridMapI18n.t(key, values);
+const translateServer = text => window.ChemGridMapI18n.translateServer(text);
 const token = location.hash.slice(1) || sessionStorage.getItem('chemgridmap-token');
 if (token) sessionStorage.setItem('chemgridmap-token', token);
 history.replaceState(null, '', location.pathname);
 let busy = false, job = null, points = [], gridSVG = '', view = 'grid', currentCell = null, requestNumber = 0;
 let transform = {s: 1, x: 0, y: 0}, drawingSize = {w: 1, h: 1};
 let tileWidth = 100, hasStructures = false;
-let inputInfo = null, queryInputInfo = null, page = 'import', umapAvailable = false, demoAvailable = false;
+let inputInfo = null, queryInputInfo = null, page = 'import', umapAvailable = null, demoAvailable = false;
 let structureGroups = [], neighborRelations = new Map();
 let highlightedGroup = '', groupRequestNumber = 0, mapCells = [];
 const colors = {active: '#2a9d8f', medium: '#e6a23c', inactive: '#c44e52', unlabelled: '#b8c2cc'};
@@ -61,6 +291,7 @@ function closeInspector() {
 }
 
 async function api(path, options = {}) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   const response = await fetch(path, {...options, headers: {...options.headers, 'X-ChemGridMap-Token': token || ''}});
   if (!response.ok) {
     const data = await response.json();
@@ -70,39 +301,46 @@ async function api(path, options = {}) {
 }
 const getJSON = async (path, options) => (await api(path, options)).json();
 function status(message, kind = '') {
+  status.last = {message, kind};
+  message = translateServer(message);
   $('status').textContent = message; $('status').className = kind;
   $('status').hidden = !message || kind === 'running';
   if (kind === 'running') $('build-progress').textContent = message;
 }
 function fail(error) { status(error.message, 'error'); }
 function setBusy(value) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   busy = value;
   document.querySelectorAll('#options input,#options select,#options button,#csv,#demo').forEach(el => el.disabled = value);
   $('quit').disabled = value;
-  $('build').textContent = value ? 'Building map...' : 'Generate map →';
+  $('build').textContent = value ? t("d.Building map...") : t("d.Generate map →");
   updateNavigation(); updateEvidenceOptions();
 }
 function table(rows, container, columnLimit = 999, orderedColumns = null) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   container.replaceChildren();
-  if (!rows.length) { container.textContent = 'No records available.'; return; }
+  if (!rows.length) { container.textContent = t("d.No records available."); return; }
   const columns = (orderedColumns || Object.keys(rows[0])).slice(0, columnLimit), el = document.createElement('table');
+  const sourceTable = container === $('preview-table') || container === $('record-table');
   const head = el.createTHead().insertRow();
-  for (const col of columns) { const th = document.createElement('th'); th.textContent = col; head.append(th); }
+  for (const col of columns) { const th = document.createElement('th'); th.textContent = sourceTable ? col : t('d.' + col, {activityTerm: job?.options.input_format === 'chembl' ? 'pChEMBL' : 'pActivity'}); head.append(th); }
   const body = el.createTBody();
   for (const row of rows) {
     const tr = body.insertRow();
-    for (const col of columns) { const td = tr.insertCell(); td.textContent = row[col] ?? '—'; td.title = td.textContent; }
+    for (const col of columns) { const td = tr.insertCell(); const value = row[col] ?? '—'; td.textContent = sourceTable ? value : typeof value === 'boolean' ? t('d.' + value) : typeof value !== 'string' ? value : (['Metric','neighbor_relation','activity_class','class_status','measurement_status','Class','Display class','Class status'].includes(col) || col === 'Value' && row.Metric !== 'map_name' ? t('d.' + value) : value); td.title = td.textContent; }
   }
   container.append(el);
 }
 function selectColumns(id, columns, preferred, optional = false) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   $(id).replaceChildren();
   for (const name of (optional ? [''].concat(columns) : columns)) {
-    const option = document.createElement('option'); option.value = name; option.textContent = name || 'None'; $(id).append(option);
+    const option = document.createElement('option'); option.value = name; option.textContent = name || t("d.None"); $(id).append(option);
   }
   $(id).value = columns.includes(preferred) ? preferred : (optional ? '' : columns[0]);
 }
 function resetResult() {
+  inspect.lastDetail = null; compareGroup.lastResult = null; selectGroup.lastResult = null;
   job = null; currentCell = null; points = []; gridSVG = ''; requestNumber++;
   structureGroups = []; neighborRelations.clear(); $('group-controls').hidden = true;
   highlightedGroup = ''; groupRequestNumber++; mapCells = [];
@@ -116,11 +354,12 @@ function resetResult() {
   $('run-caption').textContent = ''; closeInspector(); updateNavigation();
 }
 async function loadInput(demo = false, droppedFile = null) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   try {
     if (busy) return;
     const file = droppedFile || $('csv').files[0];
     if (!demo && !file) return;
-    setBusy(true); status('Reading the CSV...');
+    setBusy(true); status("Reading the CSV...");
     const input = await getJSON(demo ? '/api/demo' : '/api/input', {
       method: 'POST', body: demo ? '' : file, headers: demo ? {} : {'X-Filename': encodeURIComponent(file.name)}
     });
@@ -132,11 +371,12 @@ async function loadInput(demo = false, droppedFile = null) {
   finally { $('csv').value = ''; }
 }
 function showInput(input, demo = false) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
     inputInfo = input;
     $('input-summary').hidden = false;
     $('input-name').textContent = input.filename;
-    $('input-summary').textContent = 'CSV loaded · stored only on this computer';
-    $('input-stats').replaceChildren(stat(input.rows, 'Input rows'),stat(input.columns.length, 'Columns'));
+    $('input-summary').textContent = t("d.CSV loaded · stored only on this computer");
+    $('input-stats').replaceChildren(stat(input.rows, t("d.Input rows")),stat(input.columns.length, t("d.Columns")));
     $('target').value = input.targets.length === 1 ? input.targets[0] : '';
     $('target-list').replaceChildren();
     input.targets.forEach(target => { const option = document.createElement('option'); option.value = target; $('target-list').append(option); });
@@ -154,13 +394,16 @@ function showInput(input, demo = false) {
     updateNavigation();
 }
 function updateInputType() {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   const chembl = $('input-format').value === 'chembl';
   $('chembl-options').hidden = !chembl; $('molecule-options').hidden = chembl;
-  $('lower-label').textContent = `Lower ${chembl ? 'pChEMBL' : 'pActivity'}`;
-  $('upper-label').textContent = `Upper ${chembl ? 'pChEMBL' : 'pActivity'}`;
+  $('lower-label').textContent = t("d.Lower {term}", {term: chembl ? 'pChEMBL' : 'pActivity'});
+  $('upper-label').textContent = t("d.Upper {term}", {term: chembl ? 'pChEMBL' : 'pActivity'});
   updateEvidenceOptions();
+  window.ChemGridMapI18n.updateHelpLabels?.();
 }
 function updateEvidenceOptions() {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   const moleculeTable = $('input-format').value === 'molecule';
   $('compound-column').disabled = busy || moleculeTable;
   $('compound-column').required = $('input-format').value === 'generic';
@@ -168,34 +411,37 @@ function updateEvidenceOptions() {
   if (moleculeTable) $('use-assumed-sigma').checked = false;
   $('use-assumed-sigma').disabled = busy || moleculeTable;
   $('assumed-sigma').disabled = busy || moleculeTable || !$('use-assumed-sigma').checked;
-  $('assumed-sigma').setCustomValidity(Number($('assumed-sigma').value) > 0 ? '' : 'Assumed σ must be greater than zero.');
+  $('assumed-sigma').setCustomValidity(Number($('assumed-sigma').value) > 0 ? '' : t("d.Assumed σ must be greater than zero."));
   $('assumed-sigma-unavailable').hidden = !moleculeTable;
 }
 function showQueryInput(input) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   queryInputInfo = input;
   $('query-input-info').hidden = !input;
   if (!input) { $('query-csv').value = ''; return; }
   $('query-input-name').textContent = input.filename;
-  $('query-input-rows').textContent = `${input.rows.toLocaleString()} rows`;
+  $('query-input-rows').textContent = t("d.{count} rows", {count: input.rows.toLocaleString()});
   selectColumns('query-smiles-col', input.columns, input.detected.smiles || 'smiles');
   selectColumns('query-id-col', input.columns, input.columns.includes('query_id') ? 'query_id' : '', true);
 }
 async function loadQueryInput() {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   if (busy || !$('query-csv').files[0]) return;
   try {
     const file = $('query-csv').files[0]; setBusy(true);
     const input = await getJSON('/api/query-input', {method:'POST', body:file, headers:{'X-Filename':encodeURIComponent(file.name)}});
     resetResult(); showQueryInput(input); showPage('configure');
-    status('Unmeasured molecules loaded. Generate the map to apply this input.');
+    status("Unmeasured molecules loaded. Generate the map to apply this input.");
   } catch (error) { fail(error); }
   finally { setBusy(false); }
 }
 async function removeQueryInput() {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   if (busy) return;
   try {
     setBusy(true); await getJSON('/api/query-input/clear', {method:'POST'});
     resetResult(); showQueryInput(null); showPage('configure');
-    status('Unmeasured molecules removed. Generate the map to update the result.');
+    status("Unmeasured molecules removed. Generate the map to update the result.");
   } catch (error) { fail(error); }
   finally { setBusy(false); }
 }
@@ -241,13 +487,14 @@ function options() {
   return config;
 }
 async function build(event) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   event.preventDefault();
   if (busy) return;
   try {
     const config = options();
     await getJSON('/api/build', {method:'POST', body:JSON.stringify(config), headers:{'Content-Type':'application/json'}});
     resetResult(); setBusy(true); poll();
-    showPage('explore'); status('Preparing input records...', 'running');
+    showPage('explore'); status("Preparing input records...", 'running');
   } catch (error) { fail(error); }
 }
 async function poll() {
@@ -267,113 +514,126 @@ function stat(value, label) {
   const text = document.createElement('span'); text.textContent = label; el.append(number, text); return el;
 }
 function showDataAudit(report) {
+  var translateServer = globalThis.ChemGridMapI18n?.translateServer || (text => text);
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   $('audit-body').replaceChildren();
   const note = document.createElement('p');
-  note.textContent = job.options.input_format === 'chembl' ? 'All retained records are summarized by median pChEMBL. A wide record range is retained, not converted to Medium or silently removed. Aggregation does not harmonize assay conditions. An entry without a wide record range is not proof of experimental agreement.' : job.options.compound_column ? 'Retained activity records are converted to pActivity and summarized by compound. Evidence units describe the supplied document, batch or run identifiers.' : 'This map uses the supplied molecule-level annotations. It does not create an assay-record provenance trail.';
+  note.textContent = job.options.input_format === 'chembl' ? t("d.All retained records are summarized by median pChEMBL. A wide record range is retained, not converted to Medium or silently removed. Aggregation does not harmonize assay conditions. An entry without a wide record range is not proof of experimental agreement.") : job.options.compound_column ? t("d.Retained activity records are converted to pActivity and summarized by compound. Evidence units describe the supplied document, batch or run identifiers.") : t("d.This map uses the supplied molecule-level annotations. It does not create an assay-record provenance trail.");
   $('audit-body').append(note);
   if (job.options.assumed_sigma != null) {
     const sigma = document.createElement('p'); sigma.dataset.assumedSigma = 'true';
-    const source = report.activity_confidence?.evidence_unit_source || job.options.document_column || 'one per compound';
-    sigma.textContent = `σ (assumed) ${format(job.options.assumed_sigma)} log units. Evidence units: ${source === 'one unit per compound' ? 'one per compound' : source}.`;
-    if (job.options.input_format !== 'chembl' && !job.options.document_column) sigma.textContent += ' Offset detection needs an evidence-unit column, so it was not run.';
+    const source = report.activity_confidence?.evidence_unit_source || job.options.document_column || t("d.one per compound");
+    sigma.textContent = t("d.σ (assumed) {sigma} log units. Evidence units: {source}.", {sigma: format(job.options.assumed_sigma), source: source === 'one unit per compound' ? t('d.one per compound') : source});
+    if (job.options.input_format !== 'chembl' && !job.options.document_column) sigma.textContent += t("d. Offset detection needs an evidence-unit column, so it was not run.");
     $('audit-body').append(sigma);
   }
   if (report.query_molecules) {
     const section = document.createElement('section'), heading = document.createElement('h3');
-    heading.textContent = 'Unmeasured molecules'; section.append(heading);
-    for (const [key, label] of [['mapped','mapped'],['invalid_smiles','invalid SMILES'],['duplicate_query','duplicates'],['in_reference','already measured']]) {
+    heading.textContent = t("d.Unmeasured molecules"); section.append(heading);
+    for (const [key, label] of [['mapped','mapped'],['invalid_smiles',t("d.invalid SMILES")],['duplicate_query','duplicates'],['in_reference','already measured']]) {
       const count = document.createElement('p'); count.dataset.queryStatus = key;
-      count.dataset.queryCount = report.query_molecules[key]; count.textContent = `${label}: ${report.query_molecules[key]}`; section.append(count);
+      count.dataset.queryCount = report.query_molecules[key]; count.textContent = `${t('d.' + label)}: ${report.query_molecules[key]}`; section.append(count);
+    }
+    for (const message of report.query_molecules.warnings || []) {
+      const warning = document.createElement('p'); warning.textContent = translateServer(message); section.append(warning);
     }
     $('audit-body').append(section);
   }
   const generic = report.generic_activity;
   if (generic) {
     const labels = {
-      non_exact_relation: 'censored or inexact values (relation other than =)',
-      invalid_activity_value: 'empty or non-numeric activity values',
-      nonpositive_activity_value: 'zero or negative values',
-      unrecognized_activity_unit: 'unrecognized units',
-      invalid_smiles: 'invalid SMILES',
-      missing_compound_id: 'missing compound IDs'
+      non_exact_relation: t("d.censored or inexact values (relation other than =)"),
+      invalid_activity_value: t("d.empty or non-numeric activity values"),
+      nonpositive_activity_value: t("d.zero or negative values"),
+      unrecognized_activity_unit: t("d.unrecognized units"),
+      invalid_smiles: t("d.invalid SMILES"),
+      missing_compound_id: t("d.missing compound IDs")
     };
     const counts = generic.excluded_reasons || {non_exact_relation: generic.excluded_non_exact_relation_records};
     const details = Object.entries(labels).filter(([key]) => counts[key] > 0).map(([key, label]) => `${label}: ${counts[key]}`).join('; ');
     const excluded = document.createElement('p'); excluded.dataset.excludedRecords = 'true';
-    excluded.textContent = `Excluded records: ${generic.excluded_activity_records} of ${generic.input_rows}.`;
+    excluded.textContent = t("d.Excluded records: {excluded} of {total}.", {excluded: generic.excluded_activity_records, total: generic.input_rows});
     if (details) excluded.textContent += ` ${details[0].toUpperCase()}${details.slice(1)}.`;
     $('audit-body').append(excluded);
   }
   const exclusions = report.exclusion_counts || {};
   if (Object.keys(exclusions).length) {
-    const reasons = document.createElement('p'); reasons.textContent = 'Exclusion reasons (may overlap): ' + Object.entries(exclusions).map(([k,v]) => `${k}: ${v}`).join('; '); $('audit-body').append(reasons);
+    const reasons = document.createElement('p'); reasons.textContent = t("d.Exclusion reasons (may overlap): ") + Object.entries(exclusions).map(([k,v]) => `${t('d.' + k)}: ${v}`).join('; '); $('audit-body').append(reasons);
   }
   const confidence = report.activity_confidence;
   if (confidence?.document_pair_count != null && confidence.document_offset_detection !== 'not applicable' && (!generic || job.options.document_column)) {
     const section = document.createElement('section'), heading = document.createElement('h3');
-    heading.textContent = 'Evidence units and offsets'; section.append(heading);
+    heading.textContent = t("d.Evidence units and offsets"); section.append(heading);
     const description = document.createElement('p');
-    const source = job.options.input_format === 'chembl' ? 'document' : `${generic?.document_column || job.options.document_column} column`;
-    description.textContent = `Evidence units come from ${source}; ${confidence.document_pair_count} pairs with at least ${confidence.offset_min_shared} shared entries were evaluated, ${confidence.discordant_document_pair_count} pairs were flagged, using |median difference| ≥ ${format(confidence.offset_threshold)} log units and sign agreement ≥ ${Math.round(100 * confidence.offset_sign_agreement)}%.`;
+    const source = job.options.input_format === 'chembl' ? t('d.document') : t("d.{column} column", {column: generic?.document_column || job.options.document_column});
+    description.textContent = t("d.Evidence units come from {source}; {pairs} pairs with at least {minimum} shared entries were evaluated, {flagged} pairs were flagged, using |median difference| ≥ {threshold} log units and sign agreement ≥ {agreement}%.", {source, pairs: confidence.document_pair_count, minimum: confidence.offset_min_shared, flagged: confidence.discordant_document_pair_count, threshold: format(confidence.offset_threshold), agreement: Math.round(100 * confidence.offset_sign_agreement)});
     section.append(description);
     const pairs = confidence.document_offsets_top10 || [], container = document.createElement('div');
     container.className = 'table-scroll offset-pairs';
     table(pairs.map(pair => ({
-      Pair: `${pair.document_a} vs ${pair.document_b}`,
+      Pair: t('d.{a} vs {b}', {a: pair.document_a, b: pair.document_b}),
       'Shared entries': pair.shared_entries,
       'Median difference (B − A)': `${pair.median_offset >= 0 ? '+' : '−'}${Math.abs(pair.median_offset).toFixed(2)}`,
       'Sign agreement': `${Math.round(100 * pair.sign_agreement)}%`,
-      Flagged: pair.systematic_offset ? 'Yes' : 'No',
+      Flagged: pair.systematic_offset ? t("d.Yes") : t("d.No"),
       'Entries touched': pair.touched_entry_count
     })), container);
     container.querySelectorAll('tbody tr').forEach((row, index) => { row.dataset.offsetFlagged = String(pairs[index].systematic_offset); });
     section.append(container);
     const display = document.createElement('p');
     display.textContent = (confidence.offset_display || job.options.offset_display || 'uncertain') === 'uncertain'
-      ? 'Entries with records from a flagged pair are shown as uncertain.'
-      : 'Display unchanged: entries with records from a flagged pair are marked ◣ on Activity class support.';
-    const full = document.createElement('p'); full.textContent = 'Full table: map_document_offsets.csv (Export).';
+      ? t("d.Entries with records from a flagged pair are shown as uncertain.")
+      : t("d.Display unchanged: entries with records from a flagged pair are marked ◣ on Activity class support.");
+    const full = document.createElement('p'); full.textContent = t("d.Full table: map_document_offsets.csv (Export).");
     section.append(display, full); $('audit-body').append(section);
   }
   const warnings = document.createElement('ul');
-  for (const text of report.warnings || []) { const item = document.createElement('li'); item.textContent = text; warnings.append(item); }
+  for (const text of report.warnings || []) { const item = document.createElement('li'); item.textContent = translateServer(text); warnings.append(item); }
   $('audit-body').append(warnings); $('audit').open = true;
   $('audit-count').textContent = (report.warnings || []).length;
   $('audit-count').hidden = !warnings.children.length;
 }
-async function showResult() {
-  restoreOptions(job.options);
+async function showResult(languageOnly = false) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
+  if (!languageOnly) restoreOptions(job.options);
   const report = job.report;
-  const stats = [stat(report.input_rows, 'Input records'), stat(job.molecules, 'Mapped molecules')];
-  if (report.query_molecules?.mapped) stats.push(stat(report.query_molecules.mapped, 'Unmeasured molecules'));
-  stats.push(stat(report.retained_activity_records, 'Retained records'), stat(report.repeated_conflicted_molecules, 'Wide record ranges'));
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
+  const stats = [stat(report.input_rows, t("d.Input records")), stat(job.molecules, t("d.Mapped molecules"))];
+  if (report.query_molecules?.mapped) stats.push(stat(report.query_molecules.mapped, t("d.Unmeasured molecules")));
+  stats.push(stat(report.retained_activity_records, t("d.Retained records")), stat(report.repeated_conflicted_molecules, t("d.Wide record ranges")));
   $('summary').replaceChildren(...stats);
-  $('summary').hidden = false; $('audit').hidden = false; $('preview').open = false;
+  $('summary').hidden = false; $('audit').hidden = false; if (!languageOnly) $('preview').open = false;
+  const auditOpen = $('audit').open;
   showDataAudit(report);
+  if (languageOnly) $('audit').open = auditOpen;
+  if (!languageOnly) {
   const svgFile = job.files.find(name => name === 'map.svg');
   gridSVG = await (await api('/api/file?name=' + encodeURIComponent(svgFile))).text();
   points = await getJSON('/api/points');
   $('measurement-filter-control').hidden = !points.some(point => point.measurement_status === 'not_measured');
-  const grouping = await getJSON('/api/groups'); structureGroups = grouping.groups;
+  showResult.grouping = await getJSON('/api/groups');
+  }
+  const grouping = showResult.grouping; structureGroups = grouping.groups;
   $('group-controls').hidden = false;
   document.querySelectorAll('[data-group-only]').forEach(el => el.hidden = !structureGroups.length);
   const structureOption = $('color-mode').querySelector('[value=structure]');
   structureOption.disabled = structureOption.hidden = !structureGroups.length;
   if (structureOption.disabled && $('color-mode').value === 'structure') $('color-mode').value = 'activity';
   $('group-select').replaceChildren();
-  const none = document.createElement('option'); none.value = ''; none.textContent = 'None'; $('group-select').append(none);
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
+  const none = document.createElement('option'); none.value = ''; none.textContent = t("d.None"); $('group-select').append(none);
   for (const group of structureGroups) {
     const option = document.createElement('option'); option.value = group.structure_group;
-    option.textContent = `${group.structure_group} | ${countLabel(group.size, 'member')} | core ${group.core_coverage_count}/${group.size}`;
+    option.textContent = t("d.{id} | {members} | core {covered}/{size}", {id: group.structure_group, members: countLabel(group.size, 'member'), covered: group.core_coverage_count, size: group.size});
     $('group-select').append(option);
   }
   $('group-select').value = highlightedGroup;
-  $('group-method').textContent = `${grouping.protocol.method} groups are defined before projection. Colors may repeat; group IDs are authoritative.`;
+  $('group-method').textContent = t("d.{method} groups are defined before projection. Colors may repeat; group IDs are authoritative.", {method: t('d.' + grouping.protocol.method)});
   $('neighbor-key').querySelector('.representation-only').textContent =
-    job.options.representation === 'morgan' ? 'Fingerprint only' : 'Representation only';
-  updateNavigation(); showPage('explore');
-  $('run-caption').textContent = [job.options.target_id || inputInfo.filename, job.options.representation === 'morgan' ? 'Morgan fingerprint' : 'Molecular descriptors', job.options.projection.toUpperCase(), `${Math.round(job.options.grid_occupancy * 100)}% occupancy`].join(' · ');
-  view = 'grid'; setView('grid');
+    job.options.representation === 'morgan' ? t("d.Fingerprint only") : t("d.Representation only");
+  if (!languageOnly) { updateNavigation(); showPage('explore'); }
+  $('run-caption').textContent = [job.options.target_id || inputInfo.filename, job.options.representation === 'morgan' ? t("d.Morgan fingerprint") : t("d.Molecular descriptors"), job.options.projection.toUpperCase(), t("d.{value}% occupancy", {value: Math.round(job.options.grid_occupancy * 100)})].join(' · ');
+  if (!languageOnly) { view = 'grid'; setView('grid'); }
   $('download-all').hidden = false;
   $('downloads').replaceChildren();
   $('figure-downloads').replaceChildren();
@@ -382,15 +642,15 @@ async function showResult() {
     const figure = /^map(?:_(?:class_support|neighbor_recall|structure_group))?\.(svg|png|pdf)$/.test(name);
     if (figure) {
       const extension = name.split('.').pop(), mode = name.slice(0, -(extension.length + 1));
-      const titles = {map: 'Observed activity', map_class_support: 'Activity class support',
-        map_neighbor_recall: 'Neighbor reliability', map_structure_group: 'Structure group'};
+      const titles = {map: t("d.Observed activity"), map_class_support: t("d.Activity class support"),
+        map_neighbor_recall: t("d.Neighbor reliability"), map_structure_group: t("d.Structure group")};
       button.textContent = `${titles[mode]} · ${extension.toUpperCase()}`;
-      const caption = document.createElement('small'); caption.textContent = extension === 'png' ? 'Raster image' : 'Vector figure'; button.append(caption);
+      const caption = document.createElement('small'); caption.textContent = extension === 'png' ? t("d.Raster image") : t("d.Vector figure"); button.append(caption);
     } else button.textContent = name;
     button.addEventListener('click', () => download('/api/file?name=' + encodeURIComponent(name), name));
     $(figure ? 'figure-downloads' : 'downloads').append(button);
   }
-  $('saved-location').textContent = 'Saved locally: ' + job.output_dir;
+  $('saved-location').textContent = t("d.Saved locally: ") + job.output_dir;
   table(Object.entries(job.metrics).map(([metric,value]) => ({Metric:metric,Value:value})), $('metrics-table')); $('metrics').hidden = false;
   const hasSupport = points.some(p => p.class_status != null), hasReliability = points.some(p => p.neighbor_recall != null);
   $('color-mode').querySelector('[value=support]').disabled = !hasSupport;
@@ -399,6 +659,7 @@ async function showResult() {
   renderLegend($('color-mode').value);
 }
 function projectionSVG() {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('viewBox','0 0 900 900'); svg.setAttribute('width','900'); svg.setAttribute('height','900');
   for (const point of points) {
@@ -406,7 +667,7 @@ function projectionSVG() {
     circle.setAttribute('cx',40 + point.projection_x * 820); circle.setAttribute('cy',860 - point.projection_y * 820);
     circle.setAttribute('r','4'); circle.setAttribute('fill',colors[point.activity_class] || '#b8c2cc');
     circle.dataset.gridRow = point.grid_row; circle.dataset.gridCol = point.grid_col;
-    const title = document.createElementNS(ns,'title'); title.textContent = `${point.molecule_id || point.molecule_identity_key || 'Molecule'} · ${point.activity_class}`; circle.append(title); svg.append(circle);
+    const title = document.createElementNS(ns,'title'); title.dataset.originalText = `${point.molecule_id || point.molecule_identity_key || 'Molecule'} · ${point.activity_class}`; title.textContent = title.dataset.originalText; circle.append(title); svg.append(circle);
   }
   return svg;
 }
@@ -424,7 +685,7 @@ function setView(name) {
   hasStructures = !!svg.querySelector('g[data-grid-row] > g');
   mapCells = Array.from(svg.querySelectorAll('[data-grid-row]'));
   drawingSize = {w:box.width,h:box.height}; svg.setAttribute('width',box.width); svg.setAttribute('height',box.height);
-  colorMap(); fit(); highlight();
+  colorMap(); fit(); highlight(); translateSVGText($('map-stage'));
 }
 function colorMap() {
   const mode = $('color-mode').value;
@@ -489,10 +750,11 @@ function legendItem(color, text) {
   swatch.style.background = color; item.append(swatch, document.createTextNode(text)); return item;
 }
 function renderLegend(mode) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   renderColorLegend(mode);
   const hasQueries = points.some(point => point.measurement_status === 'not_measured');
   if (hasQueries && ['activity','support'].includes(mode)) {
-    const item = legendItem('#FFFFFF', 'Not measured'); item.firstElementChild.style.border = '1px solid #8A99A6';
+    const item = legendItem('#FFFFFF', t("d.Not measured")); item.firstElementChild.style.border = '1px solid #8A99A6';
     $('legend').append(item);
   }
   const group = structureGroups.find(g => g.structure_group === highlightedGroup);
@@ -500,56 +762,58 @@ function renderLegend(mode) {
     const note = document.createElement('span'); note.className = 'group-legend';
     const members = points.filter(point => point.structure_group === group.structure_group);
     const queryMembers = members.filter(point => point.measurement_status === 'not_measured').length;
-    note.textContent = `Outlined: ${group.structure_group}, ${countLabel(members.length, 'molecule')}${queryMembers ? ` (${queryMembers} unmeasured)` : ''}. Others faded.`;
+    note.textContent = t("d.Outlined: {id}, {members}{unmeasured}. Others faded.", {id: group.structure_group, members: countLabel(members.length, 'molecule'), unmeasured: queryMembers ? t('d. ({count} unmeasured)', {count: queryMembers}) : ''});
     $('legend').append(note); $('legend').hidden = false;
   }
   if (hasQueries) {
     const note = document.createElement('span'); note.className = 'measurement-legend';
-    note.textContent = `Show: ${$('measurement-filter').selectedOptions[0].textContent}${$('measurement-filter').value === 'all' ? '.' : '. Other molecules faded.'}`;
+    note.textContent = t("d.Show: {filter}{suffix}", {filter: $('measurement-filter').selectedOptions[0].textContent, suffix: $('measurement-filter').value === 'all' ? t('d..') : t('d.. Other molecules faded.')});
     $('legend').append(note); $('legend').hidden = false;
   }
 }
 function renderColorLegend(mode) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   $('legend').replaceChildren(); $('legend').hidden = mode === 'structure';
   if (!job || mode === 'structure') return;
   const lower = job.options.lower_threshold, upper = job.options.upper_threshold;
   if (job.options.input_format === 'molecule' && !job.options.compound_column && mode !== 'reliability') {
-    $('legend').textContent = 'Colors follow supplied class labels, or the selected pActivity thresholds; gray = unlabelled.';
+    $('legend').textContent = t("d.Colors follow supplied class labels, or the selected pActivity thresholds; gray = unlabelled.");
     return;
   }
   if (mode === 'reliability') {
     reliabilityBins.forEach(([low, color], i) => $('legend').append(legendItem(color,
       `${Math.round(low * 100)}–${Math.round((reliabilityBins[i + 1]?.[0] ?? 1) * 100)}%`)));
     const term = job.options.representation === 'morgan' ? 'fingerprint' : 'representation';
-    $('legend').prepend(document.createTextNode(`Share of ${term} neighbors that are also grid neighbors:`));
+    $('legend').prepend(document.createTextNode(t("d.Share of {term} neighbors that are also grid neighbors:", {term: t('d.' + term)})));
     return;
   }
-  for (const [label, text] of [['inactive', `Inactive ≤${lower}`], ['medium', `Medium (${lower}, ${upper})`], ['active', `Active ≥${upper}`]]) {
+  for (const [label, text] of [['inactive', t("d.Inactive ≤{lower}", {lower})], ['medium', t("d.Medium ({lower}, {upper})", {lower, upper})], ['active', t("d.Active ≥{upper}", {upper})]]) {
     $('legend').append(legendItem(colors[label], text));
-    if (mode === 'support') $('legend').append(legendItem(fadedColors[label], 'uncertain'));
+    if (mode === 'support') $('legend').append(legendItem(fadedColors[label], t('d.uncertain')));
   }
   if (mode === 'support') {
     // Jobs created before 99b57ad always showed touched entries as uncertain.
     const offsetDisplay = job.options.offset_display || 'uncertain';
-    const suffix = offsetDisplay === 'uncertain' ? ', or an offset document pair' : '';
-    $('legend').append(document.createTextNode(`Pale: uncertain (class support below ${job.options.support_level ?? .8}${suffix}).`));
+    const suffix = offsetDisplay === 'uncertain' ? t("d., or an offset document pair") : '';
+    $('legend').append(document.createTextNode(t("d.Pale: uncertain (class support below {level}{suffix}).", {level: job.options.support_level ?? .8, suffix})));
     if (points.some(point => point.offset_pair_touched)) {
       const offset = document.createElement('span');
-      offset.textContent = `◣ offset document pair${offsetDisplay === 'uncertain' ? '' : ' (display unchanged)'}`;
+      offset.textContent = t("d.◣ offset document pair{suffix}", {suffix: offsetDisplay === 'uncertain' ? '' : t('d. (display unchanged)')});
       $('legend').append(offset);
     }
   }
-  const flag = document.createElement('span'); flag.textContent = '◥ Wide record range'; $('legend').append(flag);
+  const flag = document.createElement('span'); flag.textContent = t("d.◥ Wide record range"); $('legend').append(flag);
 }
 function applyTransform() {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   $('map-stage').style.transform = `translate(${transform.x}px,${transform.y}px) scale(${transform.s})`;
   $('map-stage').style.setProperty('--zoom-inverse', String(1 / transform.s));
   // Suppress unreadable bonds only in the browser; exported SVGs remain untouched.
   const overview = view === 'grid' && tileWidth * transform.s < 24;
   $('map-viewport').classList.toggle('color-overview', overview);
-  $('view-hint').textContent = view === 'projection' ? '2D projection · Click a point to inspect' :
-    overview && hasStructures ? 'Color overview · Zoom in for structures · Click a cell to inspect' :
-    'Click a cell to inspect · Scroll to zoom · Drag to pan';
+  $('view-hint').textContent = view === 'projection' ? t("d.2D projection · Click a point to inspect") :
+    overview && hasStructures ? t("d.Color overview · Zoom in for structures · Click a cell to inspect") :
+    t("d.Click a cell to inspect · Scroll to zoom · Drag to pan");
 }
 function fit() {
   if (!job || page !== 'explore') return;
@@ -563,6 +827,7 @@ function zoom(factor,x=$('map-viewport').clientWidth/2,y=$('map-viewport').clien
   transform = {s,x:x-(x-transform.x)*ratio,y:y-(y-transform.y)*ratio}; applyTransform();
 }
 function highlight() {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   $('map-stage').querySelector('[data-map-outlines]')?.remove();
   const groups = new Map(points.map(p => [`${p.grid_row},${p.grid_col}`, p.structure_group]));
   const measurements = new Map(points.map(p => [`${p.grid_row},${p.grid_col}`, p.measurement_status || 'measured']));
@@ -603,18 +868,23 @@ function highlight() {
   });
   if (outlines.children.length) mapCells[0].parentNode.append(outlines);
   const selectedGroup = currentCell && groups.get(`${currentCell.row},${currentCell.col}`);
-  $('selected-group-highlight').textContent = selectedGroup && selectedGroup === highlightedGroup ? 'Clear highlight' : 'Highlight on map';
+  $('selected-group-highlight').textContent = selectedGroup && selectedGroup === highlightedGroup ? t("d.Clear highlight") : t("d.Highlight on map");
 }
 function coreRule(group) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   return group.core_rule === 'coverage'
-    ? `largest scaffold or ring fragment matching at least ${Math.round(100 * group.core_coverage_target)}% of members (${group.core_target_met ? 'target met' : 'target not met; highest-coverage core shown'}).`
+    ? t("d.largest scaffold or ring fragment matching at least {coverage}% of members ({status}).", {coverage: Math.round(100 * group.core_coverage_target), status: group.core_target_met ? t('d.target met') : t('d.target not met; highest-coverage core shown')})
     : group.core_rule === 'fmcs'
-      ? `FMCS matching at least ${Math.round(100 * group.core_coverage_target)}% of members${group.fmcs_timed_out ? '; the search timed out, so this partial core may vary with machine speed and load' : ''}.`
-      : 'most frequent ring scaffold.';
+      ? t("d.FMCS matching at least {coverage}% of members{timeout}.", {coverage: Math.round(100 * group.core_coverage_target), timeout: group.fmcs_timed_out ? t('d.; the search timed out, so this partial core may vary with machine speed and load') : ''})
+      : t("d.most frequent ring scaffold.");
 }
-function countLabel(count, noun) { return `${count} ${noun}${count === 1 ? '' : 's'}`; }
-async function selectGroup(groupId) {
-  const request = ++groupRequestNumber;
+function countLabel(count, noun) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
+  return t(`d.{count} ${noun}${count === 1 ? '' : 's'}`, {count});
+}
+async function selectGroup(groupId, cached = null) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
+  const request = cached ? groupRequestNumber : ++groupRequestNumber;
   const group = structureGroups.find(g => g.structure_group === groupId);
   highlightedGroup = group ? groupId : ''; $('group-select').value = highlightedGroup;
   $('group-core-card').hidden = !group; $('group-core-svg').replaceChildren();
@@ -622,17 +892,18 @@ async function selectGroup(groupId) {
   if (!group) return;
   const queryMembers = points.filter(point => point.measurement_status === 'not_measured' && point.structure_group === groupId).length;
   const members = countLabel(group.size, queryMembers ? 'measured member' : 'member');
-  $('group-core-title').textContent = `${group.structure_group} · ${members}${queryMembers ? ` + ${queryMembers} unmeasured` : ''}`;
+  $('group-core-title').textContent = t("d.{id} · {members}{unmeasured}", {id: group.structure_group, members, unmeasured: queryMembers ? t('d. + {count} unmeasured', {count: queryMembers}) : ''});
   $('group-core-coverage').textContent = group.core_smiles
-    ? `Core in ${group.core_coverage_count} of ${members} · exact scaffold in ${group.core_exact_scaffold_count}`
-    : `${members} · no ring scaffold`;
+    ? t("d.Core in {covered} of {members} · exact scaffold in {exact}", {covered: group.core_coverage_count, members, exact: group.core_exact_scaffold_count})
+    : t("d.{members} · no ring scaffold", {members});
   $('group-core-rule').textContent = coreRule(group);
-  $('group-core-svg').textContent = group.core_smiles ? 'Loading core...' : 'No ring scaffold';
+  $('group-core-svg').textContent = group.core_smiles ? t("d.Loading core...") : t("d.No ring scaffold");
   try {
-    const result = await getJSON('/api/group?group=' + encodeURIComponent(groupId));
+    const result = cached || await getJSON('/api/group?group=' + encodeURIComponent(groupId));
     if (request !== groupRequestNumber) return;
+    selectGroup.lastResult = result;
     if (result.core_svg) $('group-core-svg').innerHTML = result.core_svg;
-  } catch (error) { if (request === groupRequestNumber) { $('group-core-svg').textContent = 'Core unavailable'; fail(error); } }
+  } catch (error) { if (request === groupRequestNumber) { $('group-core-svg').textContent = t("d.Core unavailable"); fail(error); } }
 }
 function format(value) { return value == null ? '—' : typeof value === 'number' ? Number(value.toFixed(3)).toString() : String(value); }
 function ordinal(n) {
@@ -646,18 +917,20 @@ function percentage(value) {
   return `${Math.round(100 * value)}%`;
 }
 function measuredLabel(identity) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   // Neighbor identities remain the click target; the visible ID matches the inspector.
   const point = points.find(point => (point.molecule_identity_key || point.molecule_id) === identity);
   const title = point?.molecule_id || identity;
-  return title === identity ? title : `${title} (parent ${identity})`;
+  return title === identity ? title : t("d.{title} (parent {identity})", {title, identity});
 }
 function showQuerySelection(detail) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   const row = detail.molecule;
   const stats = document.createElement('dl');
   const fields = [
-    ['Most similar measured molecule', `${measuredLabel(row.nearest_measured_id)} · Tanimoto ${format(row.nearest_measured_similarity)}`],
-    ['Structure group', row.structure_group || `No reference group within similarity ${format(detail.group_similarity ?? job.options.group_similarity)}`],
-    ['Contains the group core', row.contains_group_core ? 'Yes' : 'No']
+    [t("d.Most similar measured molecule"), `${measuredLabel(row.nearest_measured_id)} · Tanimoto ${format(row.nearest_measured_similarity)}`],
+    [t("d.Structure group"), row.structure_group || t("d.No reference group within similarity {similarity}", {similarity: format(detail.group_similarity ?? job.options.group_similarity)})],
+    [t("d.Contains the group core"), row.contains_group_core ? t("d.Yes") : t("d.No")]
   ];
   for (const [label, value] of fields) {
     const dt = document.createElement('dt'), dd = document.createElement('dd');
@@ -667,8 +940,8 @@ function showQuerySelection(detail) {
   const rows = detail.query_neighbors.map(neighbor => ({
     Rank:neighbor.rank, ID:measuredLabel(neighbor.measured_id), Tanimoto:format(neighbor.tanimoto),
     'Display class':neighbor.activity_class, pActivity:format(neighbor.activity_pchembl),
-    'Class support':percentage(neighbor.class_confidence), 'Class status':neighbor.class_status,
-    'Evidence units':neighbor.n_evidence_units
+    [t("d.Class support")]:percentage(neighbor.class_confidence), 'Class status':neighbor.class_status,
+    [t("d.Evidence units")]:neighbor.n_evidence_units
   }));
   table(rows, $('query-neighbor-table'));
   $('query-neighbor-table').querySelectorAll('tbody tr').forEach((tr, i) => {
@@ -678,21 +951,27 @@ function showQuerySelection(detail) {
   });
 }
 async function inspect(query) {
-  const request = ++requestNumber;
+  // 语言切换可复用第二个参数中的检查结果，普通调用仍只传查询字符串。
+  const cached = arguments[1] || null;
+  var translateServer = globalThis.ChemGridMapI18n?.translateServer || (text => text);
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
+  const request = cached ? requestNumber : ++requestNumber;
   try {
     if (!job) return;
-    const detail = await getJSON('/api/inspect?' + query);
+    const detail = cached || await getJSON('/api/inspect?' + query);
     if (request !== requestNumber) return;
-    status('');
+    inspect.lastDetail = detail;
+    if (!cached) status('');
     const row = detail.molecule, summary = detail.summary;
     const unmeasured = row.measurement_status === 'not_measured';
     currentCell = {row:row.grid_row,col:row.grid_col};
     neighborRelations = new Map((detail.neighbors || []).map(p => [`${p.grid_row},${p.grid_col}`, p.neighbor_relation])); highlight();
     $('neighbor-key').hidden = unmeasured;
     const group = structureGroups.find(g => g.structure_group === row.structure_group);
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
     $('selected-group').hidden = !group;
     if (group) {
-      $('selected-group-summary').textContent = `${group.structure_group} | ${countLabel(group.size, 'member')} | core covers ${group.core_coverage_count}/${group.size}`;
+      $('selected-group-summary').textContent = t("d.{id} | {members} | core covers {covered}/{size}", {id: group.structure_group, members: countLabel(group.size, 'member'), covered: group.core_coverage_count, size: group.size});
       $('selected-group-button').onclick = () => compareGroup(group.structure_group);
       $('selected-group-highlight').onclick = () => selectGroup(highlightedGroup === group.structure_group ? '' : group.structure_group);
     }
@@ -701,8 +980,9 @@ async function inspect(query) {
     if (wasClosed) requestAnimationFrame(fit);
     $('selection').hidden = false; $('selection-hint').hidden = true;
     $('molecule-svg').innerHTML = detail.svg;
+    globalThis.ChemGridMapI18n?.translateSVG?.($('molecule-svg'));
     $('selected-id').textContent = row.query_id || row.molecule_id || row.molecule_identity_key || row.canonical_smiles;
-    $('cell-location').textContent = `Grid row ${row.grid_row} · column ${row.grid_col} (zero-based)`;
+    $('cell-location').textContent = t("d.Grid row {row} · column {column} (zero-based)", {row: row.grid_row, column: row.grid_col});
     $('measurement-badge').hidden = !unmeasured; $('query-selection').hidden = !unmeasured;
     $('measured-selection').hidden = unmeasured;
     if (unmeasured) {
@@ -711,6 +991,7 @@ async function inspect(query) {
       showQuerySelection(detail); return;
     }
     $('neighborhood-svg').innerHTML = detail.neighborhood_svg;
+    globalThis.ChemGridMapI18n?.translateSVG?.($('neighborhood-svg'));
     $('evidence-summary').replaceChildren();
     const stats = document.createElement('dl');
     const neighbors = summary.neighborhood;
@@ -718,55 +999,64 @@ async function inspect(query) {
     const activityTerm = job.options.input_format === 'chembl' ? 'pChEMBL' : 'pActivity';
     const assumedSigma = summary.method === 'assumed_sigma' || summary.assumed_sigma != null;
     const genericRecords = summary.input_format === 'generic_activity';
-    const fields = [[`Median ${activityTerm}`,summary.median_pchembl],[`${activityTerm} range`,summary.minimum_pchembl == null ? null : `${format(summary.minimum_pchembl)}–${format(summary.maximum_pchembl)}`],['Source records',summary.n_records],['Distinct assays',summary.n_assays],['Distinct documents',summary.n_documents]];
+    const fields = [[t("d.Median {term}", {term: activityTerm}),summary.median_pchembl],[t("d.{term} range", {term: activityTerm}),summary.minimum_pchembl == null ? null : `${format(summary.minimum_pchembl)}–${format(summary.maximum_pchembl)}`],[t("d.Source records"),summary.n_records],[t("d.Distinct assays"),summary.n_assays],[t("d.Distinct documents"),summary.n_documents]];
     if (genericRecords || !summary.median_verified) {
-      fields.splice(0,fields.length,['Activity class',row.activity_class],['Source-record audit',genericRecords && summary.median_verified ? `Median recomputed from ${summary.n_records} listed records` : 'Not available']);
+      fields.splice(0,fields.length,[t("d.Activity class"),t('d.' + row.activity_class)],[t("d.Source-record audit"),genericRecords && summary.median_verified ? t("d.Median recomputed from {count} listed records", {count: summary.n_records}) : t("d.Not available")]);
       if (job.options.input_format !== 'chembl') {
         const activity = row.activity_pchembl ?? row[job.options.value_col];
         if (job.options.compound_column) {
-          fields.unshift(['Median pActivity', activity], ['pActivity range', row.pchembl_min == null ? null : `${format(row.pchembl_min)}–${format(row.pchembl_max)}`], ['Source records', row.n_records]);
-        } else if (activity != null) fields.unshift(['Activity (pActivity)', activity]);
+          fields.unshift([t("d.Median pActivity"), activity], [t("d.pActivity range"), row.pchembl_min == null ? null : `${format(row.pchembl_min)}–${format(row.pchembl_max)}`], [t("d.Source records"), row.n_records]);
+        } else if (activity != null) fields.unshift([t("d.Activity (pActivity)"), activity]);
       }
     }
     if (row.class_confidence != null) {
-      fields.push(['Evidence units', assumedSigma ? (summary.evidence_unit_source === 'one unit per compound' ? 'one per compound' : summary.evidence_unit_source) : `${row.n_evidence_units} (${row.n_documents} documents)`],
-      [`Document-balanced ${activityTerm}`, row.document_balanced_pchembl],
-      ['Class support', `${percentage(row.class_confidence)} ${row.activity_class} · ${row.class_status}`]);
+      fields.push([t("d.Evidence units"), assumedSigma ? (summary.evidence_unit_source === 'one unit per compound' ? t("d.one per compound") : summary.evidence_unit_source) : t("d.{units} ({documents} documents)", {units: row.n_evidence_units, documents: row.n_documents})],
+      [t("d.Document-balanced {term}", {term: activityTerm}), row.document_balanced_pchembl],
+      [t("d.Class support"), `${percentage(row.class_confidence)} ${t('d.' + row.activity_class)} · ${t('d.' + row.class_status)}`]);
       if (summary.status_reason != null) {
         const threshold = summary.confidence_threshold == null ? (job.options.support_level ?? 0.8) : summary.confidence_threshold;
-        const supportText = summary.status_reason === 'supported' ? 'supported' :
-          summary.status_reason === 'low_support' ? `low support (below ${threshold})` :
-          summary.status_reason === 'offset_pair' ? 'offset document pair' : summary.status_reason;
-        fields.push(['Support status', supportText]);
+        const supportText = summary.status_reason === 'supported' ? t('d.supported') :
+          summary.status_reason === 'low_support' ? t("d.low support (below {threshold})", {threshold}) :
+          summary.status_reason === 'offset_pair' ? t("d.offset document pair") : summary.status_reason;
+        fields.push([t("d.Support status"), supportText]);
       }
     }
-    if (assumedSigma) fields.push(['σ (assumed)', format(summary.assumed_sigma ?? summary.sigma_doc)]);
+    if (assumedSigma) fields.push([t("d.σ (assumed)"), format(summary.assumed_sigma ?? summary.sigma_doc)]);
     else if (summary.sigma_doc != null) fields.push(
       ['σ_doc', format(summary.sigma_doc)],
-      ['σ_doc degrees of freedom', summary.sigma_doc_degrees_of_freedom == null ? 'not estimated (fallback)' : summary.sigma_doc_degrees_of_freedom],
-      ['Entries with multiple units', summary.multi_unit_entry_count]);
+      [t("d.σ_doc degrees of freedom"), summary.sigma_doc_degrees_of_freedom == null ? t("d.not estimated (fallback)") : summary.sigma_doc_degrees_of_freedom],
+      [t("d.Entries with multiple units"), summary.multi_unit_entry_count]);
     if (row.neighbor_recall != null) fields.push(
-      ['Neighbor recall (tie-inclusive)', `${row.neighbor_shared_count}/${row.representation_neighbor_count} (${percentage(row.neighbor_recall)})`]);
+      [t("d.Neighbor recall (tie-inclusive)"), `${row.neighbor_shared_count}/${row.representation_neighbor_count} (${percentage(row.neighbor_recall)})`]);
     if (row.neighbor_recall_fixed_k != null) fields.push(
-      ['Neighbor recall (fixed k)', percentage(row.neighbor_recall_fixed_k)]);
+      [t("d.Neighbor recall (fixed k)"), percentage(row.neighbor_recall_fixed_k)]);
     if (summary.neighbor_kth_similarity != null) fields.push(
       [`${ordinal(neighbors.effective_k)} fingerprint neighbor`, `Tanimoto ${summary.neighbor_kth_similarity.toFixed(2)}`]);
     if (summary.neighbor_kth_distance != null) fields.push(
       [`${ordinal(neighbors.effective_k)} representation neighbor`, `distance ${summary.neighbor_kth_distance.toFixed(2)}`]);
-    for (const [label,value] of fields) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = format(value); stats.append(dt,dd); }
+    for (const [label,value] of fields) {
+      const dt = document.createElement('dt'), dd = document.createElement('dd');
+      dt.textContent = translateServer(label);
+      // 证据单元来源可以是用户列名；只翻译代码生成的距离说明。
+      dd.textContent = label.endsWith(' representation neighbor') ? translateServer(format(value)) : format(value);
+      stats.append(dt,dd);
+    }
     $('evidence-summary').append(stats);
     const marker = document.createElement('p'); marker.className = genericRecords ? 'micro' : !summary.quality_annotations_verified && summary.median_verified ? 'flag' : summary.wide_record_range ? 'note' : 'micro';
-    marker.textContent = genericRecords ? summary.interpretation : !summary.quality_annotations_verified && summary.median_verified ? 'Quality flags not verified: original annotation rules are unavailable.' : summary.wide_record_range ? 'Records span more than one log unit or lie on both sides of the class thresholds. Class support already accounts for agreement among documents.' : summary.median_verified ? 'No wide record range rule triggered. This does not establish assay equivalence.' : summary.interpretation;
+    marker.textContent = genericRecords ? summary.interpretation : !summary.quality_annotations_verified && summary.median_verified ? t("d.Quality flags not verified: original annotation rules are unavailable.") : summary.wide_record_range ? t("d.Records span more than one log unit or lie on both sides of the class thresholds. Class support already accounts for agreement among documents.") : summary.median_verified ? t("d.No wide record range rule triggered. This does not establish assay equivalence.") : summary.interpretation;
+    marker.textContent = translateServer(marker.textContent);
     $('evidence-summary').append(marker);
     for (const text of summary.warnings || []) {
-      if (!text.startsWith('Offset document pair:')) continue;
+      if (!text.startsWith('Offset document pair:') && globalThis.ChemGridMapI18n?.getLanguage() !== 'zh') continue;
       const warning = document.createElement('p'); warning.className = 'flag';
-      warning.dataset.documentOffsetWarning = 'true'; warning.textContent = text;
+      warning.dataset.documentOffsetWarning = String(text.startsWith('Offset document pair:')); warning.textContent = translateServer(text);
       $('evidence-summary').append(warning);
     }
-    if (summary.median_verified && !genericRecords) { const verified = document.createElement('p'); verified.className = 'verified'; verified.textContent = summary.quality_annotations_verified ? 'Identity, counts, median, activity class and quality flags checked against retained records and saved rules.' : 'Record count and median verified; quality annotations remain unverified.'; $('evidence-summary').append(verified); }
+    if (summary.median_verified && !genericRecords) { const verified = document.createElement('p'); verified.className = 'verified'; verified.textContent = summary.quality_annotations_verified ? t("d.Identity, counts, median, activity class and quality flags checked against retained records and saved rules.") : t("d.Record count and median verified; quality annotations remain unverified."); $('evidence-summary').append(verified); }
     $('neighbor-title').textContent = `${fingerprintNeighbors ? 'Fingerprint' : 'Representation'} vs grid neighbors`;
+    $('neighbor-title').textContent = translateServer($('neighbor-title').textContent);
     $('neighbor-summary').textContent = `${neighbors.representation} (${neighbors.representation_metric}), k=${neighbors.effective_k}: ${neighbors.shared_count} shared neighbors out of ${neighbors.representation_count} ${fingerprintNeighbors ? 'fingerprint' : 'representation'} neighbors and ${neighbors.grid_count} grid neighbors. Recall ${(100 * neighbors.recall).toFixed(1)}%.`;
+    $('neighbor-summary').textContent = translateServer($('neighbor-summary').textContent);
     table(detail.neighbors, $('neighbor-table'));
     $('download-audit').hidden = !detail.audit_file;
     $('download-audit').onclick = () => download('/api/file?name=' + encodeURIComponent(detail.audit_file), detail.audit_file);
@@ -776,24 +1066,27 @@ async function inspect(query) {
     const priority = ['source_row','molecule_identity_key','activity_pchembl_raw','assay_chembl_id','document_chembl_id','assay_description'];
     const ordered = genericRecords ? detail.records : detail.records.map(record => Object.fromEntries([...priority.filter(key => key in record),...Object.keys(record).filter(key => !priority.includes(key))].map(key => [key,record[key]])));
     table(ordered,$('record-table'),999,genericRecords ? detail.record_columns : null);
-    $('record-count').textContent = `${detail.total_records} records${!genericRecords && detail.total_records > 100 ? ' · first 100 shown; CSV contains all records' : ''}`;
+    $('record-count').textContent = t("d.{count} records{suffix}", {count: detail.total_records, suffix: !genericRecords && detail.total_records > 100 ? t('d. · first 100 shown; CSV contains all records') : ''});
   } catch (error) { if (request === requestNumber) fail(error); }
 }
 async function download(path,name) {
   try { const blob = await (await api(path)).blob(), url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url),10000); }
   catch (error) { fail(error); }
 }
-async function compareGroup(groupId) {
+async function compareGroup(groupId, cached = null) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   try {
-    const result = await getJSON('/api/compare?group=' + encodeURIComponent(groupId));
+    const result = cached || await getJSON('/api/compare?group=' + encodeURIComponent(groupId));
+    compareGroup.lastResult = result;
     const group = result.summary;
     $('comparison-title').textContent = `${group.structure_group}: ${countLabel(group.size, 'molecule')}`;
-    $('core-svg').innerHTML = result.drawings.core_smiles || '<p>No ring scaffold</p>';
+    $('core-svg').innerHTML = result.drawings.core_smiles || '';
+    if (!result.drawings.core_smiles) $('core-svg').textContent = t('d.No ring scaffold');
     $('representative-svg').innerHTML = result.drawings.representative_smiles;
-    const rule = 'Core rule: ' + coreRule(group) + (group.core_rule === 'coverage'
-      ? ` The most frequent scaffold matches ${group.most_frequent_scaffold_coverage_count}/${group.size}.` : '');
-    $('core-coverage').textContent = `${group.core_status}. This core matches ${group.core_coverage_count}/${countLabel(group.size, 'member')}; ${group.core_exact_scaffold_count} have exactly this scaffold. ${group.distinct_scaffolds} distinct ring scaffolds; ${countLabel(group.acyclic_members, 'acyclic member')}. ${rule}`;
-    $('comparison-rule').textContent = `${result.selected_count}/${countLabel(group.size, 'member')} shown. ${result.selection_rule} A scaffold summary is not a complete explanation of fingerprint similarity.`;
+    const rule = t("d.Core rule: ") + coreRule(group) + (group.core_rule === 'coverage'
+      ? t("d. The most frequent scaffold matches {covered}/{size}.", {covered: group.most_frequent_scaffold_coverage_count, size: group.size}) : '');
+    $('core-coverage').textContent = t("d.{status}. This core matches {covered}/{members}; {exact} have exactly this scaffold. {distinct} distinct ring scaffolds; {acyclic}. {rule}", {status: t('d.' + group.core_status), covered: group.core_coverage_count, members: countLabel(group.size, 'member'), exact: group.core_exact_scaffold_count, distinct: group.distinct_scaffolds, acyclic: countLabel(group.acyclic_members, 'acyclic member'), rule});
+    $('comparison-rule').textContent = t("d.{selected}/{members} shown. {rule} A scaffold summary is not a complete explanation of fingerprint similarity.", {selected: result.selected_count, members: countLabel(group.size, 'member'), rule: t('d.' + result.selection_rule)});
     $('comparison-svg').innerHTML = result.svg;
     const activityTerm = job.options.input_format === 'chembl' ? 'pChEMBL' : 'pActivity';
     const rows = result.members.map(m => ({ID:m.comparison_id, [activityTerm]:m.activity_pchembl, Class:m.activity_class, Core:group.core_member_ids.includes(m.comparison_id), Scaffold:m.scaffold_smiles, Row:m.grid_row, Column:m.grid_col}));
@@ -804,7 +1097,8 @@ async function compareGroup(groupId) {
       tr.onclick = locate; tr.onkeydown = e => { if (e.key === 'Enter') locate(); };
     });
     $('download-comparison').onclick = () => download('/api/file?name=' + encodeURIComponent(result.archive), result.archive);
-    $('comparison-dialog').showModal();
+    if (!$('comparison-dialog').open) $('comparison-dialog').showModal();
+    translateSVGText($('comparison-svg'));
   } catch (error) { fail(error); }
 }
 $('compare-group').addEventListener('click', () => compareGroup($('group-select').value));
@@ -860,7 +1154,7 @@ dropZone.addEventListener('drop', event => {
   event.preventDefault(); dropZone.classList.remove('drag-over');
   if (busy) return;
   const files = event.dataTransfer.files;
-  if (files.length !== 1) { fail(new Error('Choose one CSV file at a time.')); return; }
+  if (files.length !== 1) { fail(new Error("Choose one CSV file at a time.")); return; }
   loadInput(false, files[0]);
 });
 document.querySelector('.tabs').addEventListener('keydown', event => {
@@ -870,6 +1164,7 @@ document.querySelector('.tabs').addEventListener('keydown', event => {
 });
 densityPreview(); updateNavigation(); updateGrouping();
 function restoreOptions(config) {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   $('grouping').value = config.grouping || 'butina';
   $('group-similarity').value = config.group_similarity ?? .6;
   $('cluster-col').value = config.cluster_col || ''; $('cluster-source').value = config.cluster_source || '';
@@ -897,10 +1192,76 @@ function restoreOptions(config) {
   updateGrouping();
 }
 $('core-rule').addEventListener('change', updateGrouping);
+
+function translateSVGText(container) {
+  for (const node of container.querySelectorAll('text,title')) {
+    if (!node.dataset.originalText) node.dataset.originalText = node.textContent;
+    // Compound IDs and chemical drawing atom labels are not interface text.
+    const original = node.dataset.originalText;
+    const card = node.closest('[data-comparison-id]');
+    if (card && original === card.dataset.comparisonId) continue;
+    node.textContent = translateServer(original);
+  }
+}
+function refreshValidation(input) {
+  if (!input.setCustomValidity) return;
+  input.setCustomValidity('');
+  if (input.id === 'assumed-sigma' && !(Number(input.value) > 0)) {
+    input.setCustomValidity(t('d.Assumed σ must be greater than zero.')); return;
+  }
+  if (window.ChemGridMapI18n.getLanguage() !== 'zh' || input.disabled) return;
+  const validity = input.validity;
+  if (validity.valueMissing) input.setCustomValidity(t(input.tagName === 'SELECT' ? 'd.Please select an item in the list.' : 'd.Please fill out this field.'));
+  else if (validity.badInput) input.setCustomValidity(t('d.Please enter a number.'));
+  else if (validity.rangeUnderflow) input.setCustomValidity(t('d.Value must be greater than or equal to {value}.', {value: input.min}));
+  else if (validity.rangeOverflow) input.setCustomValidity(t('d.Value must be less than or equal to {value}.', {value: input.max}));
+  else if (!validity.valid) input.setCustomValidity(t('d.Please enter a valid value.'));
+}
+async function refreshLanguage() {
+  const focus = document.activeElement;
+  const scroll = [window.scrollX, window.scrollY];
+  updateInputType();
+  $('build').textContent = t(busy ? 'd.Building map...' : 'd.Generate map →');
+  $('selection-hint').textContent = t('d.Select a molecule on the map.');
+  if (!inspect.lastDetail || $('inspector').hidden) $('neighbor-title').textContent = t('d.Representation vs grid neighbors');
+  if (inputInfo) {
+    $('input-summary').textContent = t('d.CSV loaded · stored only on this computer');
+    $('input-stats').replaceChildren(stat(inputInfo.rows, t('d.Input rows')), stat(inputInfo.columns.length, t('d.Columns')));
+    if (!inputInfo.preview.length) $('preview-table').textContent = t('d.No records available.');
+  } else $('input-name').textContent = t('d.Your dataset');
+  if (queryInputInfo) $('query-input-rows').textContent = t('d.{count} rows', {count: queryInputInfo.rows.toLocaleString()});
+  for (const select of document.querySelectorAll('#molecule-options select,#query-input-info select')) {
+    for (const option of select.options) if (!option.value) option.textContent = t('d.None');
+  }
+  if (umapAvailable === false) $('projection').querySelector('[value=umap]').textContent = t('d.UMAP (not installed)');
+  if (job && showResult.grouping) await showResult(true);
+  if (currentCell && inspect.lastDetail) await inspect(null, inspect.lastDetail);
+  if (highlightedGroup) {
+    // 新组请求尚在运行时，更新标签但不借用上一个结构组的核心图。
+    const cachedGroup = selectGroup.lastResult?.summary?.structure_group === highlightedGroup ? selectGroup.lastResult : {};
+    await selectGroup(highlightedGroup, cachedGroup);
+  }
+  if ($('comparison-dialog').open && compareGroup.lastResult) await compareGroup(null, compareGroup.lastResult);
+  applyTransform();
+  for (const id of ['map-stage','molecule-svg','neighborhood-svg','comparison-svg']) translateSVGText($(id));
+  if (status.last) status(status.last.message, status.last.kind);
+  else $('build-progress').textContent = t('d.Preparing input records...');
+  for (const input of document.querySelectorAll('#options input,#options select')) refreshValidation(input);
+  window.ChemGridMapI18n.updateHelpLabels?.();
+  if (focus?.isConnected && document.activeElement !== focus) focus.focus({preventScroll:true});
+  window.scrollTo({left:scroll[0], top:scroll[1]});
+}
+window.ChemGridMapI18n.translateSVG = translateSVGText;
+document.addEventListener('chemgridmap:languagechange', refreshLanguage);
+$('options').addEventListener('input', event => refreshValidation(event.target));
+$('options').addEventListener('change', event => refreshValidation(event.target));
+$('options').addEventListener('invalid', event => refreshValidation(event.target), true);
+refreshLanguage();
+
 getJSON('/api/session').then(async info => {
   $('version').textContent = 'v' + info.version;
   umapAvailable = info.umap; demoAvailable = info.demo_available;
-  if (!info.umap) { $('projection').querySelector('[value=umap]').disabled=true; $('projection').querySelector('[value=umap]').textContent='UMAP (not installed)'; }
+  if (!info.umap) { $('projection').querySelector('[value=umap]').disabled=true; $('projection').querySelector('[value=umap]').textContent=t("d.UMAP (not installed)"); }
   $('demo').disabled = !info.demo_available;
   if (info.input) { showInput(info.input); showPage('configure'); }
   if (info.query_input) showQueryInput(info.query_input);
@@ -912,3 +1273,9 @@ getJSON('/api/session').then(async info => {
   }
   else if (info.job.state === 'error') status(info.job.message, 'error');
 }).catch(fail);
+
+}
+initializeWorkspace().catch(error => {
+  const status = document.getElementById('status');
+  status.hidden = false; status.className = 'error'; status.textContent = error.message;
+});

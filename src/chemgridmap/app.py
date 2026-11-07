@@ -719,7 +719,7 @@ class LocalHandler(BaseHTTPRequestHandler):
             return
         session = self.server.session
         try:
-            if path in ("/", "/app.js", "/app.css", "/example-map.svg", "/example-molecule.svg"):
+            if path in ("/", "/app.js", "/i18n.json", "/app.css", "/example-map.svg", "/example-molecule.svg"):
                 asset = ASSETS / ("index.html" if path == "/" else path[1:])
                 self.send(asset.read_bytes(), mimetypes.guess_type(asset.name)[0] or "text/plain")
             elif path == "/api/session":
