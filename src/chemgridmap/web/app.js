@@ -1050,7 +1050,7 @@ function showSources(sources = [], lookup = {}) {
       row.append(metadata);
       if (possible && source.same_values?.length) {
         const same = document.createElement('p'); same.className = 'micro source-same-value';
-        same.textContent = t('u7.sameValue', {values: source.same_values.join(', ')}); row.append(same);
+        same.textContent = t('u7.sameValue', {values: source.same_values.join(t('u.idSeparator'))}); row.append(same);
       }
       const links = document.createElement('div'); links.className = 'source-links';
       for (const link of source.links || []) {
@@ -1143,7 +1143,8 @@ async function inspect(query) {
     const genericRecords = summary.input_format === 'generic_activity';
     const fields = [[t("d.Median {term}", {term: activityTerm}),summary.median_pchembl],[t("d.{term} range", {term: activityTerm}),summary.minimum_pchembl == null ? null : `${format(summary.minimum_pchembl)}–${format(summary.maximum_pchembl)}`],[t("d.Source records"),summary.n_records],[t("d.Distinct assays"),summary.n_assays],[t("d.Distinct documents"),summary.n_documents]];
     if (genericRecords || !summary.median_verified) {
-      fields.splice(0,fields.length,[t("d.Activity class"),t('d.' + row.activity_class)],[t("d.Source-record audit"),genericRecords && summary.median_verified ? t("d.Median recomputed from {count} listed records", {count: summary.n_records}) : t("d.Not available")]);
+      const auditKey = summary.n_records === 1 ? "d.Median recomputed from {count} listed record" : "d.Median recomputed from {count} listed records";
+      fields.splice(0,fields.length,[t("d.Activity class"),t('d.' + row.activity_class)],[t("d.Source-record audit"),genericRecords && summary.median_verified ? t(auditKey, {count: summary.n_records}) : t("d.Not available")]);
       if (job.options.input_format !== 'chembl') {
         const activity = row.activity_pchembl ?? row[job.options.value_col];
         if (job.options.compound_column) {

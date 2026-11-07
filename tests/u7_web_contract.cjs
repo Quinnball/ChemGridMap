@@ -1,5 +1,7 @@
 'use strict';
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const vm = require('node:vm');
 const {runtime, realFunction} = require('./u4_web_contract.cjs');
 
@@ -53,7 +55,7 @@ const scenarios = {
       assert.equal($('possible-sources-note').textContent, api.t('u7.sourceNote', {file: lookupFile}));
       assert.match($('possible-source-list').textContent, language === 'en' ? /Publication.*J\. Med\. Chem\..*1989.*ChEMBL records: 3/ : /论文.*J\. Med\. Chem\..*1989.*ChEMBL 记录：3 条/);
       assert.equal($('possible-source-list').querySelector('.source-same-value').textContent,
-        language === 'en' ? 'Same value (pChEMBL 7.20, 8.00)' : '数值相同（pChEMBL 7.20, 8.00）');
+        language === 'en' ? 'Same value (pChEMBL 7.20, 8.00)' : '数值相同（pChEMBL 7.20、8.00）');
       assert.equal($('possible-sources-empty').hidden, true);
       const anchors = $('possible-source-list').querySelectorAll('a'); assert.equal(anchors.length, 4);
       for (const anchor of anchors) {
@@ -172,6 +174,82 @@ const scenarios = {
       assert.equal($('source-input-rows').textContent, api.t('d.{count} rows', {count: '2,281'}));
       assert.equal($('possible-sources-note').textContent, api.t('u7.sourceNote', {file: lookupFile}));
       assert.match($('audit-body').textContent, language === 'en' ? /Source lookup/ : /来源文献查找/);
+    }
+  },
+  async summary_columns() {
+    await setup();
+    const css = fs.readFileSync(path.join(process.argv[2], 'app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const declarations = selector => [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter(([, selectors]) => selectors.split(',').some(item => item.trim() === selector))
+      .map(([, , body]) => body).join('\n');
+    const grid = declarations('#evidence-summary dl');
+    assert.match(grid, /display:\s*grid\s*;/);
+    assert.match(grid, /grid-template-columns:\s*minmax\(0,\s*1\.25fr\)\s+minmax\(0,\s*1fr\)\s*;/);
+    assert.match(grid, /gap:\s*8px\s*;/);
+    assert.match(grid, /font-size:\s*11px\s*;/);
+    for (const selector of ['#evidence-summary dt', '#evidence-summary dd']) {
+      const rule = declarations(selector);
+      assert.match(rule, /min-width:\s*0\s*;/);
+      assert.match(rule, /overflow-wrap:\s*anywhere\s*;/);
+      assert.doesNotMatch(rule, /white-space:\s*nowrap/);
+    }
+    // VM 没有浏览器排版引擎；这里只约束列宽与换行规则，不证明实际行数或无溢出。
+  },
+  async median_plural() {
+    const {context, $, api} = await setup();
+    context.getJSON = () => { throw Error('Language changes must reuse cached records'); };
+    for (const count of [0, 1, 2]) {
+      const result = detail(); result.summary.n_records = count;
+      api.setLanguage('en'); await context.inspect(null, result);
+      for (const language of ['en', 'zh', 'en']) {
+        api.setLanguage(language); await context.refreshLanguage();
+        const fields = $('evidence-summary').children[0].children;
+        const auditIndex = fields.findIndex(node => node.tagName === 'DT'
+          && node.textContent === (language === 'en' ? 'Source-record audit' : '来源记录审计'));
+        assert.ok(auditIndex >= 0);
+        assert.equal(fields[auditIndex + 1].textContent, language === 'en'
+          ? `Median recomputed from ${count} listed ${count === 1 ? 'record' : 'records'}`
+          : `已根据列出的 ${count} 条记录重新计算中位数`);
+      }
+    }
+  },
+  async same_value_separator() {
+    const {context, $, api} = await setup();
+    context.getJSON = () => { throw Error('Language changes must reuse cached sources'); };
+    for (const values of [[], ['8.05'], ['8.05', '8.10']]) {
+      const originalValues = [...values];
+      const result = detail({possible_sources: [{...source, same_values: values}]});
+      api.setLanguage('en'); await context.inspect(null, result);
+      for (const language of ['en', 'zh', 'en']) {
+        api.setLanguage(language); await context.refreshLanguage();
+        const same = $('possible-source-list').querySelector('.source-same-value');
+        if (!values.length) assert.equal(same, null);
+        else assert.equal(same.textContent, language === 'en'
+          ? `Same value (pChEMBL ${values.join(', ')})` : `数值相同（pChEMBL ${values.join('、')}）`);
+      }
+      assert.deepEqual(result.possible_sources[0].same_values, originalValues);
+    }
+  },
+  async control_order() {
+    const {context, $, api, document} = await setup();
+    const sourceControl = $('source-input-control'), parent = sourceControl.parentElement;
+    const relationRow = $('relation-column').closest('.form-row');
+    assert.equal($('label-col').closest('.form-row'), relationRow);
+    assert.equal(relationRow.parentElement, parent);
+    assert.equal($('reference-column-control').parentElement, parent);
+    const siblings = parent.children, relationIndex = siblings.indexOf(relationRow);
+    assert.equal(siblings[relationIndex - 1], $('reference-column-control'));
+    assert.equal(siblings[relationIndex + 1], sourceControl);
+    assert.equal(siblings[relationIndex + 2].dataset.i18nText, 's.060');
+    assert.equal(document.querySelectorAll('[data-help]').length, 50);
+    assert.equal(sourceControl.querySelectorAll('[data-help]').length, 1);
+    for (const language of ['en', 'zh']) {
+      api.setLanguage(language);
+      for (const type of ['generic', 'chembl', 'molecule']) {
+        $('input-format').value = type; context.updateInputType();
+        assert.equal(sourceControl.hidden, type !== 'generic');
+        assert.equal($('source-csv').disabled, type !== 'generic');
+      }
     }
   },
   async u6_layout() {
