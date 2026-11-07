@@ -544,6 +544,35 @@ function showDataAudit(report) {
       const count = document.createElement('p'); count.dataset.queryStatus = key;
       count.dataset.queryCount = report.query_molecules[key]; count.textContent = t('d.{label}: {value}', {label: t('d.' + label), value: report.query_molecules[key]}); section.append(count);
     }
+    const matches = report.query_reference_matches || [];
+    if (matches.length) {
+      const heading = document.createElement('h4'), container = document.createElement('div');
+      heading.textContent = t('u6.referenceMatches');
+      container.className = 'table-scroll query-reference-matches';
+      const visible = matches.slice(0, 50);
+      table(visible.map(match => {
+        const title = match.molecule_id, identity = match.parent_molecule_id || match.reference_id;
+        return {
+          [t('u6.queryId')]: match.query_id,
+          [t('u6.measuredId')]: identity && title !== identity ? t('d.{title} (parent {identity})', {title, identity}) : title,
+          [t('u6.sourceCount')]: match.source_count,
+          [t('u6.linkedSourceCount')]: match.linked_source_count
+        };
+      }), container);
+      container.querySelectorAll('tbody tr').forEach((row, index) => {
+        row.tabIndex = 0; row.setAttribute('role', 'button');
+        row.dataset.queryId = visible[index].query_id;
+        const locate = () => { $('audit-dialog').close(); inspect('id=' + encodeURIComponent(visible[index].query_id)); };
+        row.onclick = locate;
+        row.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); locate(); } };
+      });
+      section.append(heading, container);
+      if (matches.length > visible.length) {
+        const remaining = document.createElement('p'); remaining.className = 'micro';
+        remaining.textContent = t('u6.remainingMatches', {count: matches.length - visible.length});
+        section.append(remaining);
+      }
+    }
     for (const message of report.query_molecules.warnings || []) {
       const warning = document.createElement('p'); warning.textContent = translateServer(message); section.append(warning);
     }
@@ -1028,6 +1057,19 @@ async function inspect(query) {
     $('molecule-svg').innerHTML = detail.svg;
     globalThis.ChemGridMapI18n?.translateSVG?.($('molecule-svg'));
     $('selected-id').textContent = row.query_id || row.molecule_id || row.molecule_identity_key || row.canonical_smiles;
+    const match = detail.query_match, matchNote = $('query-match-note');
+    matchNote.replaceChildren();
+    matchNote.hidden = !match || !['in_reference', 'duplicate_query'].includes(match.status);
+    if (!matchNote.hidden) {
+      const parts = [];
+      if (match.status === 'duplicate_query') parts.push(t('u6.duplicateQuery', {query: match.query_id, first: match.first_query_id}));
+      if (match.status === 'in_reference' || match.reference_id) {
+        const title = $('selected-id').textContent, identity = row.parent_molecule_id || match.reference_id;
+        const measured = identity && title !== identity ? t('d.{title} (parent {identity})', {title, identity}) : title;
+        parts.push(t('u6.inReference', {query: match.status === 'duplicate_query' ? match.first_query_id : match.query_id, measured}));
+      }
+      matchNote.textContent = parts.length === 2 ? t('d.{first} {second}', {first: parts[0], second: parts[1]}) : parts[0];
+    }
     $('cell-location').textContent = t("d.Grid row {row} · column {column} (zero-based)", {row: row.grid_row, column: row.grid_col});
     $('measurement-badge').hidden = !unmeasured; $('query-selection').hidden = !unmeasured;
     $('measured-selection').hidden = unmeasured;

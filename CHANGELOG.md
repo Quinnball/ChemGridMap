@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Resolve unmeasured IDs through existing structure matches to measured sources
+  or the first duplicate; add bilingual inspector notes and a source-count table
+  in Data audit without changing calculations or exports.
 - Add inspector source-document links from the bundled ChEMBL 37 document table,
   optional DOI/PubMed/URL references for generic records, link-coverage audit
   summaries and document links in inspector record downloads; preserve map

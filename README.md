@@ -94,6 +94,13 @@ measured/unmeasured cells and combines with structure-group highlighting;
 select an unmeasured molecule to inspect its Morgan-nearest measured molecules.
 No activity is predicted, and grid adjacency is not evidence.
 
+If an unmeasured molecule has the same structure as a measured molecule,
+searching its uploaded ID opens that measured molecule and its source documents.
+Matching uses the reference data's structure policy, independent of how the
+SMILES is written; stereoisomers are not the same structure. **Data audit** lists
+these matches and their source-document counts. Repeated query structures open
+the first occurrence; invalid SMILES are identified in the lookup error.
+
 Use **EN / 中文** in the upper-right corner to switch the interface language.
 The question-mark buttons beside settings explain their defaults, choices and
 effects. Exported files always use English, regardless of the interface language.

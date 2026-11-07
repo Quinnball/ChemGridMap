@@ -87,7 +87,8 @@ def _select_molecule(data, row, col, molecule_id):
         if chembl_id:
             wanted = wanted.upper()
         matches = pd.Series(False, index=data.index)
-        for field in ("molecule_identity_key", "molecule_id", "parent_molecule_id", "query_id", "name"):
+        for field in ("molecule_identity_key", "molecule_id", "parent_molecule_id", "query_id", "name",
+                      "canonical_smiles"):
             if field in data:
                 matches |= data[field].fillna("").astype(str).map(
                     lambda value: wanted in {v.strip().upper() if chembl_id else v.strip()
@@ -96,6 +97,22 @@ def _select_molecule(data, row, col, molecule_id):
     if len(chosen) != 1:
         raise ValueError(f"Selection matched {len(chosen)} entries; one occupied cell is required.")
     return chosen
+
+
+def _query_selection(check, molecule_id):
+    """Resolve uploaded IDs using the existing structure check, without rematching."""
+    if molecule_id is None or check.empty:
+        return molecule_id, None
+    matches = check[check.query_id.eq(str(molecule_id).strip())]
+    if matches.empty:
+        return molecule_id, None
+    match = matches.iloc[0][["query_id", "status", "reference_id", "first_query_id"]].to_dict()
+    if match["status"] == "mapped":
+        return molecule_id, None
+    if match["status"] == "invalid_smiles":
+        raise ValueError(f"Unmeasured molecule {match['query_id']} has invalid SMILES.")
+    target = match["reference_id"] or "query:" + (match["first_query_id"] or match["query_id"])
+    return target, match
 
 
 def _group_drawing(summary, field):
@@ -399,6 +416,9 @@ class AppSession:
                                         options["reference_column"])
                 report = {**report, "document_coverage": {
                     "kind": "reference", **document_coverage(sources)}}
+            if result.query_report:
+                report = {**report, "query_reference_matches": self._query_reference_matches(
+                    result, curation, generic_records, options)}
             with self.lock:
                 self.result, self.curation, self.files = result, curation, files
                 self.generic_records = generic_records
@@ -474,6 +494,32 @@ class AppSession:
         records[column] = records.source_row.map(references)
         return records
 
+    def _query_reference_matches(self, result, curation, generic_records, options):
+        """Count retained documents for the browser only; never create audit exports."""
+        checks = result.query_check[result.query_check.status.eq("in_reference")]
+        if checks.empty:
+            return []
+        records = curation.retained_records if curation is not None else generic_records
+        document_column = (curation.report["detected_columns"].get("document_id")
+                           if curation is not None else options["document_column"])
+        if records is not None:
+            records = self._reference_records(records, options)
+        matches = []
+        for check in checks.itertuples(index=False):
+            selected = _select_molecule(result.data, None, None, check.reference_id)
+            molecule = json_rows(selected)[0]
+            sources = []
+            # Reference-only text must not invent document identifiers or counts.
+            if records is not None and document_column:
+                retained = records[records.molecule_identity_key.eq(check.reference_id)]
+                sources = build_sources(retained, document_column, options.get("reference_column"))
+            matches.append({"query_id": check.query_id, "reference_id": check.reference_id,
+                            "molecule_id": molecule.get("molecule_id") or check.reference_id,
+                            "parent_molecule_id": molecule.get("parent_molecule_id") or "",
+                            "source_count": len(sources),
+                            "linked_source_count": sum(bool(source["links"]) for source in sources)})
+        return matches
+
     def _generic_record_audit(self, chosen, summary):
         row = chosen.iloc[0]
         records = self.generic_records
@@ -517,6 +563,7 @@ class AppSession:
             if self.result is None:
                 raise ValueError("Build a map first.")
             data, curation = self.result.data, self.curation
+            molecule_id, query_match = _query_selection(self.result.query_check, molecule_id)
             if "measurement_status" in data:
                 selected = _select_molecule(data, row, col, molecule_id)
                 if selected.iloc[0].measurement_status == "not_measured":
@@ -525,8 +572,11 @@ class AppSession:
                         self.result.query_neighbors.query_id.eq(query.query_id)]
                     svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320">'
                            + (_svg_molecule_content(query.canonical_smiles, 320) or '') + '</svg>')
-                    return {"molecule": json_rows(selected)[0], "query_neighbors": json_rows(neighbors),
-                            "group_similarity": self.job["options"]["group_similarity"], "svg": svg}, pd.DataFrame()
+                    detail = {"molecule": json_rows(selected)[0], "query_neighbors": json_rows(neighbors),
+                              "group_similarity": self.job["options"]["group_similarity"], "svg": svg}
+                    if query_match is not None:
+                        detail["query_match"] = query_match
+                    return detail, pd.DataFrame()
             if curation is not None:
                 _, run_bound, binding_warnings, manifest = load_audit_context(
                     Path(self.result.output_files['coordinates']),
@@ -608,6 +658,8 @@ class AppSession:
                     "neighborhood_svg": neighborhood.read_text(encoding="utf-8")}
             if self.generic_records is not None:
                 detail["record_columns"] = display_records.columns.tolist()
+            if query_match is not None:
+                detail["query_match"] = query_match
             return detail, records
 
 

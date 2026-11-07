@@ -736,7 +736,16 @@
     "d.{first} {second}": "{first} {second}",
     "server.reference_column_missing": "The selected reference column was not found.",
     "server.reference_column_generic": "Reference columns require generic activity records.",
-    "u5.patentLink": "Patent {id}"
+    "u5.patentLink": "Patent {id}",
+    "u6.inReference": "{query} is not shown separately: it has the same structure as the measured molecule {measured}. Its evidence and sources are shown below.",
+    "u6.duplicateQuery": "{query} repeats {first} (same structure).",
+    "u6.referenceMatches": "Same structure as a measured molecule",
+    "u6.queryId": "Unmeasured molecule ID",
+    "u6.measuredId": "Matched measured molecule ID",
+    "u6.sourceCount": "Sources",
+    "u6.linkedSourceCount": "Sources with links",
+    "u6.remainingMatches": "{count} more rows. Full list: map_query_check.csv (Export)",
+    "server.query_invalid_smiles": "Unmeasured molecule {query_id} has invalid SMILES."
   },
   "zh": {
     "s.001": "ChemGridMap | 分子工作台",
@@ -1475,6 +1484,15 @@
     "d.{first} {second}": "{first}{second}",
     "server.reference_column_missing": "找不到所选的参考文献列。",
     "server.reference_column_generic": "参考文献列需要使用通用活性记录输入。",
-    "u5.patentLink": "专利 {id}"
+    "u5.patentLink": "专利 {id}",
+    "u6.inReference": "{query} 未单独入图：它与已测分子 {measured} 结构相同。下面显示该已测分子的证据与来源文献。",
+    "u6.duplicateQuery": "{query} 与 {first} 结构相同（重复）。",
+    "u6.referenceMatches": "与已测分子结构相同",
+    "u6.queryId": "未测分子 ID",
+    "u6.measuredId": "对应的已测分子 ID",
+    "u6.sourceCount": "来源文献数",
+    "u6.linkedSourceCount": "带链接的来源文献数",
+    "u6.remainingMatches": "另有 {count} 行。完整列表：map_query_check.csv（导出）",
+    "server.query_invalid_smiles": "未测分子 {query_id} 的 SMILES 无效。"
   }
 }
