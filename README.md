@@ -88,18 +88,22 @@ Select a structure group to highlight its members on any color layer in the grid
 or 2D projection, and see its selected core structure and coverage.
 For your own records, choose **Generic activity records**, select the activity
 unit or a unit column, and optionally supply evidence-unit identifiers or an
-assumed σ in Advanced settings. Add an optional unmeasured CSV/TSV in
-**Data & activity** to map it with the measured references. **Show** filters
-measured/unmeasured cells and combines with structure-group highlighting;
-select an unmeasured molecule to inspect its Morgan-nearest measured molecules.
-No activity is predicted, and grid adjacency is not evidence.
+assumed σ in Advanced settings. First build the **reference map**, then use
+**Add new molecules** on the map page to upload AI-generated candidates or your
+own measurements. **Show** filters all, reference or new molecules and combines
+with structure-group highlighting. New molecules occupy empty grid cells;
+reference molecules and the original reference outputs remain unchanged.
+Select a new molecule to inspect its nearest reference molecules and their
+**neighbor evidence**. This is evidence auditing and exploration, not activity
+prediction. Grid adjacency itself is not evidence.
 
-If an unmeasured molecule has the same structure as a measured molecule,
-searching its uploaded ID opens that measured molecule and its source documents.
-Matching uses the reference data's structure policy, independent of how the
-SMILES is written; stereoisomers are not the same structure. **Data audit** lists
-these matches and their source-document counts. Repeated query structures open
-the first occurrence; invalid SMILES are identified in the lookup error.
+If a new molecule has the same structure as a reference molecule, searching its
+uploaded ID opens that reference molecule and its source documents. Matching
+uses the reference data's structure policy; stereoisomers remain distinct.
+**Data audit** lists these matches and their source counts. Repeated structures
+open the first occurrence; invalid SMILES are identified in the lookup error.
+For your measurements, the matched reference also shows both medians and their
+difference, which can help check agreement between assay systems.
 
 Use **EN / 中文** in the upper-right corner to switch the interface language.
 The question-mark buttons beside settings explain their defaults, choices and
@@ -286,56 +290,65 @@ record the evidence-unit source. Assumed SDs have no fitted degrees of freedom.
 This option requires records; a molecule-only table must first be supplied in
 record-table form with `--compound-column`.
 
-To place unmeasured molecules alongside measured references:
+### 先建参照图，再加入新分子 / Reference first, then new molecules
+
+先选择参照数据并生成地图，再在地图页点击“加入新分子”。上传 CSV/TSV，
+选择 SMILES、可选 ID 和标签；不选 ID 时按 `N00001`、`N00002` 编号。
+选活性列后按自己的测定记录处理，可指定统一单位或单位列、关系符列和
+证据单元列。自己的数据仍可作为主数据独立建图。
+
+Build a reference map first, then choose **Add new molecules** on the map page.
+Upload CSV/TSV and select SMILES plus optional ID and label columns. IDs default
+to `N00001`, `N00002`, etc. Selecting an activity column enables measured-record
+aggregation, with a fixed unit or unit column, an optional relation column and
+an optional evidence-unit column. Your own data can still be the main input.
+
+Only maps arranged using **Morgan fingerprints** accept new molecules. Checked
+new molecules are limited to **1,000**; tens to hundreds are recommended. New
+molecules appear **only in the grid**, never in the 2D projection. One set is
+active at a time. Uploading another set replaces the displayed set; removing it
+restores the reference-only display. Refreshing retains the set, rebuilding
+re-inserts it, and changing the reference input clears it. Saved output folders
+are preserved.
+
+Placement uses the reference map's Morgan radius and bit count. For each new
+molecule, choose the reference with the highest Tanimoto score; tied references
+favor the lexicographically smallest ID. Process new molecules by decreasing
+best score, then ID. Choose the nearest empty cell within the original grid
+bounds by Euclidean distance; ties favor row, then column. No reference cell
+moves. An error is raised when there are too few empty cells.
+
+**Neighbor evidence** uses the five most similar reference molecules, including
+all ties at fifth place. Only neighbors with Tanimoto at least `group_similarity`
+(default `0.6`) count as similar. Supported similar neighbors yield consistent
+active, medium or inactive evidence, or conflicting evidence if classes differ.
+Similar neighbors without supported classes yield insufficient evidence; no
+similar neighbors yield no similar reference molecule. When reference class
+support was not assessed, observed classes are used and this limitation is
+shown. For measured new molecules, the app compares their own class with a
+consistent neighbor class. **This summarizes evidence from similar reference
+molecules; it is not a prediction for this molecule.**
+
+The CLI keeps its existing query arguments and inserts after finishing the
+reference map:
 
 ```bash
 chemgridmap --example caii --query-file virtual_library.csv \
   --query-smiles-column smiles --query-id-column query_id \
-  --map-color-modes activity class_support neighbor_recall structure_group \
   --output-dir query_map
 ```
 
-Queries may be CSV or TSV. SMILES-column detection accepts common names such as
-`smiles`, `SMILES` and `canonical_smiles`; omitted IDs become `Q00001`,
-`Q00002`, and so on in input order. Duplicate IDs are errors. Queries use the
-reference input's actual structure policy. Invalid structures, repeated query
-structures and structures already in the measured set are recorded in
-`<name>_query_check.csv` and excluded from additional map cells. At least two
-measured reference molecules are required.
+CLI queries are treated as unmeasured molecules. **Measured new-molecule input
+is supported in the browser only**, not through CLI query arguments.
+`build_grid_map(..., query_data=...)` likewise builds the reference first and
+then inserts unmeasured molecules. The public `insert_new_molecules` function
+is shared by the browser and CLI.
 
-`<name>_query_neighbors.csv` lists each query's five most similar measured
-Morgan-fingerprint neighbors, including all ties at fifth place, with their
-observed class, median pActivity and available evidence statistics. This uses
-the map's Morgan radius and bit count even for descriptor maps. Similarity 1.0
-can occur for stereoisomers or tautomers of measured molecules. The tool does
-not predict activity or assign a predicted activity class. Grid adjacency is
-not evidence; these neighbors come from fingerprint space.
-
-Unmeasured rows have `measurement_status=not_measured` and
-`activity_class=not_measured`, with blank activity and support fields. Their
-activity and class-support cells are white with a thin gray border and a
-`Not measured` legend. Structure and neighbor-reliability layers include all
-molecules. Activity-based diagnostics include only measured references.
-
-Groups and cores are calculated using measured references alone. A query
-joins the group whose center has the highest Morgan similarity at or above
-`--group-similarity`; tied centers favor the smaller group number. Unmatched
-queries and all queries with external grouping remain ungrouped. Each group
-adds `n_query_members`, while reference membership and core-coverage statistics
-stay unchanged. Query rows record center similarity and core containment.
-Exact grouping's 10,000 limit applies to references; larger combined maps warn
-about runtime, and automatic structure drawing uses the total 2,000 threshold.
-
-Python uses the same public `prepare_query_molecules` function and
-`build_grid_map(..., query_data=queries, query_smiles_col="smiles",
-query_id_col="query_id")` workflow. For pre-curated ChEMBL tables pass the
-curation report's actual structure policy as `query_structure_policy`.
-See [generated API](docs/API.md) and [output columns](docs/OUTPUT_COLUMNS.md)
-for parameters, conditional fields and audit outputs. These options are also
-available in the local browser. Its Data audit lists query-check counts,
-excluded generic records and the evaluated evidence-unit pairs, and identifies
-an assumed σ; for generic records the inspector lists each compound's retained
-records. Exported files include the query checks and neighbors.
+New results are saved under `new_molecules/<input-stem>/`; existing names receive
+`-2`, `-3`, etc. The folder contains the byte-preserved input, structure checks,
+one-row-per-molecule results, tie-inclusive neighbors, an activity SVG,
+a manifest and a ZIP. Original reference files are not changed. See
+[新分子详细规则与输出文件](docs/NEW_MOLECULES.md).
 
 ## Python API
 

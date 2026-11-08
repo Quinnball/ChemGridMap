@@ -9,7 +9,7 @@ const source = fs.readFileSync(path.join(assets, 'app.js'), 'utf8');
 const dictionaries = JSON.parse(fs.readFileSync(path.join(assets, 'i18n.json'), 'utf8'));
 const controls = ['input-format', 'target', 'activity-type', 'compound-column', 'smiles-col',
   'value-col', 'value-unit', 'unit-column', 'document-column', 'reference-column', 'relation-column', 'label-col',
-  'source-csv', 'query-csv', 'query-smiles-col', 'query-id-col', 'representation', 'projection', 'occupancy',
+  'new-activity-col', 'new-unit', 'new-unit-col', 'new-relation-col', 'new-document-col', 'new-label-col', 'new-class-filter', 'new-label-filter', 'source-csv', 'query-csv', 'query-smiles-col', 'query-id-col', 'representation', 'projection', 'occupancy',
   'grouping', 'group-similarity', 'cluster-col', 'cluster-source', 'core-rule', 'core-coverage-target',
   'fmcs-timeout', 'grid-refinement', 'activity-confidence', 'merge-identical-documents',
   'use-assumed-sigma', 'assumed-sigma', 'evidence-model', 'support-level', 'offset-display',
@@ -48,11 +48,11 @@ function environment({saved = null, browserLanguage = 'en-US', blockedStorage = 
       get selectedOptions() { return this.children.filter(item => item.value === this.value); },
       get offsetWidth() { return this.id === 'parameter-tooltip' ? 300 : 16; },
       get offsetHeight() { return this.id === 'parameter-tooltip' ? 140 : 16; },
-      append(...items) { for (let item of items) { if (typeof item === 'string') item = textNode(item); item.parentNode = this; this.childNodes.push(item); } },
+      append(...items) { for (let item of items) { if (typeof item === 'string') item = textNode(item); item.remove?.(); item.parentNode = this; this.childNodes.push(item); } },
       appendChild(item) { this.append(item); return item; },
       prepend(...items) { for (const item of items.reverse()) { item.parentNode = this; this.childNodes.unshift(item); } },
       replaceChildren(...items) { this.childNodes = []; this.append(...items); },
-      remove() { if (this.parentNode) this.parentNode.childNodes = this.parentNode.childNodes.filter(item => item !== this); },
+      remove() { if (this.parentNode) this.parentNode.childNodes = this.parentNode.childNodes.filter(item => item !== this); this.parentNode = null; },
       contains(item) { return item === this || this.childNodes.some(child => child.contains?.(item)); },
       setAttribute(key, value) {
         this.attributes[key] = String(value);
@@ -111,7 +111,7 @@ function environment({saved = null, browserLanguage = 'en-US', blockedStorage = 
       createTBody() { const item = node('tbody'); this.append(item); return item; },
       insertRow() { const item = node('tr'); this.append(item); return item; },
       insertCell() { const item = node('td'); this.append(item); return item; },
-      showModal() { this.open = true; }, close() { this.open = false; },
+      showModal() { this.open = true; }, close() { this.open = false; this.dispatchEvent({type: 'close'}); },
     };
     result.classList = {add(...names) { result.className = [...new Set(result.className.split(/\s+/).concat(names))].join(' ').trim(); },
       remove(...names) { result.className = result.className.split(/\s+/).filter(name => !names.includes(name)).join(' '); },
@@ -297,7 +297,7 @@ const scenarios = {
         shared_count: 3, representation_count: 5, grid_count: 5, recall: .6}},
       neighbors: [], records: [record], record_columns: recordColumns, total_records: 1, svg: '', neighborhood_svg: ''};
     const transform = {s: 2.5, x: 17, y: -24};
-    Object.assign(context, {$, t: api.t, translateServer: api.translateServer, job: {report, molecules: 1,
+    Object.assign(context, {newMolecules:null,$, t: api.t, translateServer: api.translateServer, job: {report, molecules: 1,
       options: {input_format: 'molecule', compound_column: 'compound_id', document_column: 'run_id',
         representation: 'morgan', projection: 'umap', grid_occupancy: .4, target_id: 'CHEMBL205',
         lower_threshold: 6, upper_threshold: 7, support_level: .8, offset_display: 'none'},
@@ -359,9 +359,9 @@ const scenarios = {
       nearest_measured_id: 'LAB-001', nearest_measured_similarity: .8};
     context.inspect.lastDetail = {...detail, molecule: unmeasured, query_neighbors: []};
     api.setLanguage('en'); await languageWork;
-    assert.match($('query-summary').textContent, /Most similar measured molecule/);
+    assert.match($('query-summary').textContent, /Most similar reference ID/);
     api.setLanguage('zh'); await languageWork;
-    assert.match($('query-summary').textContent, /最相似的已测分子/);
+    assert.match($('query-summary').textContent, /最相似的参照分子 ID/);
     assert.equal($('selected-id').textContent, 'QUERY-1');
     assert.equal($('record-section').hidden, true);
     context.umapAvailable = false; await context.refreshLanguage();

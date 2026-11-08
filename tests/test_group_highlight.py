@@ -179,7 +179,14 @@ def test_faded_cells_keep_inspection_outlines_in_a_separate_layer():
     # Parent opacity also fades child strokes; inspection outlines need an opaque sibling layer.
     assert "querySelector('[data-map-outlines]')?.remove()" in script
     assert "outlines.setAttribute('pointer-events', 'none')" in script
-    assert "mapCells[0].parentNode.append(outlines)" in script
+    # 插入图中的参照格子位于有平移的包装层；覆盖层必须放在 SVG 根，
+    # 并恢复原格子的祖先变换，才能保持不透明且位置一致。
+    assert "const svg = $('map-stage').querySelector('svg')" in script
+    assert "svg.append(outlines)" in script
+    assert "parent.tagName.toLowerCase() !== 'svg'; parent = parent.parentNode" in script
+    assert "parent.getAttribute('transform')" in script
+    assert "transforms.unshift(value)" in script
+    assert "outline.setAttribute('transform',transforms.join(' '))" in script
     assert "['class', 'data-grid-row', 'data-grid-col']" in script
     assert "outline.setAttribute('fill', 'none')" in script
     assert '#map-stage .group-faded { opacity: .2; }' in stylesheet

@@ -115,9 +115,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--assumed-sigma", type=_assumed_sigma,
         help="Use this positive finite log-unit SD for record-table class support; it is not estimated.",
     )
-    parser.add_argument("--query-file", type=Path, help="Unmeasured molecules in a CSV or TSV file.")
+    parser.add_argument("--query-file", type=Path, help="New unmeasured molecules to insert into the completed reference grid (CSV/TSV).")
     parser.add_argument("--query-smiles-column", help="Query SMILES column; detected automatically when omitted.")
-    parser.add_argument("--query-id-column", help="Query identifier column; otherwise generate Q00001, Q00002, ...")
+    parser.add_argument("--query-id-column", help="Query identifier column; otherwise generate N00001, N00002, ...")
     parser.add_argument(
         "--label-col",
         help="Optional activity-class label column in molecule-table input.",
@@ -486,7 +486,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             value_col = "activity_pchembl"
             label_col = "activity_class"
             duplicate_policy = "error"
-            if args.value_unit != "p" or args.unit_column or args.assumed_sigma is not None or args.query_file:
+            if args.value_unit != "p" or args.unit_column or args.assumed_sigma is not None :
                 args.output_dir.mkdir(parents=True, exist_ok=True)
                 if "activity_pchembl_raw" not in records:
                     records["activity_pchembl_raw"] = records["pchembl_value"]
@@ -504,8 +504,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.query_file:
         query_data = pd.read_csv(args.query_file, sep=None, engine="python", encoding="utf-8-sig",
                                  dtype={args.query_id_column: str} if args.query_id_column else None)
-        source["query_file"] = args.query_file.name
-        source["query_file_sha256"] = hashlib.sha256(args.query_file.read_bytes()).hexdigest()
 
     result = build_grid_map(
         data,
@@ -552,10 +550,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         map_color_modes=args.map_color_modes,
         value_unit=args.value_unit if args.input_format == "molecule" and not args.compound_column else "p",
         unit_column=args.unit_column if args.input_format == "molecule" and not args.compound_column else None,
-        query_data=query_data,
-        query_smiles_col=args.query_smiles_column,
-        query_id_col=args.query_id_column,
-        query_structure_policy=query_structure_policy,
     )
     result.output_files.update(curation_files)
     archive = args.output_dir / (args.name + "_results.zip")
@@ -563,6 +557,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         for path in result.output_files.values():
             bundle.write(path, Path(path).name)
     result.output_files["results_zip"] = str(archive)
+    if query_data is not None:
+        from .queries import insert_new_molecules
+        result.new_molecules = insert_new_molecules(
+            result, query_data, output_dir=args.output_dir,
+            input_bytes=args.query_file.read_bytes(), input_filename=args.query_file.name,
+            smiles_col=args.query_smiles_column, id_col=args.query_id_column,
+            structure_policy=query_structure_policy)
+        result.query_report = result.new_molecules.report
 
     report = result.preprocessing
     print(
@@ -605,6 +607,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print("Saved files:")
     for key, path in result.output_files.items():
         print("  {:12s} {}".format(key, path))
+    if result.new_molecules is not None:
+        for key, path in result.new_molecules.output_files.items():
+            print("  {:12s} {}".format(key, path))
     return 0
 
 

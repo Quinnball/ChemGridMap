@@ -154,15 +154,17 @@ def test_caii_query_points_inspector_and_export_agree(caii_sessions):
     assert {key: report[key] for key in ("mapped", "invalid_smiles", "duplicate_query", "in_reference")} == {
         "mapped": 45, "invalid_smiles": 3, "duplicate_query": 2, "in_reference": 5}
     assert report["structure_policy"] == session.curation.report["parameters"]["structure_policy"]
-    assert {"map_query_check.csv", "map_query_neighbors.csv"} <= session.files.keys()
+    assert {"new_molecules_check.csv", "new_molecules_neighbors.csv"} <= session.files.keys()
     before = set(Path(session.job["output_dir"]).iterdir())
     status, detail = api(session, "/api/inspect?id=ANALOG_001", method="GET")
     assert status == 200 and detail["molecule"]["measurement_status"] == "not_measured"
-    assert not ({"audit_file", "summary", "records", "neighbors"} & detail.keys())
+    assert not ({"audit_file", "neighbors"} & detail.keys())
+    assert detail["records"] == []
+    assert detail["summary"]["reference_support_assessed"]
     assert set(Path(session.job["output_dir"]).iterdir()) == before
-    assert detail["molecule"]["activity_pchembl"] is None
-    assert detail["molecule"]["class_confidence"] is None
-    saved = pd.read_csv(session.files["map_query_neighbors.csv"])
+    assert detail["molecule"].get("activity_pchembl") is None
+    assert detail["molecule"].get("class_confidence") is None
+    saved = pd.read_csv(session.files["new_molecules_neighbors.csv"])
     expected = saved[saved.query_id.eq("ANALOG_001")]
     assert detail["query_neighbors"] == json_rows(expected)
     row = detail["molecule"]
@@ -176,15 +178,10 @@ def test_query_addition_preserves_measured_audit_values(caii_sessions):
     after, after_records = session.inspect(molecule_id="CHEMBL20")
     pd.testing.assert_frame_equal(before_records, after_records)
     assert session.activity_confidence == baseline.activity_confidence
-    # Projection, grid neighbours and their file hashes use all mapped molecules.
-    geometry = {"grid_row", "grid_col", "neighbor_kth_similarity", "neighbor_kth_label",
-                "neighborhood", "evidence_digests"}
-    assert {k: v for k, v in before["summary"].items() if k not in geometry} == {
-        k: v for k, v in after["summary"].items() if k not in geometry}
-    assert before["summary"]["evidence_digests"]["source_records.csv"] == after["summary"]["evidence_digests"]["source_records.csv"]
+    # Insertion leaves the complete reference geometry and audit digests unchanged.
+    assert before["summary"] == after["summary"]
     for column, value in before["molecule"].items():
-        if not column.startswith(("projection_", "grid_", "neighbor_", "representation_neighbor")):
-            assert after["molecule"][column] == value, column
+        assert after["molecule"][column] == value, column
 
 
 def test_own_nm_records_with_assumed_sigma_and_generic_id_lookup(tmp_path):

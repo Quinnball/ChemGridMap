@@ -64,7 +64,7 @@ def simulated_query_session(tmp_path_factory):
 
 
 def assert_reference_matches(session, expected_count):
-    checks = session.result.query_check
+    checks = session.new_result.check
     matched = checks[checks.status.eq("in_reference")]
     assert len(matched) == expected_count
     rows = session.job["report"]["query_reference_matches"]
@@ -99,7 +99,7 @@ def assert_reference_matches(session, expected_count):
     saved = json.loads(session.files["map_curation_report.json"].read_text(encoding="utf-8"))
     assert "query_reference_matches" not in saved
     assert checks.columns.tolist() == QUERY_CHECK_COLUMNS
-    exported = pd.read_csv(session.files["map_query_check.csv"], keep_default_na=False)
+    exported = pd.read_csv(session.files["new_molecules_check.csv"], keep_default_na=False)
     assert exported.columns.tolist() == QUERY_CHECK_COLUMNS
     pd.testing.assert_frame_equal(checks.fillna(""), exported, check_dtype=False)
 
@@ -135,7 +135,7 @@ def test_demo_invalid_smiles_has_specific_api_error(demo_query_session, suffix):
     query_id = "INVALID_" + suffix
     response = inspect_api(demo_query_session, query_id)
     assert response["status"] == 400
-    assert response["data"]["error"] == f"Unmeasured molecule {query_id} has invalid SMILES."
+    assert response["data"]["error"] == f"New molecule {query_id} has invalid SMILES."
 
 
 def test_measured_ids_and_grid_cells_do_not_include_query_match(demo_query_session):
@@ -153,7 +153,7 @@ def test_duplicate_of_reference_match_preserves_both_query_checks(tmp_path):
     session = run_query_session(
         tmp_path, measured, b"query_id,smiles\nFIRST,OCC\nREPEAT,CCO\nNEW,CCF\n",
         input_format="molecule", value_col="value")
-    original_check = session.result.query_check.copy(deep=True)
+    original_check = session.new_result.check.copy(deep=True)
     first, _ = session.inspect(molecule_id="FIRST")
     duplicate, _ = session.inspect(molecule_id="REPEAT")
     assert first["molecule"]["molecule_id"] == duplicate["molecule"]["molecule_id"] == "M1"
@@ -164,7 +164,7 @@ def test_duplicate_of_reference_match_preserves_both_query_checks(tmp_path):
         "query_id": "REPEAT", "status": "duplicate_query", "reference_id": "M1",
         "first_query_id": "FIRST",
     }
-    pd.testing.assert_frame_equal(original_check, session.result.query_check)
+    pd.testing.assert_frame_equal(original_check, session.new_result.check)
     assert session.job["report"]["query_reference_matches"] == [{
         "query_id": "FIRST", "reference_id": "M1", "molecule_id": "M1",
         "parent_molecule_id": "", "source_count": 0, "linked_source_count": 0,

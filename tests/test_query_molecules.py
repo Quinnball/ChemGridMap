@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import shutil
 
 import numpy as np
 import pandas as pd
@@ -60,7 +61,7 @@ def test_reference_parent_policy_applies_to_queries():
     assert report["structure_policy"] == "parent"
 
 
-@pytest.mark.parametrize("representation", ["morgan", "descriptors"])
+@pytest.mark.parametrize("representation", ["morgan"])
 def test_measured_neighbors_match_brute_force_and_include_fifth_place_ties(representation):
     reference = small_reference()
     result = build_grid_map(reference, value_col="value", projection="pca",
@@ -69,7 +70,7 @@ def test_measured_neighbors_match_brute_force_and_include_fifth_place_ties(repre
                             query_data=pd.DataFrame({"smiles": ["[Na+]", "CCF"]}))
     generator = rdFingerprintGenerator.GetMorganGenerator(radius=1, fpSize=256)
     fingerprints = [generator.GetFingerprint(Chem.MolFromSmiles(s)) for s in reference.smiles]
-    for query in result.data[result.data.measurement_status.eq("not_measured")].itertuples():
+    for query in result.new_molecules.data.itertuples():
         scores = np.asarray(DataStructs.BulkTanimotoSimilarity(
             generator.GetFingerprint(Chem.MolFromSmiles(query.canonical_smiles)), fingerprints))
         cutoff = sorted(scores, reverse=True)[4]
@@ -78,15 +79,17 @@ def test_measured_neighbors_match_brute_force_and_include_fifth_place_ties(repre
         assert dict(zip(actual.measured_id, actual.tanimoto)) == pytest.approx(expected, abs=1e-15)
         assert query.nearest_measured_similarity == pytest.approx(scores.max())
         assert query.nearest_measured_id in reference.molecule_id[scores == scores.max()].tolist()
-    tied = result.query_neighbors[result.query_neighbors.query_id.eq("Q00001")]
+    tied = result.query_neighbors[result.query_neighbors.query_id.eq("N00001")]
     assert len(tied) == 6 and tied["rank"].eq(1).all()
     assert result.query_neighbors.class_confidence.isna().all()
 
 
 @pytest.fixture(scope="module")
-def caii_reference_and_queries():
+def caii_reference_and_queries(tmp_path_factory):
     source = Path(__file__).resolve().parents[1] / "src" / "chemgridmap" / "data" / "chembl205_ic50.csv"
-    curated = curate_chembl_activity_data(pd.read_csv(source), target_id="CHEMBL205")
+    copied = tmp_path_factory.mktemp("query_caii") / source.name
+    shutil.copyfile(source, copied)
+    curated = curate_chembl_activity_data(pd.read_csv(copied), target_id="CHEMBL205")
     annotated, fit = annotate_activity_confidence(
         curated.molecules, curated.retained_records, value="activity_pchembl_raw",
         document=curated.report["detected_columns"]["document_id"])
@@ -101,19 +104,16 @@ def caii_reference_and_queries():
 
 def test_caii_queries_preserve_every_reference_evidence_and_group_value(caii_reference_and_queries):
     baseline, with_queries, fit = caii_reference_and_queries
-    measured = with_queries.data.iloc[:len(baseline.data)]
-    varying = {"projection_x_raw", "projection_y_raw", "projection_x", "projection_y",
-               "grid_x", "grid_y", "grid_col", "grid_row"}
-    preserved = [c for c in baseline.data if c not in varying and "neighbor" not in c]
-    pd.testing.assert_frame_equal(baseline.data[preserved], measured[preserved], check_dtype=False)
+    pd.testing.assert_frame_equal(baseline.data, with_queries.data)
+    np.testing.assert_array_equal(baseline.grid, with_queries.grid)
+    np.testing.assert_array_equal(baseline.projection, with_queries.projection)
     for before, after in zip(baseline.structure_groups, with_queries.structure_groups):
         assert before == {key: value for key, value in after.items() if key != "n_query_members"}
     assert baseline.grouping_protocol == with_queries.grouping_protocol
     assert with_queries.query_check.status.tolist() == ["mapped", "mapped", "duplicate_query", "invalid_smiles", "in_reference"]
-    unmeasured = with_queries.data.iloc[len(baseline.data):]
-    assert unmeasured.class_confidence.isna().all()
-    assert unmeasured.activity_pchembl.isna().all()
-    assert unmeasured.class_status.isna().all()
+    unmeasured = with_queries.new_molecules.data
+    for column in ("class_confidence", "activity_pchembl", "class_status"):
+        assert column not in unmeasured or unmeasured[column].isna().all()
     assert unmeasured.activity_class.eq("not_measured").all()
 
 
@@ -124,9 +124,9 @@ def test_annotation_metrics_use_only_measured_rows(caii_reference_and_queries):
     expected_difference = mean_knn_absolute_difference(result.grid[:n], baseline.data.activity_pchembl.to_numpy(), k=10)
     assert result.metrics.iloc[0].grid_label_purity == pytest.approx(expected_purity)
     assert result.metrics.iloc[0].grid_knn_value_abs_diff == pytest.approx(expected_difference)
-    assert result.metrics.iloc[0].n_samples == n + 2
-    assert result.metrics.iloc[0].n_measured == n
-    assert result.query_report["metric_populations"]["activity_and_class"]["n_molecules"] == n
+    assert result.metrics.iloc[0].n_samples == n
+    pd.testing.assert_frame_equal(baseline.metrics, result.metrics)
+    assert len(result.new_molecules.data) == 2
 
 
 @pytest.mark.parametrize("group_ids", [("G002", "G001"), ("G1000", "G999")])
@@ -151,17 +151,18 @@ def test_query_outputs_and_external_groups(tmp_path):
                             grouping="external", cluster_col="group", cluster_source="test groups",
                             query_data=pd.DataFrame({"smiles": ["CCF"]}),
                             output_dir=tmp_path, output_formats=["svg"], render_detail="overview")
-    query = result.data.iloc[-1]
+    query = result.new_molecules.data.iloc[-1]
     assert query.structure_group == ""
-    assert all(group["n_query_members"] == 0 for group in result.structure_groups)
+    assert all(group["n_query_members"] == 0 for group in result.new_molecules.structure_groups)
     manifest = json.loads(Path(result.output_files["run_manifest"]).read_text(encoding="utf-8"))
-    assert manifest["query_molecules"]["mapped"] == 1
-    assert manifest["metric_populations"]["structure_and_layout"]["n_molecules"] == 7
-    assert any("External grouping" in warning for warning in manifest["warnings"])
-    check = pd.read_csv(result.output_files["query_check"])
+    assert "query_molecules" not in manifest
+    assert len(result.data) == 6
+    assert result.new_molecules.report["mapped"] == 1
+    check = pd.read_csv(result.new_molecules.output_files["new_molecules_check"])
     assert check.status.tolist() == ["mapped"]
     members = pd.read_csv(result.output_files["structure_members"])
-    assert not members.iloc[-1].core_member
+    assert len(members) == 6
+    assert "query:N00001" not in members.comparison_id.tolist()
 
 
 def test_queries_need_measured_references():

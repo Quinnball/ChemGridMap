@@ -218,6 +218,7 @@ def test_generic_retained_records_reset_with_map_state(tmp_path, monkeypatch, ac
     session = AppSession(tmp_path)
     session.load(assay_frame().to_csv(index=False).encode(), "own.csv")
     session.generic_records = pd.DataFrame({"source_row": [0]})
+    retained = session.generic_records
     if action == "load":
         session.load(b"smiles\nCCO\n", "replacement.csv")
     elif action == "load_query":
@@ -227,4 +228,8 @@ def test_generic_retained_records_reset_with_map_state(tmp_path, monkeypatch, ac
     else:
         monkeypatch.setattr(session, "run", lambda options: None)
         session.start(OPTIONS, background=False)
-    assert session.generic_records is None
+    if action in {"load_query", "clear_query"}:
+        # 新分子的上传/移除只改变覆盖层，参照测定记录继续复用。
+        assert session.generic_records is retained
+    else:
+        assert session.generic_records is None

@@ -7,7 +7,6 @@ from pathlib import Path
 import hashlib
 import json
 import time
-import warnings
 from typing import Dict, List, Optional, Sequence
 
 import numpy as np
@@ -17,8 +16,6 @@ from .core import (
     assign_to_grid,
     choose_assignment_method,
     compute_metrics,
-    label_purity,
-    mean_knn_absolute_difference,
     normalize_coordinates,
     prepare_molecules,
 )
@@ -30,7 +27,6 @@ from .reliability import grid_neighbor_weights, reliability_columns, representat
 from .representations import compute_representation
 from .provenance import environment_versions, file_digests, git_provenance, source_tree_digest
 from .comparison import structural_groups, save_group_outputs
-from .queries import prepare_query_molecules, annotate_query_neighbors, assign_query_groups
 
 
 @dataclass
@@ -50,6 +46,8 @@ class GridMapResult:
     query_check: pd.DataFrame = field(default_factory=pd.DataFrame)
     query_neighbors: pd.DataFrame = field(default_factory=pd.DataFrame)
     query_report: Dict = field(default_factory=dict)
+    new_molecules: object = None
+    insertion_parameters: Dict = field(default_factory=dict)
 
 
 def build_grid_map(
@@ -237,7 +235,7 @@ def build_grid_map(
         They never receive predicted activity or class support.
     query_smiles_col, query_id_col : str, optional
         Query SMILES and identifier columns; otherwise detect SMILES and assign
-        Q00001-style identifiers. See prepare_query_molecules.
+        N00001-style identifiers. See insert_new_molecules.
     query_structure_policy : {"canonical", "as-recorded", "parent"}, default "canonical"
         Actual reference preparation policy to apply to query structures.
 
@@ -247,6 +245,20 @@ def build_grid_map(
         Prepared data, representation, projection, grid, metrics, groups and
         output-file paths.
     """
+    if query_data is not None:
+        # 同一参照构建路径先完整结束，再把新分子放进空格。
+        arguments = locals().copy()
+        arguments["query_data"] = None
+        reference = build_grid_map(**arguments)
+        from .queries import insert_new_molecules
+        inserted = insert_new_molecules(
+            reference, query_data, output_dir=output_dir,
+            smiles_col=query_smiles_col, id_col=query_id_col,
+            structure_policy=query_structure_policy)
+        reference.new_molecules = inserted
+        reference.query_check, reference.query_neighbors = inserted.check, inserted.neighbors
+        reference.query_report = inserted.report
+        return reference
     started = time.perf_counter()
     unit_parameters = ({"value_unit": value_unit, "unit_column": unit_column}
                        if value_unit != "p" or unit_column is not None else {})
@@ -329,49 +341,6 @@ def build_grid_map(
             "10,000-entry limit. Use --grouping none (No grouping in the browser) "
             "or map an explicit subset."
         )
-
-    n_measured = len(prepared)
-    query_check, query_neighbors, query_report = pd.DataFrame(), pd.DataFrame(), {}
-    metric_populations = None
-    if query_data is not None:
-        observed = prepared.activity_class.notna() & ~prepared.activity_class.isin(
-            {"unlabelled", "not_measured", "", "nan", "none", "<na>"})
-        if value_col:
-            observed |= np.isfinite(pd.to_numeric(prepared[value_col], errors="coerce"))
-        if int(observed.sum()) < 2:
-            raise ValueError("Query mapping requires at least two measured reference molecules.")
-        if not observed.all():
-            raise ValueError("Reference rows without measured activity must be supplied in query_data instead.")
-        queries, query_check, query_report = prepare_query_molecules(
-            query_data, prepared, smiles_column=query_smiles_col,
-            id_column=query_id_col, structure_policy=query_structure_policy)
-        # Only representation inputs may cross from the query table; activity
-        # and evidence columns supplied with unmeasured structures are ignored.
-        feature_columns = ([column for column in prepared if str(column).startswith(embedding_prefix)]
-                           if representation == "embedding" and not x_col else [])
-        feature_columns += [column for column in (x_col, y_col) if column]
-        for column in dict.fromkeys(feature_columns):
-            if column not in query_data and len(queries):
-                raise ValueError(f"Query representation column {column!r} was not found.")
-            queries[column] = (query_data.iloc[queries.source_row.astype(int)][column].to_numpy()
-                               if len(queries) else pd.Series(dtype=float))
-        queries, query_neighbors = annotate_query_neighbors(
-            prepared, queries, radius=radius, n_bits=n_bits, value_col=value_col)
-        prepared["measurement_status"] = "measured"
-        prepared = pd.concat([prepared, queries], ignore_index=True)
-        metric_populations = {
-            "structure_and_layout": {"population": "all molecules", "n_molecules": len(prepared)},
-            "activity_and_class": {"population": "measured reference molecules", "n_molecules": n_measured},
-            "evidence_and_group_cores": {"population": "measured reference molecules", "n_molecules": n_measured},
-        }
-        query_report["metric_populations"] = metric_populations
-        if grouping == "external":
-            query_report["warnings"].append("External grouping: unmeasured molecules remain ungrouped.")
-        if len(prepared) > 10_000:
-            warning = "More than 10,000 total molecules: projection, layout and diagnostics may run slowly."
-            warnings.warn(warning, UserWarning, stacklevel=2)
-            query_report["warnings"].append(warning)
-        report["query_molecules"] = query_report
 
     projection_fallback = None
     if x_col and y_col:
@@ -505,31 +474,13 @@ def build_grid_map(
         if grouping == "external" and not cluster_col:
             raise ValueError("External grouping requires cluster_col and cluster_source.")
         group_data, groups, grouping_protocol = structural_groups(
-            result_data.iloc[:n_measured] if query_data is not None else result_data,
+            result_data,
             similarity=group_similarity, radius=radius, n_bits=n_bits,
             cluster_col=cluster_col if grouping == "external" else None,
             cluster_source=cluster_source if grouping == "external" else None,
             core_rule=core_rule, core_min_coverage=core_min_coverage,
             fmcs_timeout=fmcs_timeout)
-        if query_data is None:
-            result_data = group_data
-        else:
-            query_rows, groups = assign_query_groups(
-                result_data.iloc[n_measured:], groups, grouping=grouping,
-                similarity=group_similarity, radius=radius, n_bits=n_bits)
-            result_data = pd.concat([group_data, query_rows], ignore_index=True)
-    elif query_data is not None:
-        query_rows, groups = assign_query_groups(
-            result_data.iloc[n_measured:], groups, grouping=grouping,
-            similarity=group_similarity, radius=radius, n_bits=n_bits)
-        result_data = pd.concat([result_data.iloc[:n_measured], query_rows], ignore_index=True)
-    if query_data is not None:
-        result_data.attrs["representation_type"] = representation_name
-        result_data.attrs["activity_thresholds"] = {
-            "lower": lower_threshold, "upper": upper_threshold,
-        }
-        if confidence_fit is not None:
-            result_data.attrs["activity_confidence_fit"] = confidence_fit
+        result_data = group_data
 
     values = None
     if value_col:
@@ -546,29 +497,14 @@ def build_grid_map(
         representation_matrix,
         projected,
         grid,
-        values=values if query_data is None else None,
-        labels=label_values if query_data is None else None,
+        values=values,
+        labels=label_values,
         k=k,
         trustworthiness_sample_size=trustworthiness_sample_size,
         random_state=random_state,
         representation_metric=representation_distance_metric,
         coordinate_scaling=coordinate_scaling,
     )
-    if query_data is not None:
-        measured_k = min(max(1, int(k)), n_measured - 1)
-        if values is not None:
-            for prefix, matrix, distance in (
-                ("representation", representation_matrix, representation_distance_metric),
-                ("projection", projected, "euclidean"), ("grid", grid, "euclidean")
-            ):
-                metrics[prefix + "_knn_value_abs_diff"] = mean_knn_absolute_difference(
-                    matrix[:n_measured], values[:n_measured], k=measured_k, metric=distance)
-        measured_labels = result_data.activity_class.iloc[:n_measured].astype(str).to_numpy()
-        if not np.any(measured_labels == "unlabelled"):
-            metrics["projection_label_purity"] = label_purity(projected[:n_measured], measured_labels, k=measured_k)
-            metrics["grid_label_purity"] = label_purity(grid[:n_measured], measured_labels, k=measured_k)
-        metrics["n_measured"] = n_measured
-        metrics["n_query"] = len(result_data) - n_measured
     metric_seconds = time.perf_counter() - metric_started
     metrics.insert(0, "projection_method", projection_name)
     metrics.insert(0, "representation_type", representation_name)
@@ -614,11 +550,6 @@ def build_grid_map(
                 "metrics": str(metrics_path),
             }
         )
-        if query_data is not None:
-            for suffix, table in (("query_check", query_check), ("query_neighbors", query_neighbors)):
-                path = output_dir / f"{name}_{suffix}.csv"
-                table.to_csv(path, index=False, encoding="utf-8", lineterminator="\n")
-                output_files[suffix] = str(path)
         if groups:
             output_files.update(save_group_outputs(result_data, groups, grouping_protocol, output_dir, name))
         if confidence_fit is not None:
@@ -667,7 +598,7 @@ def build_grid_map(
                 "representation": representation_name, "projection": projection_name,
                 "projection_fallback": projection_fallback,
                 "umap_metric": selected_umap_metric,
-                "umap_n_neighbors": min(15, max(2, (len(prepared) if query_data is not None else len(data)) - 1)),
+                "umap_n_neighbors": min(15, max(2, len(data) - 1)),
                 "umap_min_dist": 0.1, "random_state": random_state,
                 "morgan_radius": radius, "morgan_n_bits": n_bits,
                 "coordinate_scaling": coordinate_scaling,
@@ -705,14 +636,6 @@ def build_grid_map(
             "outputs": {key: Path(value).name for key, value in output_files.items()},
             "output_digests": file_digests(output_files),
         }
-        if query_data is not None:
-            manifest["query_molecules"] = query_report
-            manifest["metric_populations"] = metric_populations
-            manifest["query_table_sha256"] = hashlib.sha256(
-                query_data.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
-            manifest["warnings"].extend(query_report["warnings"])
-            manifest["parameters"].update(query_smiles_col=query_smiles_col, query_id_col=query_id_col,
-                                          query_structure_policy=query_report["structure_policy"])
         if unit_parameters:
             manifest["parameters"].update(unit_parameters)
             manifest["activity_unit_conversion"] = ((provenance or {}).get("generic_activity") or report)
@@ -732,7 +655,9 @@ def build_grid_map(
         output_files=output_files,
         structure_groups=groups,
         grouping_protocol=grouping_protocol,
-        query_check=query_check,
-        query_neighbors=query_neighbors,
-        query_report=query_report,
+        insertion_parameters={"representation": representation_name, "radius": radius, "n_bits": n_bits,
+                              "lower_threshold": lower_threshold, "upper_threshold": upper_threshold,
+                              "conflict_range_threshold": float(result_data.get("audit_conflict_range_threshold", pd.Series([1.0])).iloc[0]),
+                              "grouping": grouping, "group_similarity": group_similarity,
+                              "value_col": value_col, "grid_rows": int(grid_rows), "grid_cols": int(grid_cols)},
     )

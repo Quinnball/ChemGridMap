@@ -50,8 +50,9 @@ def test_query_upload_is_optional_and_does_not_submit_the_map():
     upload = html.elements["query-csv"]
     assert upload["type"] == "file"
     assert {".csv", ".tsv"} <= set(upload["accept"].split(","))
-    for control in ("query-csv", "query-smiles-col", "query-id-col"):
+    for control in ("query-csv", "query-id-col"):
         assert "required" not in html.elements[control]
+    assert "required" in html.elements["query-smiles-col"]
     assert html.elements["remove-query-input"]["type"] == "button"
     assert "hidden" in html.elements["query-input-info"]
     assert html.elements["molecule-id"]["placeholder"] == "Find a molecule ID"
@@ -59,7 +60,7 @@ def test_query_upload_is_optional_and_does_not_submit_the_map():
 
 def test_query_results_have_distinct_filter_and_inspector_sections():
     html = workspace()
-    assert html.options["measurement-filter"] == ["all", "measured", "not_measured"]
+    assert html.options["measurement-filter"] == ["all", "reference", "new"]
     assert "hidden" in html.elements["measurement-filter-control"]
     assert "hidden" in html.elements["measurement-badge"]
     assert "hidden" in html.elements["query-selection"]

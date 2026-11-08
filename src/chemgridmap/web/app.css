@@ -75,6 +75,10 @@ details { margin-top: 18px; }summary { font-size: 12px; font-weight: bold; paddi
 .find { display: flex; gap: 4px; margin-left: auto; }.find input { margin: 0 !important; height: 29px !important; width: 155px !important; font-size: 11px !important; }.find button { font-size: 11px; padding: 3px 7px; }.zoom-tools { display: flex; gap: 4px; }.zoom-tools button { border: 1px solid var(--line); border-radius: 4px; height: 28px; min-width: 28px; background: #fff; font-size: 12px; }.zoom-tools button:hover { background: var(--pale); }
 #map-viewport { position: relative; height: clamp(440px, calc(100vh - 370px), 950px); overflow: hidden; touch-action: none; cursor: grab; background: radial-gradient(#b8c9b945 .7px,transparent .7px) 0 0 / 18px 18px; }#map-viewport:active { cursor: grabbing; }#map-stage { position: absolute; transform-origin: 0 0; line-height: 0; }#map-stage>svg { display: block; max-width: none; }#map-stage [data-grid-row] { cursor: pointer; }
 #map-stage .unmeasured-outline>rect, #map-stage circle.unmeasured-outline { stroke: #8A99A6; stroke-width: calc(1.5 * var(--zoom-inverse, 1)); stroke-opacity: 1; }
+#map-stage .new-molecule-outline>rect { stroke: #173e34; stroke-width: calc(1.5 * var(--zoom-inverse, 1)); stroke-opacity: 1; }
+#map-stage [data-new-reference-link] { stroke: #173e34; stroke-width: calc(1.5 * var(--zoom-inverse, 1)); stroke-dasharray: calc(4 * var(--zoom-inverse, 1)) calc(3 * var(--zoom-inverse, 1)); fill: none; }
+#map-stage .new-evidence-outline>rect { stroke: var(--evidence-color); stroke-width: calc(var(--evidence-width, 3) * var(--zoom-inverse, 1)); stroke-dasharray: var(--evidence-dash, none); stroke-opacity: 1; }
+#map-stage .reference-evidence-faded { opacity: .25; }
 #map-stage .group-highlight>rect, #map-stage circle.group-highlight { stroke: #172536 !important; stroke-width: calc(2.5 * var(--zoom-inverse, 1)) !important; stroke-opacity: 1 !important; }
 #map-stage .group-faded { opacity: .2; }
 #map-stage>svg { overflow: visible; }
@@ -169,3 +173,13 @@ html[lang="zh-CN"] #query-csv:disabled + .localized-file-picker, html[lang="zh-C
 #source-input-control { margin-bottom: 16px; }
 #source-csv { display: block; width: 100%; margin-top: 9px; font-size: 11px; }
 .source-same-value { color: var(--green); font-weight: 600; }
+
+.result-actions { flex-wrap: wrap; justify-content: flex-end; }
+.new-list-counts { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12px; }
+#new-list-table { margin: 16px 0; max-height: 55vh; }
+#new-list-table th button { text-align: left; font-weight: bold; white-space: nowrap; padding: 3px 0; }
+#new-list-table tbody tr { cursor: pointer; }
+#new-list-table tbody tr:hover, #new-list-table tbody tr:focus { background: var(--pale); }
+#new-molecules-dialog .query-input { border: 0; padding-top: 0; margin-top: 12px; }
+#new-molecules-dialog { max-height: 90vh; overflow: auto; }
+#new-records { margin-bottom: 16px; }

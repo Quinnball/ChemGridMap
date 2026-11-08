@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Fix reference SVG display after inserting new molecules, bilingual control
+  labels and modal help. Show the selected new molecule’s similar references
+  and placement link, clarify signed comparisons and export excluded
+  measurement records with their original columns.
+
+- Build the reference map first, then insert up to 1,000 new molecules into
+  existing empty cells without changing reference outputs. Add browser imports
+  for measured records, neighbor-evidence layers and lists, reference-match
+  comparisons, bilingual help and independent versioned exports; retain CLI
+  query arguments with the new insertion workflow. No activity is predicted.
+
 - Add optional local source lookup from a user-supplied ChEMBL activity export
   for generic records, with parent-structure matches, same-pChEMBL marks and
   bilingual possible-source and audit notes; preserve calculations and exports.

@@ -54,8 +54,8 @@ const scenarios = {
       assert.equal($('query-match-note').hidden, false);
       assert.equal($('selected-id').textContent, measured.molecule_id);
       assert.equal($('query-match-note').textContent, language === 'en'
-        ? 'GEN-0005 is not shown separately: it has the same structure as the measured molecule CHEMBL538536 (parent CHEMBL1189346). Its evidence and sources are shown below.'
-        : 'GEN-0005 未单独入图：它与已测分子 CHEMBL538536（母体 CHEMBL1189346） 结构相同。下面显示该已测分子的证据与来源文献。');
+        ? 'GEN-0005 is not shown separately: it has the same structure as the reference molecule CHEMBL538536 (parent CHEMBL1189346). Its evidence and sources are shown below.'
+        : 'GEN-0005 未单独入图：它与参照分子 CHEMBL538536（母体 CHEMBL1189346） 结构相同。下面显示该参照分子的证据与来源文献。');
       assert.equal($('source-list').children.length, 1);
       assert.equal($('sources').hidden, false);
       const noParent = {...measured, molecule_id: match.reference_id};
@@ -113,10 +113,10 @@ const scenarios = {
       const container = $('audit-body').querySelector('.query-reference-matches');
       const section = container.parentNode, heading = section.children[5];
       assert.equal(section.children.slice(1, 5).filter(item => item.dataset.queryStatus).length, 4);
-      assert.equal(heading.textContent, language === 'en' ? 'Same structure as a measured molecule' : '与已测分子结构相同');
+      assert.equal(heading.textContent, language === 'en' ? 'Same structure as a reference molecule' : '与参照分子结构相同');
       assert.deepEqual(container.querySelectorAll('th').map(item => item.textContent), language === 'en'
-        ? ['Unmeasured molecule ID', 'Matched measured molecule ID', 'Sources', 'Sources with links']
-        : ['未测分子 ID', '对应的已测分子 ID', '来源文献数', '带链接的来源文献数']);
+        ? ['New molecule ID', 'Matched reference molecule ID', 'Sources', 'Sources with links']
+        : ['新分子 ID', '对应的参照分子 ID', '来源文献数', '带链接的来源文献数']);
       const renderedRows = container.querySelectorAll('tbody tr');
       assert.equal(renderedRows.length, 5);
       assert.deepEqual(renderedRows[0].children.map(item => item.textContent),
@@ -147,10 +147,10 @@ const scenarios = {
       assert.equal(container.querySelectorAll('tbody tr').length, 50);
       assert.equal(container.querySelectorAll('tbody tr').at(-1).dataset.queryId, 'GEN-49');
       assert.match(container.parentNode.textContent, language === 'en'
-        ? /3 more rows\. Full list: map_query_check\.csv \(Export\)/
-        : /另有 3 行。完整列表：map_query_check\.csv（导出）/);
+        ? /3 more rows\. Full list: new_molecules_check\.csv \(Export\)/
+        : /另有 3 行。完整列表：new_molecules_check\.csv（导出）/);
       context.showDataAudit(report(rows.slice(0, 50)));
-      assert.doesNotMatch($('audit-body').textContent, /map_query_check\.csv/);
+      assert.doesNotMatch($('audit-body').textContent, /new_molecules_check\.csv/);
     }
   },
   async no_sources() {
@@ -175,7 +175,7 @@ const scenarios = {
     for (const language of ['zh', 'en']) {
       api.setLanguage(language); await languageWork;
       assert.match($('query-match-note').textContent, language === 'en' ? /is not shown separately/ : /未单独入图/);
-      assert.match($('audit-body').textContent, language === 'en' ? /Same structure as a measured molecule/ : /与已测分子结构相同/);
+      assert.match($('audit-body').textContent, language === 'en' ? /Same structure as a reference molecule/ : /与参照分子结构相同/);
       assert.equal($('sources-title').textContent, language === 'en' ? 'Sources' : '来源文献');
       assert.equal($('selected-id').textContent, measured.molecule_id);
       assert.equal(context.inspect.lastDetail.query_match.query_id, 'GEN-0005');
@@ -184,11 +184,11 @@ const scenarios = {
   },
   async invalid() {
     const {context, $, api} = await setup();
-    context.getJSON = async () => { throw Error('Unmeasured molecule GEN-BAD has invalid SMILES.'); };
+    context.getJSON = async () => { throw Error('New molecule GEN-BAD has invalid SMILES.'); };
     for (const language of ['en', 'zh']) {
       api.setLanguage(language); await context.inspect('id=GEN-BAD');
       assert.equal($('status').textContent, language === 'en'
-        ? 'Unmeasured molecule GEN-BAD has invalid SMILES.' : '未测分子 GEN-BAD 的 SMILES 无效。');
+        ? 'New molecule GEN-BAD has invalid SMILES.' : '新分子 GEN-BAD 的 SMILES 无效。');
       assert.equal($('status').className, 'error');
       assert.equal($('status').hidden, false);
     }

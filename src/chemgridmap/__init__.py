@@ -13,7 +13,7 @@ from .evidence import (
     prepare_generic_activity_records,
 )
 from .pipeline import GridMapResult, build_grid_map
-from .queries import prepare_query_molecules
+from .queries import NewMoleculesResult, insert_new_molecules, prepare_query_molecules
 from .inspection import inspect_entry
 from .reliability import (
     grid_neighbor_sets,
@@ -25,6 +25,8 @@ from .reliability import (
 __all__ = [
     "ChemblCurationResult",
     "GridMapResult",
+    "NewMoleculesResult",
+    "insert_new_molecules",
     "annotate_activity_confidence",
     "assign_to_grid",
     "build_grid_map",

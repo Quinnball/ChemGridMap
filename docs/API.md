@@ -11,10 +11,30 @@ Tables and audit information produced from a ChEMBL activity export.
 ## `GridMapResult`
 
 ```python
-GridMapResult(data: 'pd.DataFrame', representation: 'np.ndarray', projection: 'np.ndarray', grid: 'np.ndarray', metrics: 'pd.DataFrame', preprocessing: 'Dict[str, int]', feature_names: 'List[str]' = <factory>, output_files: 'Dict[str, str]' = <factory>, structure_groups: 'List[Dict]' = <factory>, grouping_protocol: 'Dict' = <factory>, query_check: 'pd.DataFrame' = <factory>, query_neighbors: 'pd.DataFrame' = <factory>, query_report: 'Dict' = <factory>) -> None
+GridMapResult(data: 'pd.DataFrame', representation: 'np.ndarray', projection: 'np.ndarray', grid: 'np.ndarray', metrics: 'pd.DataFrame', preprocessing: 'Dict[str, int]', feature_names: 'List[str]' = <factory>, output_files: 'Dict[str, str]' = <factory>, structure_groups: 'List[Dict]' = <factory>, grouping_protocol: 'Dict' = <factory>, query_check: 'pd.DataFrame' = <factory>, query_neighbors: 'pd.DataFrame' = <factory>, query_report: 'Dict' = <factory>, new_molecules: 'object' = None, insertion_parameters: 'Dict' = <factory>) -> None
 ```
 
 Data and files produced by one grid-map run.
+
+## `NewMoleculesResult`
+
+```python
+NewMoleculesResult(data: 'pd.DataFrame', check: 'pd.DataFrame', neighbors: 'pd.DataFrame', report: 'dict', output_files: 'dict' = <factory>, records: 'pd.DataFrame' = <factory>, structure_groups: 'list' = <factory>, all_molecules: 'pd.DataFrame' = <factory>) -> None
+```
+
+NewMoleculesResult(data: 'pd.DataFrame', check: 'pd.DataFrame', neighbors: 'pd.DataFrame', report: 'dict', output_files: 'dict' = <factory>, records: 'pd.DataFrame' = <factory>, structure_groups: 'list' = <factory>, all_molecules: 'pd.DataFrame' = <factory>)
+
+## `insert_new_molecules`
+
+```python
+insert_new_molecules(reference_result, query_data, *, output_dir=None, input_bytes=None, input_filename='new_molecules.csv', smiles_col=None, id_col=None, value_col=None, value_unit='p', unit_column=None, relation_column=None, document_column=None, label_column=None, structure_policy=None, radius=None, n_bits=None, lower_threshold=None, upper_threshold=None, conflict_range_threshold=None, grouping=None, group_similarity=None)
+```
+
+Insert one batch into a frozen Morgan reference map, with independent files.
+
+``data`` contains placed molecules; ``all_molecules`` contains every checked
+compound, including duplicates, invalid structures and reference matches.
+Reference data, diagnostics and output bytes are never modified.
 
 ## `annotate_activity_confidence`
 
@@ -214,7 +234,7 @@ query_data : pandas.DataFrame, optional
     They never receive predicted activity or class support.
 query_smiles_col, query_id_col : str, optional
     Query SMILES and identifier columns; otherwise detect SMILES and assign
-    Q00001-style identifiers. See prepare_query_molecules.
+    N00001-style identifiers. See insert_new_molecules.
 query_structure_policy : {"canonical", "as-recorded", "parent"}, default "canonical"
     Actual reference preparation policy to apply to query structures.
 

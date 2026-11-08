@@ -331,6 +331,156 @@
 | `query_group_center_similarity` | Morgan Tanimoto to the assigned reference group center; empty when unassigned. | similarity 0–1 |
 | `contains_group_core` | Whether the unmeasured molecule contains its assigned reference group's core; empty when no core/group applies. | boolean or empty |
 
+## `new_molecules.csv`
+
+| Column | Meaning | Unit or values |
+|---|---|---|
+| `molecule_identity_key` | Stable entry key used for map rows and evidence joins. | text |
+| `molecule_identity_source` | How the entry identifier was obtained. | parent ID or canonical SMILES fallback |
+| `canonical_smiles` | Canonical isomeric SMILES. | SMILES |
+| `smiles` | SMILES column consumed by the map workflow. | SMILES |
+| `representation_smiles` | Structure used for fingerprint representation after the selected policy. | SMILES |
+| `record_canonical_smiles` | Unique canonical record structures joined with semicolons. | SMILES list |
+| `structure_policy` | Selected parent/as-recorded normalization policy. | text |
+| `structure_changed` | Whether parent normalization changed the record structure. | 0 or 1 |
+| `parent_extraction_excluded` | Whether parent extraction removed atoms. | 0 or 1 |
+| `n_record_structures` | Number of distinct record structures for the entry. | count |
+| `activity_pchembl` | Displayed median pChEMBL value. | −log10 mol/L |
+| `activity_class` | Activity class from the displayed pChEMBL and thresholds. | inactive, medium, active; not_measured for unmeasured map rows |
+| `n_records` | Retained source records for the entry. | count |
+| `pchembl_min` | Minimum retained pChEMBL value. | −log10 mol/L |
+| `pchembl_max` | Maximum retained pChEMBL value. | −log10 mol/L |
+| `pchembl_median` | Median retained pChEMBL value. | −log10 mol/L |
+| `pchembl_std` | Sample SD of retained pChEMBL values. | −log10 mol/L |
+| `pchembl_range` | Maximum minus minimum pChEMBL. | log units |
+| `has_inactive_measurement` | Whether any retained record is inactive. | 0 or 1 |
+| `has_active_measurement` | Whether any retained record is active. | 0 or 1 |
+| `crosses_clean_boundary` | Whether records cross an activity threshold. | 0 or 1 |
+| `is_large_variation` | Whether record variation exceeds the configured range. | 0 or 1 |
+| `is_conflicted` | Wide-record-range flag using all configured annotation rules. | 0 or 1 |
+| `has_class_boundary_crossing` | Whether values occur on both sides of a class boundary. | 0 or 1 |
+| `n_measurement_classes` | Number of observed activity classes. | count |
+| `repeat_status` | Summary category for repeated activity records. | text |
+| `wide_record_range` | Display alias for the wide-record-range flag. | 0 or 1 |
+| `audit_lower_threshold` | Lower pChEMBL threshold saved with the row. | −log10 mol/L |
+| `audit_upper_threshold` | Upper pChEMBL threshold saved with the row. | −log10 mol/L |
+| `audit_conflict_range_threshold` | Wide-record-range threshold saved with the row. | log units |
+| `source_rows` | 0-based input rows contributing to the entry. | semicolon-separated integers |
+| `molecule_id` | Source molecule identifier(s). | text |
+| `parent_molecule_id` | Source parent molecule identifier(s). | text |
+| `target_id` | Target ChEMBL identifier(s). | text |
+| `target_name` | Target display name(s). | text |
+| `assay_id` | Assay ChEMBL identifier(s). | text |
+| `document_id` | Source document identifier(s). | text |
+| `activity_id` | Activity record identifier(s). | text |
+| `assay_type` | Assay type(s) among retained records. | text |
+| `n_assays` | Distinct retained assays. | count |
+| `n_documents` | Distinct source documents. | count |
+| `n_evidence_units` | Document-balanced units after optional identical-value merging. | count |
+| `top_unit_documents` | Documents represented by the unit with most records. | text |
+| `top_unit_record_fraction` | Share of records in the largest evidence unit. | fraction 0–1 |
+| `document_balanced_pchembl` | Mean of document-level evidence units. | −log10 mol/L |
+| `document_balanced_class` | Activity class of the document-balanced estimate. | text |
+| `class_changed_by_document_balance` | Whether balancing changes the displayed class. | 0 or 1 |
+| `consensus_scale` | Posterior scale of the entry consensus. | log units |
+| `p_consensus_{class}` | Posterior probability that the consensus is in each activity class. | fraction 0–1 |
+| `p_new_document_{class}` | Predictive probability for a new document in each class. | fraction 0–1 |
+| `class_confidence` | Posterior consensus probability for the displayed class. | fraction 0–1 |
+| `class_reproducibility` | Predictive probability for the displayed class in a new document. | fraction 0–1 |
+| `discordant_document_pairs` | Flagged document pairs containing both sides of the entry. | count |
+| `discordant_documents` | Documents in flagged pairs that share this entry. | text |
+| `offset_pair_touched` | Whether this entry occurs in any document of a flagged offset pair. | boolean |
+| `status_reason` | Support/display decision: supported, low_support or offset_pair. | text |
+| `class_status` | Displayed support status. | supported or uncertain |
+| `source_row` | 0-based source row carried through curation. | integer |
+| `projection_x_raw` | Unscaled first projection coordinate. | projection units |
+| `projection_y_raw` | Unscaled second projection coordinate. | projection units |
+| `projection_x` | Normalized first projection coordinate. | fraction 0–1 |
+| `projection_y` | Normalized second projection coordinate. | fraction 0–1 |
+| `grid_x` | Continuous horizontal grid coordinate. | grid units |
+| `grid_y` | Continuous vertical grid coordinate. | grid units |
+| `grid_col` | Zero-based horizontal grid column. | integer |
+| `grid_row` | Zero-based vertical grid row. | integer |
+| `neighbor_recall` | Tie-inclusive representation-neighbor recall on the grid. | fraction 0–1 |
+| `neighbor_shared_count` | Neighbors present in both representation and grid sets. | count |
+| `representation_neighbor_count` | Representation neighbors within the kth-distance shell. | count |
+| `grid_neighbor_count` | Grid neighbors within the kth-distance shell. | count |
+| `neighbor_recall_fixed_k` | Expected recall with random tie-breaking at fixed k. | fraction 0–1 |
+| `neighbor_kth_similarity` | Tanimoto similarity of the kth Morgan fingerprint neighbor. | similarity 0–1 |
+| `neighbor_kth_distance` | Euclidean distance to the kth non-fingerprint representation neighbor. | representation distance |
+| `comparison_id` | Identifier used in structure comparisons. | text |
+| `structure_group` | Structure-group identifier. | text |
+| `structure_group_color` | Group layer color. | hex RGB |
+| `scaffold_smiles` | Bemis–Murcko scaffold SMILES. Charge-separated groups can leave representation artifacts after removal of the negative oxygen: sulfoxides may appear as `[SH+]` and N-oxides as `[nH+]`. These scaffold strings are not neutral structures. Sulfones retain `S(=O)(=O)`, so sulfoxides and sulfones yield different scaffolds. | SMILES |
+| `name` | Supplied molecule name when present. | text |
+| `core_member` | Whether the member is covered by the group core. | boolean |
+| `core_rule` | Core-selection rule. | coverage, most_frequent or fmcs |
+| `core_smiles` | Selected group core SMILES. Charge-separated groups can leave representation artifacts after removal of the negative oxygen: sulfoxides may appear as `[SH+]` and N-oxides as `[nH+]`. These core strings are not neutral structures. Sulfones retain `S(=O)(=O)`, so sulfoxides and sulfones yield different cores. | SMILES |
+| `core_smarts` | FMCS core SMARTS when available. | SMARTS |
+| `core_coverage_target` | Requested core-coverage target. | fraction 0–1 |
+| `raw_activity_value` | Original activity value before unit conversion; the input column is also retained. | input unit |
+| `raw_activity_unit` | Original per-row unit, or the selected common unit, before conversion. | M, mM, uM, µM, μM, nM, pM |
+| `sigma_doc` | Assumed between-unit SD, only emitted for assumed_sigma. | log units |
+| `sigma_doc_degrees_of_freedom` | Empty for assumed_sigma because the SD was not estimated. | empty |
+| `measurement_status` | Whether the molecule belongs to measured reference data or the unmeasured query set. | measured or not_measured |
+| `query_id` | User query identifier or generated Q00001-style identifier; empty for measured rows. | text |
+| `input_smiles` | Original query SMILES before structure preparation. | SMILES |
+| `status` | Query inclusion decision, one row per input row. | mapped, invalid_smiles, duplicate_query or in_reference |
+| `first_query_id` | First query identifier with the same canonical structure; empty otherwise. | text |
+| `reference_id` | Measured molecule with the same canonical structure; empty otherwise. | text |
+| `tanimoto` | Morgan fingerprint Tanimoto using the map radius and bit count, including for descriptor maps. | similarity 0–1 |
+| `nearest_measured_id` | Most similar measured molecule in Morgan fingerprint space; no activity is inferred. | text |
+| `nearest_measured_similarity` | Morgan Tanimoto to the nearest measured molecule. | similarity 0–1 |
+| `query_group_center_similarity` | Morgan Tanimoto to the assigned reference group center; empty when unassigned. | similarity 0–1 |
+| `contains_group_core` | Whether the unmeasured molecule contains its assigned reference group's core; empty when no core/group applies. | boolean or empty |
+| `label` | User label, used only for display and filtering. | text |
+| `is_new` | Identifies the current new-molecule overlay. | boolean |
+| `nearest_reference_id` | Placement target: highest Morgan Tanimoto, then smallest reference ID. | text |
+| `placement_distance` | Euclidean distance from the target reference cell. | grid cells |
+| `neighbor_evidence` | Evidence from similar tie-inclusive top-five reference neighbors; never a prediction. | none, insufficient, active, medium, inactive, mixed |
+| `similar_reference_count` | Top-five neighbors including ties meeting group_similarity. | count |
+| `supported_reference_count` | Supported similar neighbors; zero when reference support was not assessed. | count |
+| `supported_reference_classes` | Classes of supported similar neighbors; empty when support was not assessed. | semicolon-separated classes |
+| `evidence_reference_count` | Neighbors contributing to evidence; uses observed classes when support was not assessed. | count |
+| `evidence_reference_classes` | Classes contributing to neighbor evidence, including observed-class fallback. | semicolon-separated classes |
+| `reference_support_assessed` | Whether reference class support was assessed. | boolean |
+| `neighbor_comparison` | Own measured class compared with consistent neighbor evidence only. | agrees, disagrees, or empty |
+| `user_median` | Own retained-record median, when available. | pActivity |
+| `reference_median` | Median of the structurally identical reference molecule. | pActivity |
+| `median_difference` | Own median minus structurally identical reference median. | log units |
+
+## `new_molecules_check.csv`
+
+| Column | Meaning | Unit or values |
+|---|---|---|
+| `canonical_smiles` | Canonical isomeric SMILES. | SMILES |
+| `source_row` | 0-based source row carried through curation. | integer |
+| `query_id` | User query identifier or generated Q00001-style identifier; empty for measured rows. | text |
+| `input_smiles` | Original query SMILES before structure preparation. | SMILES |
+| `status` | Query inclusion decision, one row per input row. | mapped, invalid_smiles, duplicate_query or in_reference |
+| `first_query_id` | First query identifier with the same canonical structure; empty otherwise. | text |
+| `reference_id` | Measured molecule with the same canonical structure; empty otherwise. | text |
+
+## `new_molecules_excluded_records.csv`
+
+| Column | Meaning | Unit or values |
+|---|---|---|
+| `exclusion_reason` | Semicolon-separated curation exclusion reasons. | text |
+
+## `new_molecules_neighbors.csv`
+
+| Column | Meaning | Unit or values |
+|---|---|---|
+| `activity_pchembl` | Displayed median pChEMBL value. | −log10 mol/L |
+| `activity_class` | Activity class from the displayed pChEMBL and thresholds. | inactive, medium, active; not_measured for unmeasured map rows |
+| `n_evidence_units` | Document-balanced units after optional identical-value merging. | count |
+| `class_confidence` | Posterior consensus probability for the displayed class. | fraction 0–1 |
+| `class_status` | Displayed support status. | supported or uncertain |
+| `query_id` | User query identifier or generated Q00001-style identifier; empty for measured rows. | text |
+| `rank` | Similarity rank among measured neighbors, including every tie at the fifth neighbor. | integer starting at 1 |
+| `measured_id` | Measured reference molecule identifier. | text |
+| `tanimoto` | Morgan fingerprint Tanimoto using the map radius and bit count, including for descriptor maps. | similarity 0–1 |
+
 ## `query_check.csv`
 
 | Column | Meaning | Unit or values |
@@ -472,10 +622,14 @@
 
 ## Optional own-data outputs and metadata
 
-Filenames have the run's `<name>_` prefix. `query_check.csv` and `query_neighbors.csv`
-are written only with query input. `structure_groups.json` adds `n_query_members`
-per group; member counts, core selection and core coverage still refer to measured references.
-Generic records with unit conversion, assumed sigma or query input also export
+Reference filenames retain the run's `<name>_` prefix and never change on insertion.
+New results live in `new_molecules/<input-stem>/`, with numeric suffixes for existing names.
+`new_molecules_check.csv` and `new_molecules_neighbors.csv` retain the legacy query column contracts.
+`new_molecules.csv` contains all checked molecules; placement fields are empty for excluded rows.
+Measured input also writes `new_molecules_excluded_records.csv`: every original input column,
+followed by `exclusion_reason`; the header is retained when no records are excluded.
+Group overlay summaries add `n_query_members` and `n_new_members`; saved reference groups stay unchanged.
+Generic reference records with unit conversion or assumed sigma also export
 `retained_records.csv`, `molecule_level.csv` and `curation_report.json`.
 
 Unit-conversion reports contain `excluded_reasons` counts and the selected unit/column.
@@ -484,9 +638,10 @@ and `evidence_unit_source` (the supplied column or `one unit per compound`).
 With no evidence-unit column, `document_offset_detection` is `not applicable`.
 The existing automatic `literature_fallback` remains a separate method.
 
-Query manifests add `query_molecules` counts, `query_table_sha256` and `metric_populations`.
-Structure/layout metrics use all mapped molecules; activity differences and class purity
-use measured molecules only. Query neighbors supply observed reference evidence, never predictions.
+The separate new-molecule manifest records the input and reference-manifest hashes, parameters and timing.
+Reference layout, metrics, diagnostics and original ZIP contain reference molecules only.
+New-molecule neighbors summarize observed reference evidence, never predictions.
+Legacy query-named schema sections below describe the retained low-level query functions.
 
 ## Own-data CLI options
 
@@ -495,7 +650,7 @@ use measured molecules only. Query neighbors supply observed reference evidence,
 | `--value-unit {p,M,mM,uM,nM,pM}` | Default `p` preserves existing pActivity values; concentrations become −log10 mol/L. |
 | `--unit-column COL` | Per-row concentration units, also accepting µM and μM; case sensitive, whitespace trimmed. Mutually exclusive with explicit `--value-unit`. |
 | `--assumed-sigma S` | Finite positive SD in log units for record-table support; incompatible with molecule-only input or disabled support. |
-| `--query-file PATH` | Unmeasured molecules as CSV or TSV; requires at least two measured references. |
+| `--query-file PATH` | Insert unmeasured CSV/TSV molecules into a completed Morgan reference grid, up to 1,000 after checking. Measured new molecules use the browser. |
 | `--query-smiles-column COL` | Override automatic SMILES-column detection. |
 | `--query-id-column COL` | Query IDs, unique within the input; default generated IDs preserve input order. |
 

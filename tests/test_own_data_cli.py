@@ -68,18 +68,25 @@ def test_units_assumed_sigma_queries_cli_audit(tmp_path):
     assert {"raw_activity_value", "raw_activity_unit"} <= set(records.columns)
     _, _, inspection = inspect_entry(coordinates, records, molecule_id="A", activity_confidence=fit)
     assert inspection["median_verified"] is True
-    unmeasured = coordinates[coordinates.measurement_status.eq("not_measured")]
+    assert "measurement_status" not in coordinates
+    new_dir = output / "new_molecules" / "queries"
+    new_rows = pd.read_csv(new_dir / "new_molecules.csv")
+    unmeasured = new_rows[new_rows.status.eq("mapped")]
     assert len(unmeasured) == 1
-    assert unmeasured.class_confidence.isna().all()
-    assert unmeasured.activity_pchembl.isna().all()
-    check = pd.read_csv(output / "own_query_check.csv", dtype={"query_id": str})
+    assert "class_confidence" not in unmeasured or unmeasured.class_confidence.isna().all()
+    assert "activity_pchembl" not in unmeasured or unmeasured.activity_pchembl.isna().all()
+    check = pd.read_csv(new_dir / "new_molecules_check.csv", dtype={"query_id": str})
     assert check.query_id.tolist() == ["001", "002", "003", "004"]
     assert set(check.status) == {"mapped", "duplicate_query", "invalid_smiles", "in_reference"}
-    neighbors = pd.read_csv(output / "own_query_neighbors.csv")
+    neighbors = pd.read_csv(new_dir / "new_molecules_neighbors.csv")
     describe(check.columns, "query_check.csv")
     describe(neighbors.columns, "query_neighbors.csv")
     with zipfile.ZipFile(output / "own_results.zip") as bundle:
-        assert {"own_query_check.csv", "own_query_neighbors.csv", "own_retained_records.csv"} <= set(bundle.namelist())
+        assert "own_retained_records.csv" in bundle.namelist()
+        assert not any("query" in name or "new_molecules" in name for name in bundle.namelist())
+    with zipfile.ZipFile(new_dir / "new_molecules_results.zip") as bundle:
+        assert {"new_molecules_check.csv", "new_molecules_neighbors.csv"} <= set(bundle.namelist())
+        assert bundle.read("new_molecules_input.csv") == query.read_bytes()
 
 
 def test_chembl_assumed_sigma_without_document_column(tmp_path):

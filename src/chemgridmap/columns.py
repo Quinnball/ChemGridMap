@@ -305,6 +305,35 @@ for _column in ("activity_class", "activity_pchembl", "class_confidence", "class
 COLUMNS["name"]["files"] += MAP_FILES
 COLUMNS["activity_class"]["unit_or_values"] = "inactive, medium, active; not_measured for unmeasured map rows"
 
+# U8 新文件保留既有检查/近邻列契约；参照文件 schema 不变。
+for _entry_value in COLUMNS.values():
+    _files = _entry_value["files"]
+    for _legacy, _current in (("query_check.csv", "new_molecules_check.csv"),
+                             ("query_neighbors.csv", "new_molecules_neighbors.csv")):
+        if _legacy in _files:
+            _entry_value["files"] += (_current,)
+    if any(_file in _files for _file in MAP_FILES + ("query_check.csv", "structure_members.csv")):
+        _entry_value["files"] += ("new_molecules.csv",)
+COLUMNS["tanimoto"]["files"] += ("new_molecules.csv",)
+COLUMNS["exclusion_reason"]["files"] += ("new_molecules_excluded_records.csv",)
+COLUMNS.update({
+    "label": _entry(("new_molecules.csv",), "User label, used only for display and filtering."),
+    "is_new": _entry(("new_molecules.csv",), "Identifies the current new-molecule overlay.", "boolean"),
+    "nearest_reference_id": _entry(("new_molecules.csv",), "Placement target: highest Morgan Tanimoto, then smallest reference ID."),
+    "placement_distance": _entry(("new_molecules.csv",), "Euclidean distance from the target reference cell.", "grid cells"),
+    "neighbor_evidence": _entry(("new_molecules.csv",), "Evidence from similar tie-inclusive top-five reference neighbors; never a prediction.", "none, insufficient, active, medium, inactive, mixed"),
+    "similar_reference_count": _entry(("new_molecules.csv",), "Top-five neighbors including ties meeting group_similarity.", "count"),
+    "supported_reference_count": _entry(("new_molecules.csv",), "Supported similar neighbors; zero when reference support was not assessed.", "count"),
+    "supported_reference_classes": _entry(("new_molecules.csv",), "Classes of supported similar neighbors; empty when support was not assessed.", "semicolon-separated classes"),
+    "evidence_reference_count": _entry(("new_molecules.csv",), "Neighbors contributing to evidence; uses observed classes when support was not assessed.", "count"),
+    "evidence_reference_classes": _entry(("new_molecules.csv",), "Classes contributing to neighbor evidence, including observed-class fallback.", "semicolon-separated classes"),
+    "reference_support_assessed": _entry(("new_molecules.csv",), "Whether reference class support was assessed.", "boolean"),
+    "neighbor_comparison": _entry(("new_molecules.csv",), "Own measured class compared with consistent neighbor evidence only.", "agrees, disagrees, or empty"),
+    "user_median": _entry(("new_molecules.csv",), "Own retained-record median, when available.", "pActivity"),
+    "reference_median": _entry(("new_molecules.csv",), "Median of the structurally identical reference molecule.", "pActivity"),
+    "median_difference": _entry(("new_molecules.csv",), "Own median minus structurally identical reference median.", "log units"),
+})
+
 
 def describe(columns, files):
     """Return one dictionary entry per emitted column, expanding class patterns."""
@@ -351,25 +380,30 @@ def output_columns_markdown(frames=None) -> str:
         lines.append("")
     lines.extend([
         "## Optional own-data outputs and metadata", "",
-        "Filenames have the run's `<name>_` prefix. `query_check.csv` and `query_neighbors.csv`",
-        "are written only with query input. `structure_groups.json` adds `n_query_members`",
-        "per group; member counts, core selection and core coverage still refer to measured references.",
-        "Generic records with unit conversion, assumed sigma or query input also export",
+        "Reference filenames retain the run's `<name>_` prefix and never change on insertion.",
+        "New results live in `new_molecules/<input-stem>/`, with numeric suffixes for existing names.",
+        "`new_molecules_check.csv` and `new_molecules_neighbors.csv` retain the legacy query column contracts.",
+        "`new_molecules.csv` contains all checked molecules; placement fields are empty for excluded rows.",
+        "Measured input also writes `new_molecules_excluded_records.csv`: every original input column,",
+        "followed by `exclusion_reason`; the header is retained when no records are excluded.",
+        "Group overlay summaries add `n_query_members` and `n_new_members`; saved reference groups stay unchanged.",
+        "Generic reference records with unit conversion or assumed sigma also export",
         "`retained_records.csv`, `molecule_level.csv` and `curation_report.json`.", "",
         "Unit-conversion reports contain `excluded_reasons` counts and the selected unit/column.",
         "Fits and manifests identify assumed SDs with `method=assumed_sigma`, `assumed_sigma`,",
         "and `evidence_unit_source` (the supplied column or `one unit per compound`).",
         "With no evidence-unit column, `document_offset_detection` is `not applicable`.",
         "The existing automatic `literature_fallback` remains a separate method.", "",
-        "Query manifests add `query_molecules` counts, `query_table_sha256` and `metric_populations`.",
-        "Structure/layout metrics use all mapped molecules; activity differences and class purity",
-        "use measured molecules only. Query neighbors supply observed reference evidence, never predictions.", "",
+        "The separate new-molecule manifest records the input and reference-manifest hashes, parameters and timing.",
+        "Reference layout, metrics, diagnostics and original ZIP contain reference molecules only.",
+        "New-molecule neighbors summarize observed reference evidence, never predictions.",
+        "Legacy query-named schema sections below describe the retained low-level query functions.", "",
         "## Own-data CLI options", "",
         "| Option | Meaning |", "|---|---|",
         "| `--value-unit {p,M,mM,uM,nM,pM}` | Default `p` preserves existing pActivity values; concentrations become −log10 mol/L. |",
         "| `--unit-column COL` | Per-row concentration units, also accepting µM and μM; case sensitive, whitespace trimmed. Mutually exclusive with explicit `--value-unit`. |",
         "| `--assumed-sigma S` | Finite positive SD in log units for record-table support; incompatible with molecule-only input or disabled support. |",
-        "| `--query-file PATH` | Unmeasured molecules as CSV or TSV; requires at least two measured references. |",
+        "| `--query-file PATH` | Insert unmeasured CSV/TSV molecules into a completed Morgan reference grid, up to 1,000 after checking. Measured new molecules use the browser. |",
         "| `--query-smiles-column COL` | Override automatic SMILES-column detection. |",
         "| `--query-id-column COL` | Query IDs, unique within the input; default generated IDs preserve input order. |", "",
     ])

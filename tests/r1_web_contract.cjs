@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(process.argv[2], 'utf8');
 const elements = new Map(), calls = [];
+const dictionary = JSON.parse(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[2]), 'i18n.json'), 'utf8')).en;
+const i18n = {getLanguage: () => 'en', t: (key,values={}) => (dictionary[key] || key.slice(2)).replace(/\{(\w+)\}/g,(_,name)=>values[name] ?? `{${name}}`)};
 // Only the nodes touched by the tested functions are needed; this is not a DOM emulator.
 function node() {
   return {children: [], dataset: {}, style: {setProperty(key, value) { this[key] = value; }},
@@ -33,7 +35,7 @@ const measured = {molecule_id: 'CHEMBL538536', molecule_identity_key: 'CHEMBL118
 const query = {query_id: 'Q1', molecule_id: 'Q1', structure_group: 'G161', measurement_status: 'not_measured',
   nearest_measured_id: 'CHEMBL1189346', nearest_measured_similarity: .8};
 const group = {structure_group: 'G161', size: 1, core_smiles: 'c1ccccc1', core_coverage_count: 1, core_exact_scaffold_count: 1};
-const context = vm.createContext({$, document, points: [measured, query], structureGroups: [group],
+const context = vm.createContext({$, document, ChemGridMapI18n:i18n, newMolecules:null, points: [measured, query], structureGroups: [group],
   highlightedGroup: '', groupRequestNumber: 0, job: {options: {input_format: 'molecule'}, molecules: 889,
     report: {input_rows: 1100, retained_activity_records: 1100, repeated_conflicted_molecules: 17}},
   transform: {s: 1, x: 0, y: 0}, view: 'grid', tileWidth: 100, hasStructures: false,
@@ -83,26 +85,26 @@ const scenarios = {
     context.showSummary();
     assert.deepEqual(summary(), [['Input records', '1,100'], ['Mapped molecules', '889'], ['Retained records', '1,100'], ['Wide record ranges', '17']]);
     context.job.report.query_molecules = {mapped: 45}; context.job.molecules = 934; context.showSummary();
-    assert.deepEqual(summary(), [['Input records', '1,100'], ['Mapped molecules', '934'], ['Unmeasured molecules', '45'], ['Retained records', '1,100'], ['Wide record ranges', '17']]);
+    assert.deepEqual(summary(), [['Input records', '1,100'], ['Reference molecules', '889'], ['New molecules', '45'], ['Retained records', '1,100'], ['Wide record ranges', '17']]);
     context.job.report.query_molecules.mapped = 0; context.showSummary();
-    assert.ok(!summary().some(([label]) => label === 'Unmeasured molecules'));
+    assert.ok(!summary().some(([label]) => label === 'New molecules'));
     delete context.job.report.query_molecules; context.job.options.input_format = 'chembl'; context.showSummary();
     assert.equal(summary().length, 4);
   },
   async groups() {
     context.points.push({...measured, structure_group: 'G002'}); await context.selectGroup('G161');
-    assert.equal($('group-core-title').textContent, 'G161 · 1 measured member + 1 unmeasured');
-    assert.equal($('group-core-coverage').textContent, 'Core in 1 of 1 measured member · exact scaffold in 1');
-    assert.equal(legend(), 'Outlined: G161, 2 molecules (1 unmeasured). Others faded.');
+    assert.equal($('group-core-title').textContent, 'G161 · 1 reference member + 1 new');
+    assert.equal($('group-core-coverage').textContent, 'Core in 1 of 1 reference member · exact scaffold in 1');
+    assert.equal(legend(), 'Outlined: G161, 2 molecules (1 new). Others faded.');
     context.inspectorGroup(query);
     assert.equal($('selected-group-summary').textContent, 'G161 | 1 member | core covers 1/1');
     context.structureGroups = [{...group, size: 2, core_coverage_count: 2, core_exact_scaffold_count: 2}];
     context.points = [measured, {...measured}, ...Array.from({length: 8}, () => ({...query}))];
     await context.selectGroup('G161');
-    assert.equal($('group-core-title').textContent, 'G161 · 2 measured members + 8 unmeasured');
-    assert.equal($('group-core-coverage').textContent, 'Core in 2 of 2 measured members · exact scaffold in 2');
+    assert.equal($('group-core-title').textContent, 'G161 · 2 reference members + 8 new');
+    assert.equal($('group-core-coverage').textContent, 'Core in 2 of 2 reference members · exact scaffold in 2');
     context.structureGroups[0].core_smiles = ''; await context.selectGroup('G161');
-    assert.equal($('group-core-coverage').textContent, '2 measured members · no ring scaffold');
+    assert.equal($('group-core-coverage').textContent, '2 reference members · no ring scaffold');
   },
   async plural() {
     for (const count of [0, 1, 3]) assert.equal(context.countLabel(count, 'member'), `${count} member${count === 1 ? '' : 's'}`);
@@ -121,10 +123,12 @@ const scenarios = {
   },
   async outlines() {
     for (const point of [measured, query]) for (const mode of ['activity', 'support', 'reliability', 'structure']) {
-      const el = node(); let applied;
-      el.classList.toggle = (name, active) => { assert.equal(name, 'unmeasured-outline'); applied = active; };
+      const el = node(), applied = {};
+      el.classList.toggle = (name, active) => { applied[name] = !!active; };
       context.outlineClass(point, mode, el);
-      assert.equal(applied, point === query && ['activity', 'support'].includes(mode));
+      assert.equal(applied['unmeasured-outline'], point === query && mode === 'activity');
+      assert.equal(applied['new-molecule-outline'], point === query && mode !== 'activity');
+      assert.equal(applied['reference-evidence-faded'], false);
     }
     for (const scale of [.005, .05, .2, 1, 4, 15]) {
       context.transform = {s: scale, x: 0, y: 0}; context.applyTransform();

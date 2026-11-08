@@ -121,14 +121,14 @@ const scenarios = {
       activity_confidence: {document_pair_count: 1, offset_min_shared: 3, discordant_document_pair_count: 0, offset_threshold: 1, offset_sign_agreement: .8, document_offsets_top10: []}, warnings: []};
     context.showDataAudit(report);
     const text = $('audit-body').textContent;
-    assert.match(text, /已映射：45/);
+    assert.match(text, /已放置：45/);
     assert.match(text, /共 134 条。删失值或非精确值（关系符不是 =）：28；空值或非数值的活性值：2。/);
     assert.match(text, /证据单元来自 run_id 列；/);
     const message = 'This entry has records from R1, R3; the display is unchanged because the offset rule is off.';
     assert.match(api.translateServer(message), /包含来自 R1、R3 的记录/);
     api.setLanguage('en'); assert.equal(api.translateServer(message), message);
     context.showDataAudit(report);
-    assert.match($('audit-body').textContent, /mapped: 45/);
+    assert.match($('audit-body').textContent, /Placed: 45/);
     assert.match($('audit-body').textContent, /of 134\. Censored or inexact values \(relation other than =\): 28; empty or non-numeric activity values: 2\./);
   },
 };

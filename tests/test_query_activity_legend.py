@@ -21,16 +21,17 @@ def test_query_activity_legend_uses_actual_thresholds_without_evidence(tmp_path,
         output_dir=tmp_path, output_formats=["svg"],
     )
     assert "activity_confidence_fit" not in result.data.attrs
-    root = ET.parse(result.output_files["svg"]).getroot()
+    root = ET.parse(result.new_molecules.output_files["map_with_new_molecules"]).getroot()
     legend = next(node for node in root.iter() if node.get("data-color-legend") == "activity")
     labels = [node.text for node in legend if node.tag.endswith("text") and node.text]
     assert labels == [f"Inactive ≤ {lower:g}", f"Medium ({lower:g}, {upper:g})",
-                      f"Active ≥ {upper:g}", "Not measured"]
+                      f"Active ≥ {upper:g}", "New molecules: not measured", "New molecules: measured"]
     swatches = [node for node in legend if node.tag.endswith("rect")]
     assert [node.get("fill") for node in swatches] == [
-        DEFAULT_COLORS["inactive"], DEFAULT_COLORS["medium"], DEFAULT_COLORS["active"], "#FFFFFF",
+        DEFAULT_COLORS["inactive"], DEFAULT_COLORS["medium"], DEFAULT_COLORS["active"], "#FFFFFF", "#FFFFFF",
     ]
-    assert swatches[-1].get("stroke") == "#8A99A6"
+    assert swatches[-2].get("stroke") == "#8A99A6"
+    assert swatches[-1].get("stroke") == "#173e34"
 
 
 def test_measured_only_activity_render_ignores_query_threshold_metadata(tmp_path):

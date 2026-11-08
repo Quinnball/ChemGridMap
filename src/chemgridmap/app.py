@@ -28,6 +28,7 @@ from .inspection import (build_sources, document_coverage, enrich_source_records
                          inspect_entry, load_audit_context, offset_pair_details,
                          match_source_lookup, validate_source_lookup)
 from .pipeline import build_grid_map
+from .queries import insert_new_molecules
 from .plotting import render_svg
 from .provenance import file_digests
 from .neighborhoods import neighborhood_evidence
@@ -58,6 +59,13 @@ def point_rows(data):
     columns = [name for name in POINT_COLUMNS if name in data]
     if "measurement_status" in data:
         columns.append("measurement_status")
+    if "is_new_molecule" in data or "is_new" in data:
+        columns.extend(name for name in (
+            "is_new_molecule", "is_new", "query_id", "label", "neighbor_evidence", "neighbor_evidence_class",
+            "nearest_reference_id", "nearest_measured_similarity", "tanimoto", "placement_distance",
+            "activity_pchembl", "neighbor_comparison", "similar_reference_count",
+            "supported_reference_count", "supported_reference_classes", "reference_support_assessed",
+        ) if name in data and name not in columns)
     return json_rows(data[columns])
 
 
@@ -109,9 +117,9 @@ def _query_selection(check, molecule_id):
         return molecule_id, None
     match = matches.iloc[0][["query_id", "status", "reference_id", "first_query_id"]].to_dict()
     if match["status"] == "mapped":
-        return molecule_id, None
+        return "query:" + match["query_id"], None
     if match["status"] == "invalid_smiles":
-        raise ValueError(f"Unmeasured molecule {match['query_id']} has invalid SMILES.")
+        raise ValueError(f"New molecule {match['query_id']} has invalid SMILES.")
     target = match["reference_id"] or "query:" + (match["first_query_id"] or match["query_id"])
     return target, match
 
@@ -136,6 +144,11 @@ class AppSession:
         self.query_frame = None
         self.query_raw = b""
         self.query_filename = ""
+        self.query_options = None
+        self.new_result = None
+        self.pending_query = None
+        self.reference_files = {}
+        self.reference_report = {}
         self.source_frame = None
         self.source_filename = ""
         self.possible_sources = None
@@ -156,6 +169,9 @@ class AppSession:
             self.frame, self.raw = frame, content
             self.filename = Path(filename.replace("\\", "/")).name
             self.query_frame, self.query_raw, self.query_filename = None, b"", ""
+            self.query_options, self.new_result = None, None
+            self.pending_query = None
+            self.reference_files, self.reference_report = {}, {}
             self.source_frame, self.source_filename, self.possible_sources = None, "", None
             self.result, self.curation, self.files = None, None, {}
             self.generic_records = None
@@ -173,9 +189,12 @@ class AppSession:
                 raise ValueError("Load the measured data first.")
             # Query IDs remain text, including leading zeroes.
             frame = _read_input(content, dtype=str)
-            self.query_frame, self.query_raw = frame, content
-            self.query_filename = Path(filename.replace("\\", "/")).name
-            self._discard_map()
+            filename = Path(filename.replace("\\", "/")).name
+            if self.result is not None:
+                self.pending_query = (frame, content, filename)
+            else:
+                self.query_frame, self.query_raw, self.query_filename = frame, content, filename
+                self.query_options = None
             return self.query_input_info()
 
     def clear_query(self):
@@ -183,8 +202,98 @@ class AppSession:
             if self.job["state"] == "running":
                 raise ValueError("A map is running. Wait for it to finish before replacing the input.")
             self.query_frame, self.query_raw, self.query_filename = None, b"", ""
-            self._discard_map()
+            self.query_options, self.new_result = None, None
+            self.pending_query = None
+            if self.result is not None:
+                self.files = dict(self.reference_files)
+                self.job.update(report=self.reference_report, files=list(self.files),
+                                molecules=len(self.result.data))
+            self.group_detail_cache = {}
             return {"query_input": None}
+
+    def new_molecules_info(self):
+        """Current overlay survives browser refresh; original run files stay separate."""
+        if self.new_result is None:
+            return None
+        return {"rows": json_rows(self.new_result.all_molecules),
+                "report": self.new_result.report, "options": self.query_options,
+                "input": self.query_input_info(pending=False),
+                "files": [Path(path).name for path in self.new_result.output_files.values()]}
+
+    def points(self):
+        if self.result is None:
+            raise ValueError("Build a map first.")
+        if self.new_result is None:
+            return point_rows(self.result.data)
+        reference = self.result.data.assign(measurement_status="measured", is_new_molecule=False)
+        new = self.new_result.data.assign(is_new_molecule=True)
+        return point_rows(pd.concat([reference, new], ignore_index=True))
+
+    def groups(self):
+        return self.new_result.structure_groups if self.new_result is not None else self.result.structure_groups
+
+    def insert_new(self, options=None):
+        with self.lock:
+            if self.result is None:
+                raise ValueError("Build a reference map first.")
+            if self.job["state"] == "running":
+                raise ValueError("A map is running. Wait for it to finish before inserting new molecules.")
+            if self.job["options"]["representation"] != "morgan":
+                raise ValueError("New molecules require a reference map arranged using Morgan fingerprints.")
+            frame, raw, filename = self.pending_query or (self.query_frame, self.query_raw, self.query_filename)
+            if frame is None:
+                raise ValueError("Upload new molecules first.")
+            aliases = {"activity_col": "value_col", "unit": "value_unit", "unit_col": "unit_column",
+                       "relation_col": "relation_column", "document_col": "document_column",
+                       "label_col": "label_column"}
+            allowed = {"smiles_col", "id_col", "value_col", "value_unit", "unit_column",
+                       "relation_column", "document_column", "label_column"}
+            chosen = {aliases.get(key, key): value for key, value in (options or {}).items()}
+            if set(chosen) - allowed:
+                raise ValueError("Unknown new-molecule option.")
+            chosen = {key: value for key, value in chosen.items() if value not in (None, "")}
+            for key, value in chosen.items():
+                if key != "value_unit" and (not isinstance(value, str) or value not in frame):
+                    raise ValueError(f"The selected {key} column was not found.")
+            build_options = self.job["options"]
+            policy = (self.curation.report["parameters"]["structure_policy"]
+                      if self.curation is not None else "canonical")
+            inserted = insert_new_molecules(
+                self.result, frame, output_dir=Path(self.job["output_dir"]),
+                input_bytes=raw, input_filename=filename,
+                structure_policy=policy, lower_threshold=build_options["lower_threshold"],
+                upper_threshold=build_options["upper_threshold"],
+                conflict_range_threshold=build_options["conflict_range_threshold"],
+                grouping=build_options["grouping"], group_similarity=build_options["group_similarity"],
+                **chosen)
+            self.new_result, self.query_options = inserted, chosen
+            self.query_frame, self.query_raw, self.query_filename = frame, raw, filename
+            self.pending_query = None
+            self.files = dict(self.reference_files)
+            self.files.update({Path(path).name: Path(path) for path in inserted.output_files.values()})
+            matches = self._query_reference_matches(self.result, self.curation, self.generic_records,
+                                                    build_options, checks=inserted.check)
+            if chosen.get("value_col"):
+                rows = {row["query_id"]: row for row in json_rows(inserted.all_molecules)}
+                for match in matches:
+                    own = rows[match["query_id"]]
+                    own_value = own.get("user_median")
+                    ref_value = own.get("reference_median")
+                    match.update(own_median=own_value, reference_median=ref_value,
+                                 median_difference=(own_value - ref_value
+                                                    if own_value is not None and ref_value is not None else None),
+                                 own_n_records=own.get("n_records"))
+            differences = [row["median_difference"] for row in matches
+                           if row.get("median_difference") is not None]
+            report = {**self.reference_report, "query_molecules": inserted.report,
+                      "new_molecules": inserted.report, "query_reference_matches": matches}
+            if differences:
+                report["query_reference_differences"] = {
+                    "median": float(pd.Series(differences).median()),
+                    "min": min(differences), "max": max(differences), "count": len(differences)}
+            self.group_detail_cache = {}
+            self.job.update(report=report, files=list(self.files), molecules=len(self.result.data) + len(inserted.data))
+            return self.snapshot()
 
     def load_source(self, content, filename):
         with self.lock:
@@ -215,6 +324,8 @@ class AppSession:
 
     def _discard_map(self):
         self.result, self.curation, self.files = None, None, {}
+        self.new_result = None
+        self.reference_files, self.reference_report = {}, {}
         self.generic_records = None
         self.activity_confidence = None
         self.possible_sources = None
@@ -222,16 +333,18 @@ class AppSession:
         self.job = {"state": "ready" if self.frame is not None else "empty",
                     "message": "Input updated. Review the options, then build the map."}
 
-    def query_input_info(self):
-        if self.query_frame is None:
+    def query_input_info(self, *, pending=True):
+        frame, raw, filename = (self.pending_query if pending and self.pending_query else
+                                (self.query_frame, self.query_raw, self.query_filename))
+        if frame is None:
             return None
-        columns = self.query_frame.columns.tolist()
+        columns = frame.columns.tolist()
         available = {str(column).strip().lower(): column for column in columns}
         smiles = next((available[name] for name in (
             "smiles", "canonical_smiles", "canonical smiles", "representation_smiles"
         ) if name in available), None)
-        return {"filename": self.query_filename, "rows": len(self.query_frame), "columns": columns,
-                "detected": {"smiles": smiles}, "sha256": hashlib.sha256(self.query_raw).hexdigest()}
+        return {"filename": filename, "rows": len(frame), "columns": columns,
+                "detected": {"smiles": smiles}, "sha256": hashlib.sha256(raw).hexdigest()}
 
     def input_info(self):
         if self.frame is None:
@@ -254,11 +367,23 @@ class AppSession:
                 column = options.get(key)
                 if column and (self.query_frame is None or column not in self.query_frame):
                     raise ValueError(f"{key} requires a column in the unmeasured-molecule input.")
+            # Legacy Python callers may still supply selectors at build time. They
+            # are overlay settings and must not enter the reference run's files.
+            legacy_query = {key.removeprefix("query_"): options.pop(key)
+                            for key in ("query_smiles_col", "query_id_col") if options.get(key)}
+            for key in ("query_smiles_col", "query_id_col"):
+                options.pop(key, None)
+            if legacy_query:
+                self.query_options = legacy_query
             if options.get("unit_column") and options["unit_column"] not in self.frame:
                 raise ValueError("The selected unit column was not found.")
             if options.get("reference_column") and options["reference_column"] not in self.frame:
                 raise ValueError("The selected reference column was not found.")
+            # Rebuilding restores the committed group, not a still-unconfirmed upload.
+            self.pending_query = None
             self.result, self.curation, self.files = None, None, {}
+            self.new_result = None
+            self.reference_files, self.reference_report = {}, {}
             self.generic_records = None
             self.activity_confidence = None
             self.possible_sources = None
@@ -279,10 +404,6 @@ class AppSession:
                 json.dumps(options, indent=2), encoding="utf-8", newline="\n")
             source = {"input_file": self.filename, "input_file_sha256": hashlib.sha256(self.raw).hexdigest(),
                       "interface": "local-browser", "chemgridmap_version": __version__}
-            if self.query_frame is not None:
-                (directory / "query_input.csv").write_bytes(self.query_raw)
-                source.update(query_file=self.query_filename,
-                              query_file_sha256=hashlib.sha256(self.query_raw).hexdigest())
             source["reliability_parameters"] = {
                 "activity_confidence": options["activity_confidence"],
                 "evidence_model": options["evidence_model"],
@@ -299,7 +420,6 @@ class AppSession:
             generic_records = None
             assumed_sigma = options.get("assumed_sigma")
             value_unit, unit_column = options.get("value_unit", "p"), options.get("unit_column")
-            query_structure_policy = "canonical"
             if options["input_format"] == "chembl":
                 self.update(message="Validating structures and auditing repeated measurements...")
                 curation = curate_chembl_activity_data(
@@ -311,7 +431,6 @@ class AppSession:
                 )
                 curation.report.update(source)
                 source["curation_parameters"] = curation.report["parameters"]
-                query_structure_policy = curation.report["parameters"]["structure_policy"]
                 document_column = options["document_column"] or curation.report["detected_columns"].get("document_id")
                 if options["activity_confidence"] and (document_column or assumed_sigma is not None):
                     self.update(message="Estimating how well source documents support each activity class...")
@@ -404,14 +523,13 @@ class AppSession:
                 map_color_modes=color_modes, map_color_formats=["svg"],
                 value_unit=value_unit if options["input_format"] == "molecule" and not options["compound_column"] else "p",
                 unit_column=unit_column if options["input_format"] == "molecule" and not options["compound_column"] else None,
-                query_data=self.query_frame, query_smiles_col=options.get("query_smiles_col"),
-                query_id_col=options.get("query_id_col"), query_structure_policy=query_structure_policy,
             )
+            # Generic record aggregation happens above the pipeline; retain its
+            # actual span threshold for later insertion without changing exports.
+            result.insertion_parameters["conflict_range_threshold"] = options["conflict_range_threshold"]
             result.output_files.update(curation_files)
             files = {Path(path).name: Path(path) for path in result.output_files.values()}
             files.update({name: directory / name for name in ("input.csv", "app_options.json")})
-            if self.query_frame is not None:
-                files["query_input.csv"] = directory / "query_input.csv"
             archive = directory / "chemgridmap_results.zip"
             with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
                 for name, path in files.items():
@@ -426,8 +544,6 @@ class AppSession:
                           "input_rows": generic_report["input_rows"],
                           "retained_activity_records": generic_report["retained_activity_records"],
                           "repeated_conflicted_molecules": int(data["wide_record_range"].eq(1).sum())}
-            if result.query_report:
-                report = {**report, "query_molecules": result.query_report}
             confidence_report = report.get("activity_confidence")
             if confidence_report is not None:
                 # Include unflagged evaluated pairs in the browser audit only.
@@ -450,9 +566,6 @@ class AppSession:
                                         options["reference_column"])
                 report = {**report, "document_coverage": {
                     "kind": "reference", **document_coverage(sources)}}
-            if result.query_report:
-                report = {**report, "query_reference_matches": self._query_reference_matches(
-                    result, curation, generic_records, options)}
             possible_sources = None
             if generic_records is not None and self.source_frame is not None:
                 self.update(message="Matching structures to the source lookup file...")
@@ -462,12 +575,15 @@ class AppSession:
                     "file": self.source_filename, **lookup_summary}}
             with self.lock:
                 self.result, self.curation, self.files = result, curation, files
+                self.reference_files, self.reference_report = dict(files), report
                 self.generic_records = generic_records
                 self.possible_sources = possible_sources
                 self.job.update(state="done", message="Map ready. Select a cell to inspect its evidence.",
                                 output_dir=str(directory), molecules=len(result.data),
                                 report=report, metrics=json_rows(result.metrics)[0],
                                 options=options, files=list(files), elapsed=time.time() - self.job["started"])
+                if self.query_frame is not None:
+                    self.insert_new(self.query_options)
         except Exception as exc:
             self.update(state="error", message=str(exc), output_dir=str(directory))
 
@@ -481,7 +597,7 @@ class AppSession:
                 raise ValueError("Build a map first.")
             if group_id in self.group_detail_cache:
                 return self.group_detail_cache[group_id]
-            summary = next((g for g in self.result.structure_groups if g['structure_group'] == group_id), None)
+            summary = next((g for g in self.groups() if g['structure_group'] == group_id), None)
             if summary is None:
                 raise ValueError("Unknown structure group.")
             payload = {'summary': summary, 'core_svg': _group_drawing(summary, 'core_smiles')}
@@ -518,6 +634,7 @@ class AppSession:
                 for filename, content in files.items():
                     archive.writestr(filename, content)
             self.files[name] = path
+            self.reference_files[name] = path
             payload['archive'] = name
             self.group_cache[group_id] = payload
             return payload
@@ -536,9 +653,10 @@ class AppSession:
         records[column] = records.source_row.map(references)
         return records
 
-    def _query_reference_matches(self, result, curation, generic_records, options):
+    def _query_reference_matches(self, result, curation, generic_records, options, checks=None):
         """Count retained documents for the browser only; never create audit exports."""
-        checks = result.query_check[result.query_check.status.eq("in_reference")]
+        checks = result.query_check if checks is None else checks
+        checks = checks[checks.status.eq("in_reference")]
         if checks.empty:
             return []
         records = curation.retained_records if curation is not None else generic_records
@@ -622,20 +740,37 @@ class AppSession:
             if self.result is None:
                 raise ValueError("Build a map first.")
             data, curation = self.result.data, self.curation
-            molecule_id, query_match = _query_selection(self.result.query_check, molecule_id)
-            if "measurement_status" in data:
-                selected = _select_molecule(data, row, col, molecule_id)
-                if selected.iloc[0].measurement_status == "not_measured":
+            checks = self.new_result.check if self.new_result is not None else self.result.query_check
+            molecule_id, query_match = _query_selection(checks, molecule_id)
+            if (self.new_result is not None and not self.new_result.data.empty
+                    and not (query_match and query_match["reference_id"])):
+                combined = pd.concat([data, self.new_result.data], ignore_index=True)
+                selected = _select_molecule(combined, row, col, molecule_id)
+                if selected.index[0] >= len(data):
+                    # Recover the unmerged schema, so reference-only fields do not
+                    # become artificial null values in the new-molecule inspector.
+                    selected = self.new_result.data.iloc[[int(selected.index[0]) - len(data)]]
                     query = selected.iloc[0]
-                    neighbors = self.result.query_neighbors[
-                        self.result.query_neighbors.query_id.eq(query.query_id)]
+                    neighbors = self.new_result.neighbors[
+                        self.new_result.neighbors.query_id.eq(query.query_id)]
+                    records = self.new_result.records
+                    if not records.empty:
+                        record_key = next((column for column in (
+                            "query_id", (self.query_options or {}).get("id_col"), "molecule_identity_key"
+                        ) if column and column in records), None)
+                        records = (records[records[record_key].astype(str).isin(
+                            [str(query.query_id), "query:" + str(query.query_id)])]
+                            if record_key else pd.DataFrame())
                     svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320">'
                            + (_svg_molecule_content(query.canonical_smiles, 320) or '') + '</svg>')
                     detail = {"molecule": json_rows(selected)[0], "query_neighbors": json_rows(neighbors),
-                              "group_similarity": self.job["options"]["group_similarity"], "svg": svg}
+                              "group_similarity": self.job["options"]["group_similarity"], "svg": svg,
+                              "records": json_rows(records), "record_columns": records.columns.tolist(),
+                              "total_records": len(records), "summary": {
+                                  "reference_support_assessed": self.new_result.report["reference_support_assessed"]}}
                     if query_match is not None:
                         detail["query_match"] = query_match
-                    return detail, pd.DataFrame()
+                    return detail, records
             if curation is not None:
                 _, run_bound, binding_warnings, manifest = load_audit_context(
                     Path(self.result.output_files['coordinates']),
@@ -708,6 +843,7 @@ class AppSession:
                 for name, content in files.items():
                     bundle.writestr(name, content)
             self.files[archive.name] = archive
+            self.reference_files[archive.name] = archive
             detail = {"molecule": json_rows(chosen)[0], "summary": summary,
                     "sources": sources,
                     "records": json_rows(display_records if self.generic_records is not None else display_records.head(100)),
@@ -723,6 +859,13 @@ class AppSession:
                 detail["source_lookup_file"] = self.source_filename
             if query_match is not None:
                 detail["query_match"] = query_match
+                measurement = next((match for match in self.job["report"].get("query_reference_matches", [])
+                                    if match["query_id"] == query_match["query_id"]), None)
+                if measurement and "own_median" in measurement:
+                    detail["new_molecule_measurement"] = {key: measurement[key] for key in (
+                        "own_median", "reference_median", "median_difference", "own_n_records")}
+            if self.new_result is not None:
+                detail["molecule"]["measurement_status"] = "measured"
             return detail, records
 
 
@@ -883,21 +1026,24 @@ class LocalHandler(BaseHTTPRequestHandler):
                 payload = {"version": __version__, "umap": importlib.util.find_spec("umap") is not None,
                            "output_root": str(session.output_root), "demo_available": DEMO.exists(),
                            "input": session.input_info(), "job": session.snapshot()}
-                if session.query_frame is not None:
+                if session.query_input_info() is not None:
                     payload["query_input"] = session.query_input_info()
+                if session.new_result is not None:
+                    payload["new_molecules"] = session.new_molecules_info()
                 if session.source_frame is not None:
                     payload["source_input"] = session.source_input_info()
                 self.send(payload)
             elif path == "/api/job":
                 self.send(session.snapshot())
             elif path == "/api/points":
-                if session.result is None:
-                    raise ValueError("Build a map first.")
-                self.send(point_rows(session.result.data))
+                self.send(session.points())
+            elif path == "/api/new-molecules":
+                self.send(session.new_molecules_info() or {"rows": [], "report": {}, "options": {},
+                                                          "input": session.query_input_info(), "files": []})
             elif path == "/api/groups":
                 if session.result is None:
                     raise ValueError("Build a map first.")
-                self.send({'groups': session.result.structure_groups, 'protocol': session.result.grouping_protocol})
+                self.send({'groups': session.groups(), 'protocol': session.result.grouping_protocol})
             elif path == "/api/group":
                 self.send(session.group_detail(parse_qs(parsed.query).get('group', [''])[0]))
             elif path == "/api/compare":
@@ -935,10 +1081,17 @@ class LocalHandler(BaseHTTPRequestHandler):
             path = urlsplit(self.path).path
             if path == "/api/input":
                 self.send(session.load(content, unquote(self.headers.get("X-Filename", "input.csv"))))
-            elif path == "/api/query-input":
+            elif path in ("/api/query-input", "/api/new-molecules/input"):
+                if path == "/api/new-molecules/input":
+                    if session.result is None:
+                        raise ValueError("Build a reference map first.")
+                    if session.job["options"]["representation"] != "morgan":
+                        raise ValueError("New molecules require a reference map arranged using Morgan fingerprints.")
                 self.send(session.load_query(content, unquote(self.headers.get("X-Filename", "queries.csv"))))
-            elif path == "/api/query-input/clear":
+            elif path in ("/api/query-input/clear", "/api/new-molecules/clear"):
                 self.send(session.clear_query())
+            elif path in ("/api/new-molecules", "/api/new-molecules/insert"):
+                self.send(session.insert_new(json.loads(content)))
             elif path == "/api/source-input":
                 self.send(session.load_source(content, unquote(self.headers.get("X-Filename", "sources.csv"))))
             elif path == "/api/source-input/clear":
