@@ -563,7 +563,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             result, query_data, output_dir=args.output_dir,
             input_bytes=args.query_file.read_bytes(), input_filename=args.query_file.name,
             smiles_col=args.query_smiles_column, id_col=args.query_id_column,
-            structure_policy=query_structure_policy)
+            structure_policy=query_structure_policy,
+            reference_target_id=curation.report["parameters"]["target_id"] if curation else None)
         result.query_report = result.new_molecules.report
 
     report = result.preprocessing

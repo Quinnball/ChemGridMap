@@ -17,6 +17,7 @@ from rdkit import Chem, DataStructs
 from rdkit.Chem import rdFingerprintGenerator
 from rdkit.Chem.Scaffolds import MurckoScaffold
 
+from .chembl import detect_chembl_columns
 from .comparison import molecule_keys
 from .core import canonicalize_smiles
 
@@ -251,6 +252,27 @@ def summarize_neighbor_evidence(queries, neighbors, *, similarity=0.6, support_a
         "reference_support_assessed", "neighbor_comparison"])], axis=1)
 
 
+def _insertion_warnings(queries, query_data, reference_target_id=None):
+    """只检查已放置分子的结构差异；靶点检查覆盖整个新分子输入。"""
+    placed = len(queries)
+    none = int(queries.neighbor_evidence.eq("none").sum())
+    none_share = none / placed if placed else 0.0
+    median = float(queries.tanimoto.median()) if placed else None
+    warnings = []
+    if none_share >= 0.9 and median is not None and median < 0.35:
+        warnings.append({"code": "structural_mismatch", "placed": placed,
+                         "none": none, "median": median})
+    target_column = detect_chembl_columns(query_data)["target_id"]
+    if reference_target_id and target_column:
+        reference = str(reference_target_id).strip().upper()
+        targets = sorted({str(value).strip().upper() for value in query_data[target_column].dropna()
+                          if str(value).strip() and str(value).strip().upper() != reference})
+        if targets:
+            warnings.append({"code": "target_mismatch", "targets": targets, "reference": reference})
+    return {"warnings": warnings, "none_share": none_share,
+            "median_nearest_tanimoto": median}
+
+
 def place_new_molecules(reference, queries, *, grid_rows, grid_cols):
     """Use Euclidean cell distance, then row/column; never move a reference."""
     out = queries.copy()
@@ -341,7 +363,7 @@ def insert_new_molecules(
     value_unit="p", unit_column=None, relation_column=None, document_column=None,
     label_column=None, structure_policy=None, radius=None, n_bits=None,
     lower_threshold=None, upper_threshold=None, conflict_range_threshold=None,
-    grouping=None, group_similarity=None,
+    grouping=None, group_similarity=None, reference_target_id=None,
 ):
     """Insert one batch into a frozen Morgan reference map, with independent files.
 
@@ -355,6 +377,11 @@ def insert_new_molecules(
     started = time.perf_counter()
     settings = getattr(reference_result, "insertion_parameters", {})
     reference = reference_result.data
+    if reference_target_id is None and "target_id" in reference:
+        targets = reference.target_id.dropna().astype(str).str.strip().str.upper()
+        targets = targets[targets.ne("")].unique()
+        if len(targets) == 1:
+            reference_target_id = targets[0]
     representation = settings.get("representation", reference.attrs.get("representation_type", "morgan"))
     if representation != "morgan":
         raise ValueError("New molecules require a Morgan fingerprint reference map.")
@@ -509,6 +536,7 @@ def insert_new_molecules(
         group["n_new_members"] = group["n_query_members"]
     report["reference_support_assessed"] = bool(support_assessed)
     report["neighbor_evidence_counts"] = {key: int(queries.neighbor_evidence.eq(key).sum()) for key in NEIGHBOR_EVIDENCE_CATEGORIES}
+    report.update(_insertion_warnings(queries, query_data, reference_target_id))
     report["parameters"] = parameters
     report["projection_note"] = "New molecules are displayed only in the grid map."
     for column in queries:
@@ -561,6 +589,7 @@ def insert_new_molecules(
                                    "value_unit": value_unit, "unit_column": unit_column, "relation_column": relation_column,
                                    "document_column": document_column, "label_column": label_column},
                     "report": report, "software_source_sha256": source_tree_digest()["source_sha256"],
+                    **{key: report[key] for key in ("warnings", "none_share", "median_nearest_tanimoto")},
                     "output_digests": file_digests(files),
                     "timings_seconds": {"through_svg_and_tables": time.perf_counter()-started},
                     "timing_note": "The returned report.insertion_seconds includes manifest and ZIP writing."}

@@ -39,7 +39,7 @@ async function setup() {
     fetch() { throw Error('U6 must not make network requests'); },
   });
   const names = ['format', 'ordinal', 'percentage', 'countLabel', 'table', 'measuredLabel',
-    'showQuerySelection', 'showSources', 'showDataAudit', 'inspect', 'status', 'fail', 'refreshLanguage'];
+    'showQuerySelection', 'showSources', 'referenceMapDetails', 'renderReferenceMap', 'newMoleculeWarning', 'newMoleculeInsertedMessage', 'showDataAudit', 'inspect', 'status', 'fail', 'refreshLanguage'];
   vm.runInContext(names.map(realFunction).join('\n'), env.context);
   env.context.showResult.grouping = {};
   return {...env, $, requests};
@@ -111,8 +111,8 @@ const scenarios = {
     for (const language of ['en', 'zh']) {
       api.setLanguage(language); context.showDataAudit(report(rows));
       const container = $('audit-body').querySelector('.query-reference-matches');
-      const section = container.parentNode, heading = section.children[5];
-      assert.equal(section.children.slice(1, 5).filter(item => item.dataset.queryStatus).length, 4);
+      const section = container.parentNode, heading = section.children.find(item=>item.tagName==='H4');
+      assert.equal(section.children.filter(item => item.dataset.queryStatus).length, 4);
       assert.equal(heading.textContent, language === 'en' ? 'Same structure as a reference molecule' : '与参照分子结构相同');
       assert.deepEqual(container.querySelectorAll('th').map(item => item.textContent), language === 'en'
         ? ['New molecule ID', 'Matched reference molecule ID', 'Sources', 'Sources with links']

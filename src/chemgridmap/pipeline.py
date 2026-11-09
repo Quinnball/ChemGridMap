@@ -254,7 +254,8 @@ def build_grid_map(
         inserted = insert_new_molecules(
             reference, query_data, output_dir=output_dir,
             smiles_col=query_smiles_col, id_col=query_id_col,
-            structure_policy=query_structure_policy)
+            structure_policy=query_structure_policy,
+            reference_target_id=(provenance or {}).get("curation_parameters", {}).get("target_id"))
         reference.new_molecules = inserted
         reference.query_check, reference.query_neighbors = inserted.check, inserted.neighbors
         reference.query_report = inserted.report

@@ -27,7 +27,7 @@ NewMoleculesResult(data: 'pd.DataFrame', check: 'pd.DataFrame', neighbors: 'pd.D
 ## `insert_new_molecules`
 
 ```python
-insert_new_molecules(reference_result, query_data, *, output_dir=None, input_bytes=None, input_filename='new_molecules.csv', smiles_col=None, id_col=None, value_col=None, value_unit='p', unit_column=None, relation_column=None, document_column=None, label_column=None, structure_policy=None, radius=None, n_bits=None, lower_threshold=None, upper_threshold=None, conflict_range_threshold=None, grouping=None, group_similarity=None)
+insert_new_molecules(reference_result, query_data, *, output_dir=None, input_bytes=None, input_filename='new_molecules.csv', smiles_col=None, id_col=None, value_col=None, value_unit='p', unit_column=None, relation_column=None, document_column=None, label_column=None, structure_policy=None, radius=None, n_bits=None, lower_threshold=None, upper_threshold=None, conflict_range_threshold=None, grouping=None, group_similarity=None, reference_target_id=None)
 ```
 
 Insert one batch into a frozen Morgan reference map, with independent files.

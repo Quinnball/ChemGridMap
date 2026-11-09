@@ -319,7 +319,7 @@ async function api(path, options = {}) {
 const getJSON = async (path, options) => (await api(path, options)).json();
 function status(message, kind = '') {
   status.last = {message, kind};
-  message = translateServer(message);
+  message = typeof message === 'function' ? message() : translateServer(message);
   $('status').textContent = message; $('status').className = kind;
   $('status').hidden = !message || kind === 'running';
   if (kind === 'running') $('build-progress').textContent = message;
@@ -450,6 +450,28 @@ function updateNewNavigation() {
   for (const id of ['new-unit','new-unit-col','new-relation-col','new-document-col']) $(id).disabled = busy || !measured;
   $('new-unit').disabled = busy || !measured || !!$('new-unit-col').value;
 }
+function referenceMapDetails() {
+  return {
+    description: job.reference_map?.description || job.options.target_id || inputInfo?.filename || '—',
+    count: job.reference_map?.count ?? (job.molecules - (job.report.query_molecules?.mapped || 0))
+  };
+}
+function renderReferenceMap() {
+  const details = job ? referenceMapDetails() : null;
+  for (const id of ['new-molecules-reference','new-list-reference']) $(id).textContent = details ? t('u8d.referenceMap', details) : '';
+}
+function newMoleculeWarning(warning) {
+  if (typeof warning === 'string') return translateServer(warning);
+  if (warning.code === 'structural_mismatch') return t('u8d.structuralMismatch', {...warning, median: format(warning.median)});
+  if (warning.code === 'target_mismatch') return t('u8d.targetMismatch', {...warning, targets: warning.targets.join(t('u8d.separator'))});
+  return '';
+}
+function newMoleculeInsertedMessage(report) {
+  const counts = ['active','medium','inactive','mixed','insufficient','none']
+    .filter(category => report.neighbor_evidence_counts?.[category] > 0)
+    .map(category => `${t('u8d.' + category)} ${report.neighbor_evidence_counts[category]}`).join(t('u8d.separator'));
+  return [t('u8d.inserted', {placed: report.mapped || 0, counts: counts || '0'}), ...(report.warnings || []).map(newMoleculeWarning)].join(' ');
+}
 function showQueryInput(input, saved = {}) {
   queryInputInfo = input;
   $('query-input-info').hidden = !input;
@@ -483,7 +505,11 @@ async function insertNewMolecules(event) {
     const options = newMoleculeOptions(); setBusy(true);
     $('new-molecules-feedback').textContent = t('u8.inserting');
     job = await getJSON('/api/new-molecules', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(options)});
-    closeInspector(); await showResult(); $('new-molecules-dialog').close(); status(t('u8.inserted'));
+    // 只由本次插入成功触发；刷新、重新建图与语言切换不会重置用户所选图层。
+    $('color-mode').value = 'neighbor_evidence';
+    closeInspector(); await showResult(); $('new-molecules-dialog').close();
+    const inserted = job.report.query_molecules || {};
+    status(() => newMoleculeInsertedMessage(inserted), inserted.warnings?.length ? 'warning' : '');
   } catch (error) { fail(error); $('new-molecules-feedback').textContent = translateServer(error.message); }
   finally { setBusy(false); }
 }
@@ -501,7 +527,7 @@ async function removeQueryInput() {
   finally { setBusy(false); }
 }
 function bindNewMolecules() {
-$('open-new-molecules').addEventListener('click', () => { $('new-molecules-feedback').textContent = ''; $('new-molecules-dialog').showModal(); });
+$('open-new-molecules').addEventListener('click', () => { renderReferenceMap(); $('new-molecules-feedback').textContent = ''; $('new-molecules-dialog').showModal(); });
 $('new-molecules-form').addEventListener('submit', insertNewMolecules);
 $('new-activity-col').addEventListener('change',updateNewNavigation);
 $('new-unit-col').addEventListener('change',updateNewNavigation);
@@ -530,6 +556,7 @@ function newListValue(row, key) {
   return format(value);
 }
 function renderNewList(resetFilters = false) {
+  renderReferenceMap();
   if (resetFilters) {
     const previous = [$('new-class-filter').value, $('new-label-filter').value];
     for (const [id,values] of [['new-class-filter',['active','medium','inactive','mixed','insufficient','none']],['new-label-filter',[...new Set((newMolecules?.rows || []).map(row => row.label).filter(value => value != null && value !== ''))].sort()]]) {
@@ -723,6 +750,9 @@ function showDataAudit(report) {
   if (report.query_molecules) {
     const section = document.createElement('section'), heading = document.createElement('h3');
     heading.textContent = t("u8.newMolecules"); section.append(heading);
+    const reference = document.createElement('p'); reference.dataset.newMoleculesReference = 'true';
+    reference.textContent = t('u8d.auditReference', {...referenceMapDetails(), filename: (typeof newMolecules !== 'undefined' && newMolecules?.input?.filename) || queryInputInfo?.filename || '—'});
+    section.append(reference);
     for (const [key, label] of [['mapped',t('u8.mapped')],['invalid_smiles',t('u8.invalid_smiles')],['duplicate_query',t('u8.duplicate_query')],['in_reference',t('u8.in_reference')]]) {
       const count = document.createElement('p'); count.dataset.queryStatus = key;
       count.dataset.queryCount = report.query_molecules[key]; count.textContent = t('d.{label}: {value}', {label, value: report.query_molecules[key]}); section.append(count);
@@ -797,7 +827,8 @@ function showDataAudit(report) {
       table(added.document_pair_offsets.map(pair=>({Pair:t('d.{a} vs {b}',{a:pair.document_a,b:pair.document_b}),'Shared entries':pair.shared_entries,'Median difference (B − A)':format(pair.median_offset,true,2),'Sign agreement':`${Math.round(100*pair.sign_agreement)}%`,Flagged:pair.systematic_offset?t('d.Yes'):t('d.No')})),container);section.append(h,container);
     }
     for (const message of report.query_molecules.warnings || []) {
-      const warning = document.createElement('p'); warning.textContent = translateServer(message); section.append(warning);
+      const warning = document.createElement('p'); warning.className = 'new-molecule-warning';
+      warning.textContent = newMoleculeWarning(message); section.append(warning);
     }
     $('audit-body').append(section);
   }
@@ -846,17 +877,17 @@ async function showResult(languageOnly = false) {
   $('summary').replaceChildren(...stats);
   $('summary').hidden = false; $('audit').hidden = false; if (!languageOnly) $('preview').open = false;
   const auditOpen = $('audit').open;
-  showDataAudit(report);
-  if (languageOnly) $('audit').open = auditOpen;
   if (!languageOnly) {
   newMolecules = await getJSON('/api/new-molecules');
   const svgFile = (newMolecules?.files || []).find(name => name.endsWith('map_with_new_molecules.svg')) || job.files.find(name => name === 'map.svg');
   gridSVG = await (await api('/api/file?name=' + encodeURIComponent(svgFile))).text();
   points = await getJSON('/api/points');
   $('measurement-filter-control').hidden = !points.some(point => point.is_new || point.measurement_status === 'not_measured');
-  $('color-mode').querySelector('[value=neighbor_evidence]').disabled = !points.some(point => point.is_new || point.measurement_status === 'not_measured');
+  $('color-mode').querySelector('[value=neighbor_evidence]').disabled = newMolecules?.report?.input_rows == null && !points.some(point => point.is_new || point.measurement_status === 'not_measured');
   showResult.grouping = await getJSON('/api/groups');
   }
+  showDataAudit(report);
+  if (languageOnly) $('audit').open = auditOpen;
   const grouping = showResult.grouping; structureGroups = grouping.groups;
   $('group-controls').hidden = false;
   document.querySelectorAll('[data-group-only]').forEach(el => el.hidden = !structureGroups.length);
@@ -876,7 +907,8 @@ async function showResult(languageOnly = false) {
   $('neighbor-key').querySelector('.representation-only').textContent =
     job.options.representation === 'morgan' ? t("d.Fingerprint only") : t("d.Representation only");
   if (!languageOnly) { updateNavigation(); showPage('explore'); }
-  $('run-caption').textContent = [job.options.target_id || inputInfo.filename, job.options.representation === 'morgan' ? t("d.Morgan fingerprint") : t("d.Molecular descriptors"), job.options.projection.toUpperCase(), t("d.{value}% occupancy", {value: Math.round(job.options.grid_occupancy * 100)})].join(' · ');
+  $('run-caption').textContent = [referenceMapDetails().description, job.options.representation === 'morgan' ? t("d.Morgan fingerprint") : t("d.Molecular descriptors"), job.options.projection.toUpperCase(), t("d.{value}% occupancy", {value: Math.round(job.options.grid_occupancy * 100)})].join(' · ');
+  renderReferenceMap();
   if (!languageOnly) { view = 'grid'; setView('grid'); }
   $('download-all').hidden = false;
   $('downloads').replaceChildren();
@@ -1011,7 +1043,7 @@ function renderLegend(mode) {
   const hasQueries = points.some(point => point.is_new || point.measurement_status === 'not_measured');
   if (hasQueries && ['activity','support','reliability'].includes(mode)) {
     const items = mode === 'activity' ? [[t('u8.newUnmeasured'),'#FFFFFF','#8A99A6'],[t('u8.newMeasured'),colors.active,'#173e34']] : [[t('u8.notInLayer'),'#dfe4e9','#173e34']];
-    for (const [label,fill,border] of items) { const item = legendItem(fill,label); item.firstElementChild.style.border = '1.5px solid '+border; $('legend').append(item); }
+    for (const [label,fill,border] of items) { const item = legendItem(fill,label + ' ' + t('u8d.seeNeighborEvidence')); item.firstElementChild.style.border = '1.5px solid '+border; $('legend').append(item); }
   }
   const group = structureGroups.find(g => g.structure_group === highlightedGroup);
   if (group) {

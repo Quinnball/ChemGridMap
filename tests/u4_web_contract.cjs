@@ -316,7 +316,7 @@ const scenarios = {
       fail(error) { throw error; },
     });
     const names = ['stat', 'format', 'ordinal', 'percentage', 'countLabel', 'legendItem', 'renderColorLegend',
-      'renderLegend', 'coreRule', 'selectGroup', 'table', 'selectColumns', 'showDataAudit', 'showResult', 'measuredLabel', 'showQuerySelection', 'showSources', 'inspect',
+      'renderLegend', 'coreRule', 'selectGroup', 'table', 'selectColumns', 'referenceMapDetails', 'renderReferenceMap', 'newMoleculeWarning', 'newMoleculeInsertedMessage', 'showDataAudit', 'showResult', 'measuredLabel', 'showQuerySelection', 'showSources', 'inspect',
       'updateInputType', 'updateEvidenceOptions', 'applyTransform', 'translateSVGText', 'refreshValidation', 'status', 'refreshLanguage'];
     vm.runInContext(names.map(realFunction).join('\n'), context);
     context.showResult.grouping = {groups: [group], protocol: {method: 'Butina'}};

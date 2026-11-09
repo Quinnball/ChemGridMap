@@ -36,7 +36,7 @@ async function setup() {
     fetch() { throw Error('U7 must not make network requests'); },
   });
   const names = ['format', 'ordinal', 'percentage', 'countLabel', 'table', 'stat', 'measuredLabel',
-    'showQuerySelection', 'showSources', 'showDataAudit', 'inspect', 'status', 'fail', 'refreshLanguage',
+    'showQuerySelection', 'showSources', 'referenceMapDetails', 'renderReferenceMap', 'newMoleculeWarning', 'newMoleculeInsertedMessage', 'showDataAudit', 'inspect', 'status', 'fail', 'refreshLanguage',
     'updateInputType', 'updateEvidenceOptions', 'showSourceInput', 'loadSourceInput', 'removeSourceInput',
     'loadInput', 'showInput', 'selectColumns', 'showQueryInput', 'options'];
   vm.runInContext(names.map(realFunction).join('\n'), env.context);

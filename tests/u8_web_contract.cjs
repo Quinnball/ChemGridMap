@@ -19,7 +19,7 @@ async function setup() {
     getJSON:async(url,options)=>{requests.push({url,options});return url.endsWith('/input')?input:url.endsWith('/clear')?{job}:job;},
     Blob,URL:{createObjectURL(blob){downloaded.push(blob);return 'blob:test';},revokeObjectURL(){}},
   });
-  const names=['updateNewNavigation','showQueryInput','selectColumns','loadQueryInput','newMoleculeOptions','insertNewMolecules','removeQueryInput','bindNewMolecules','newListColumns','visibleNewMolecules','newListValue','renderNewList','downloadNewList','centerOnCurrentCell','format','countLabel','percentage','table','measuredLabel','showQuerySelection','showDataAudit','showSources','status','fail','legendItem','renderColorLegend','renderLegend','colorMap','reliabilityColor','projectionSVG'];
+  const names=['updateNewNavigation','showQueryInput','selectColumns','loadQueryInput','newMoleculeOptions','insertNewMolecules','removeQueryInput','bindNewMolecules','newListColumns','visibleNewMolecules','newListValue','renderNewList','downloadNewList','centerOnCurrentCell','format','countLabel','percentage','table','measuredLabel','showQuerySelection','referenceMapDetails', 'renderReferenceMap', 'newMoleculeWarning', 'newMoleculeInsertedMessage', 'showDataAudit','showSources','status','fail','legendItem','renderColorLegend','renderLegend','colorMap','reliabilityColor','projectionSVG'];
   vm.runInContext(names.map(realFunction).join('\n'),env.context);
   env.context.bindNewMolecules();
   return {...env,$,requests,downloaded};

@@ -265,6 +265,7 @@ class AppSession:
                 upper_threshold=build_options["upper_threshold"],
                 conflict_range_threshold=build_options["conflict_range_threshold"],
                 grouping=build_options["grouping"], group_similarity=build_options["group_similarity"],
+                reference_target_id=self.reference_map_info()["target_id"],
                 **chosen)
             self.new_result, self.query_options = inserted, chosen
             self.query_frame, self.query_raw, self.query_filename = frame, raw, filename
@@ -639,9 +640,37 @@ class AppSession:
             self.group_cache[group_id] = payload
             return payload
 
+    def reference_map_info(self):
+        """参照说明仅用于界面，不改建图参数、参照报告或任何导出文件。"""
+        options = self.job.get("options", {})
+        target_id = None
+        if options.get("input_format") == "chembl":
+            parameters = self.curation.report["parameters"] if self.curation is not None else options
+            target_id = parameters.get("target_id")
+            target_id = str(target_id).strip().upper() if target_id else None
+            parts = [target_id] if target_id else []
+            columns = detect_chembl_columns(self.frame)
+            if target_id and columns["target_id"] and columns["target_name"]:
+                selected = self.frame[columns["target_id"]].fillna("").astype(str).str.strip().str.upper().eq(target_id)
+                names = sorted({str(value).strip() for value in self.frame.loc[selected, columns["target_name"]].dropna()
+                                if str(value).strip()})
+                if names:
+                    parts.append("; ".join(names))
+            if options.get("activity_type"):
+                parts.append(options["activity_type"])
+        else:
+            parts = [self.filename]
+            activity_column = options.get("value_col") or options.get("label_col")
+            if activity_column:
+                parts.append(activity_column)
+        return {"description": " · ".join(parts), "count": len(self.result.data), "target_id": target_id}
+
     def snapshot(self):
         with self.lock:
-            return dict(self.job)
+            snapshot = dict(self.job)
+            if self.result is not None:
+                snapshot["reference_map"] = self.reference_map_info()
+            return snapshot
 
     def _reference_records(self, records, options):
         """Recover selected reference strings without altering calculation records."""

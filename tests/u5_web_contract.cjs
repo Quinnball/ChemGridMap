@@ -8,10 +8,10 @@ const {runtime, realFunction} = require('./u4_web_contract.cjs');
 async function setup(names) {
   const env = await runtime();
   const $ = id => env.document.getElementById(id);
-  Object.assign(env.context, {$, URL, busy: false, queryInputInfo: null, sourceInputInfo: null,
-    job: {options: {input_format: 'chembl'}}, updateNavigation() {}, densityPreview() {},
+  Object.assign(env.context, {$, URL, busy: false, queryInputInfo: null, sourceInputInfo: null, inputInfo: null,
+    job: {options: {input_format: 'chembl'}, report: {}, molecules: 0}, updateNavigation() {}, densityPreview() {},
     fetch() { throw Error('Sources must not make network requests'); }});
-  vm.runInContext(names.map(realFunction).join('\n'), env.context);
+  vm.runInContext([...names, 'referenceMapDetails', 'newMoleculeWarning'].map(realFunction).join('\n'), env.context);
   return {...env, $};
 }
 
