@@ -108,7 +108,7 @@ const scenarios={
     }
     context.renderLegend('neighbor_evidence');assert.equal($('legend').children.filter(item=>item.dataset.evidenceCategory).length,6);
     assert.ok(!$('legend').textContent.includes(expected[language].legend));
-    assert.equal(document.querySelectorAll('[data-help]').length,58);
+    assert.equal(document.querySelectorAll('[data-help]').length,60);
   },
   async reference(){
     const {context,$}=await setup();

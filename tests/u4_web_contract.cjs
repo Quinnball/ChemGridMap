@@ -15,7 +15,7 @@ const controls = ['input-format', 'target', 'activity-type', 'compound-column', 
   'use-assumed-sigma', 'assumed-sigma', 'evidence-model', 'support-level', 'offset-display',
   'offset-min-shared', 'offset-min-difference', 'offset-sign-agreement', 'identity-conflicts',
   'lower', 'upper', 'conflict-range', 'seed', 'identity', 'structure-policy', 'detail', 'raster',
-  'color-mode', 'measurement-filter', 'group-select', 'show-neighbor-links'];
+  'color-mode', 'measurement-filter', 'group-select', 'map-core-rule', 'group-core-comparison', 'show-neighbor-links'];
 
 function decoded(text) {
   return text.replace(/&(?:amp|lt|gt|quot|apos|#39|nbsp);/g, value =>
@@ -166,6 +166,9 @@ async function runtime(options) {
   assert.ok(env.api, 'Production i18n API');
   env.context.ChemGridMapI18n = env.api;
   await env.api.ready;
+  // 新增控件的依赖函数与旧契约共享同一生产实现。
+  const coreAndSourceFunctions = ['clearSourceHighlight','renderSourceHighlight','highlightSources','renderNewBatchSources','coreRuleName','renderCoreRuleOptions','renderGroupOptions','renderCoreRuleStatus','addCoreDownloads','switchCoreRule','renderCoreComparison','loadCoreComparison'];
+  vm.runInContext(coreAndSourceFunctions.map(realFunction).join('\n'), env.context);
   return env;
 }
 

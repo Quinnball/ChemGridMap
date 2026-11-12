@@ -136,6 +136,29 @@ def build_sources(records, document_column, reference_column=None):
         int(source["year"]) if source["year"].isdigit() else float("inf"), source["id"]))
 
 
+def build_source_index(molecules, records, document_column, reference_column=None):
+    """Index distinct mapped molecules by their retained-record source.
+
+    Source grouping and metadata exactly follow :func:`build_sources`.
+    The caller owns the per-map cache; this helper never changes either frame.
+    """
+    group_column = document_column or reference_column
+    if records is None or not group_column or group_column not in records:
+        return {}
+    fields = [name for name in ("grid_row", "grid_col", "molecule_id", "molecule_identity_key")
+              if name in molecules]
+    points = {str(row["molecule_identity_key"]): row
+              for row in json.loads(molecules[fields].to_json(orient="records"))}
+    groups = records.groupby(records[group_column].map(_reference_text).str.strip(), sort=True)
+    members = {identifier: sorted(set(group.molecule_identity_key.astype(str)) & points.keys())
+               for identifier, group in groups if identifier}
+    return {source["id"]: {
+        **source, "map_molecule_count": len(members[source["id"]]),
+        "members": [points[key] for key in members[source["id"]]],
+    } for source in build_sources(records, document_column, reference_column)
+        if members[source["id"]]}
+
+
 SOURCE_LOOKUP_COLUMNS_ERROR = (
     "The source lookup file needs SMILES and ChEMBL document ID columns, "
     "as in a ChEMBL activity export."

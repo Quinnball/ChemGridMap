@@ -192,7 +192,7 @@ cluster_col, cluster_source : str, optional
     External group labels and their provenance.
 grid_refinement : {"neighbors", "none"}, default "neighbors"
     Neighbour-guided refinement mode.
-core_rule : {"coverage", "most_frequent", "fmcs"}, default "coverage"
+core_rule : {"coverage", "coverage_brics", "most_frequent", "fmcs"}, default "coverage"
     Group-core selection rule.
 core_min_coverage : float, default 0.8
     Coverage target for coverage and FMCS cores.
@@ -592,7 +592,7 @@ Tie-inclusive k-nearest-neighbour sets, excluding self.
 ## `select_core`
 
 ```python
-select_core(mols: 'Sequence[Chem.Mol]', *, min_coverage: 'float' = 0.8) -> 'Dict'
+select_core(mols: 'Sequence[Chem.Mol]', *, min_coverage: 'float' = 0.8, include_brics: 'bool' = False) -> 'Dict'
 ```
 
 Largest candidate core matching at least ``min_coverage`` of the members.
@@ -626,7 +626,7 @@ radius : int, default 2
     Morgan fingerprint radius.
 n_bits : int, default 2048
     Morgan fingerprint length.
-core_rule : {"coverage", "most_frequent", "fmcs"}, default "most_frequent"
+core_rule : {"coverage", "coverage_brics", "most_frequent", "fmcs"}, default "most_frequent"
     Group-core selection rule.
 core_min_coverage : float, default 0.8
     Coverage target for coverage and FMCS cores.
@@ -641,3 +641,84 @@ summaries : list of dict
     Per-group sizes, core choices, coverage and core evidence.
 protocol : dict
     Grouping and core-selection parameters and provenance.
+
+## `chemgridmap.cores.brics_candidate_cores`
+
+```python
+chemgridmap.cores.brics_candidate_cores(mols: 'Sequence[Chem.Mol]') -> 'tuple[list, int]'
+```
+
+Return ring-containing BRICS fragments without dummy atoms and the guard count.
+
+## `chemgridmap.cores.select_core`
+
+```python
+chemgridmap.cores.select_core(mols: 'Sequence[Chem.Mol]', *, min_coverage: 'float' = 0.8, include_brics: 'bool' = False) -> 'Dict'
+```
+
+Largest candidate core matching at least ``min_coverage`` of the members.
+
+Candidates meeting the target are ranked by heavy atoms, then coverage;
+if none meets it, the highest-coverage candidate is used. Remaining ties
+are broken by canonical SMILES.
+
+## `chemgridmap.comparison.summarize_group_core`
+
+```python
+chemgridmap.comparison.summarize_group_core(selected, member_ids, *, core_rule='coverage', core_min_coverage=0.8, fmcs_timeout=1, return_metrics=False)
+```
+
+Calculate one fixed group's core; build and interactive switching share this path.
+
+Members must be ordered with the representative first and the remaining
+members by canonical SMILES and identifier, as in the grouping protocol.
+Optional telemetry is kept outside legacy summaries to preserve run files.
+
+## `chemgridmap.inspection.build_source_index`
+
+```python
+chemgridmap.inspection.build_source_index(molecules, records, document_column, reference_column=None)
+```
+
+Index distinct mapped molecules by their retained-record source.
+
+Source grouping and metadata exactly follow :func:`build_sources`.
+The caller owns the per-map cache; this helper never changes either frame.
+
+## `chemgridmap.app.AppSession.source_members`
+
+```python
+chemgridmap.app.AppSession.source_members(self, sources, scope='reference')
+```
+
+Return a source union without rebuilding or writing any map files.
+
+## `chemgridmap.app.AppSession.set_core_rule`
+
+```python
+chemgridmap.app.AppSession.set_core_rule(self, rule)
+```
+
+Recompute only fixed-group cores; never mutate an original map or its files.
+
+## `chemgridmap.app.AppSession.group_cores`
+
+```python
+chemgridmap.app.AppSession.group_cores(self, group_id)
+```
+
+Compare four core rules for one fixed group; FMCS has a ten-second budget.
+
+## Local browser endpoints
+
+All endpoints retain the local session-token requirement; errors return HTTP 400.
+`GET /api/source-members?source=ID&source=ID` returns source metadata, distinct molecule counts
+and the union of mapped members (`grid_row`, `grid_col`, molecule ID and identity key).
+Add `scope=new` to limit the index to the current inserted molecules and their batches.
+`GET /api/inspect` adds `map_molecule_count` to retained sources and a `source_union_molecule_count`;
+inserted molecules expose `new_molecule_sources`. Possible source-lookup matches are excluded.
+`POST /api/core-rule` accepts `{"rule": "coverage_brics"}` (or `coverage`, `most_frequent`).
+It returns the current rule, build rule, group summaries, downloadable files and cache status.
+FMCS can be restored only when it was the build rule; global switching never starts new FMCS jobs.
+`GET /api/group-cores?group=ID` returns four core summaries with SVGs, timing and the comparison CSV;
+FMCS receives a fixed 10-second budget. Existing group membership and map coordinates are unchanged.

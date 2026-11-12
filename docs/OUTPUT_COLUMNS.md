@@ -1,5 +1,44 @@
 # Output columns
 
+## `core_rules/<stem>_cores_<rule>.csv`
+
+| Column | Meaning | Unit or values |
+|---|---|---|
+| `structure_group` | Structure-group identifier. | text |
+| `core_rule` | Core-selection rule. | coverage, coverage_brics, most_frequent or fmcs |
+| `core_smiles` | Selected group core SMILES. Charge-separated groups can leave representation artifacts after removal of the negative oxygen: sulfoxides may appear as `[SH+]` and N-oxides as `[nH+]`. These core strings are not neutral structures. Sulfones retain `S(=O)(=O)`, so sulfoxides and sulfones yield different cores. | SMILES |
+| `core_coverage_target` | Requested core-coverage target. | fraction 0–1 |
+| `size` | Number of original reference members in the group. | count |
+| `core_smiles_attached` | Core depiction with attachment points generated from a matching member. | SMILES |
+| `core_heavy_atoms` | Number of non-hydrogen atoms in the selected core, excluding attachment dummies. | count |
+| `core_coverage_count` | Reference members matching the core with chirality enabled. | count |
+| `core_coverage_fraction` | Matching reference members divided by group size. | fraction 0–1 |
+| `core_target_met` | Whether the coverage target is met; empty for most_frequent. | boolean or empty |
+| `candidates` | Candidates evaluated; FMCS does not enumerate this candidate pool. | count |
+| `seconds` | Elapsed core calculation time for this group. | seconds |
+| `brics_candidates` | BRICS candidates absent from the original scaffold/ring-fragment pool; only for coverage_brics. | count |
+| `brics_single_pass_members` | Members with more than 10 BRICS bonds, decomposed with singlePass=True; only for coverage_brics. | count |
+
+## `core_rules/group_<group-hash>_core_comparison.csv`
+
+| Column | Meaning | Unit or values |
+|---|---|---|
+| `structure_group` | Structure-group identifier. | text |
+| `core_rule` | Core-selection rule. | coverage, coverage_brics, most_frequent or fmcs |
+| `core_smiles` | Selected group core SMILES. Charge-separated groups can leave representation artifacts after removal of the negative oxygen: sulfoxides may appear as `[SH+]` and N-oxides as `[nH+]`. These core strings are not neutral structures. Sulfones retain `S(=O)(=O)`, so sulfoxides and sulfones yield different cores. | SMILES |
+| `core_coverage_target` | Requested core-coverage target. | fraction 0–1 |
+| `size` | Number of original reference members in the group. | count |
+| `core_smiles_attached` | Core depiction with attachment points generated from a matching member. | SMILES |
+| `core_heavy_atoms` | Number of non-hydrogen atoms in the selected core, excluding attachment dummies. | count |
+| `core_coverage_count` | Reference members matching the core with chirality enabled. | count |
+| `core_coverage_fraction` | Matching reference members divided by group size. | fraction 0–1 |
+| `core_target_met` | Whether the coverage target is met; empty for most_frequent. | boolean or empty |
+| `candidates` | Candidates evaluated; FMCS does not enumerate this candidate pool. | count |
+| `seconds` | Elapsed core calculation time for this group. | seconds |
+| `brics_candidates` | BRICS candidates absent from the original scaffold/ring-fragment pool; only for coverage_brics. | count |
+| `brics_single_pass_members` | Members with more than 10 BRICS bonds, decomposed with singlePass=True; only for coverage_brics. | count |
+| `fmcs_timed_out` | FMCS reached its fixed 10-second comparison budget; the returned result may be incomplete. | boolean |
+
 ## `document_offsets.csv`
 
 | Column | Meaning | Unit or values |
@@ -619,6 +658,18 @@
 | `structure_record_count` | Retained records using this SMILES writing. | count |
 | `standard_inchikey` | Standard InChIKey shared by the writing variants for this identity. | InChIKey |
 | `selected` | Whether this writing normalizes to the map's selected structure (the normalized form with the most records). | boolean |
+
+## Optional core-rule outputs
+
+When building with `coverage_brics`, the existing structure-member tables also use that `core_rule` value.
+Their legacy column-dictionary text remains unchanged for byte-identical default exports.
+Map-page switches write only `core_rules/<stem>_cores_<rule>.csv` and the matching `.json`.
+The JSON records the rule, build coverage target, RDKit version, each group's `structure_sha256`,
+the original run manifest SHA-256, and total elapsed seconds. Structure hashes use the grouping
+protocol's sorted canonical-structure serialization. Existing run files, manifest and ZIP are unchanged.
+The comparison CSV uses the first 12 hexadecimal digits of the group identifier SHA-256 for `<group-hash>`.
+BRICS columns are present for BRICS rule exports and in the four-rule comparison table.
+Comparison ZIPs for non-build rules also live under `core_rules/` and include the rule in their names.
 
 ## Optional own-data outputs and metadata
 

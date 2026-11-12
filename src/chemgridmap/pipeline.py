@@ -193,7 +193,7 @@ def build_grid_map(
         External group labels and their provenance.
     grid_refinement : {"neighbors", "none"}, default "neighbors"
         Neighbour-guided refinement mode.
-    core_rule : {"coverage", "most_frequent", "fmcs"}, default "coverage"
+    core_rule : {"coverage", "coverage_brics", "most_frequent", "fmcs"}, default "coverage"
         Group-core selection rule.
     core_min_coverage : float, default 0.8
         Coverage target for coverage and FMCS cores.

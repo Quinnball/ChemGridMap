@@ -335,6 +335,32 @@ COLUMNS.update({
 })
 
 
+# Optional rule comparisons have their own schema; existing export text stays fixed.
+CORE_RULE_FILES = ("core_rules/<stem>_cores_<rule>.csv",
+                   "core_rules/group_<group-hash>_core_comparison.csv")
+for _column in ("structure_group", "core_rule", "core_smiles", "core_coverage_target"):
+    COLUMNS[_column]["files"] += CORE_RULE_FILES
+COLUMNS["core_rule"]["by_file_units"] = {
+    _file: "coverage, coverage_brics, most_frequent or fmcs" for _file in CORE_RULE_FILES}
+COLUMNS.update({
+    "size": _entry(CORE_RULE_FILES, "Number of original reference members in the group.", "count"),
+    "core_smiles_attached": _entry(CORE_RULE_FILES, "Core depiction with attachment points generated from a matching member.", "SMILES"),
+    "core_heavy_atoms": _entry(CORE_RULE_FILES, "Number of non-hydrogen atoms in the selected core, excluding attachment dummies.", "count"),
+    "core_coverage_count": _entry(CORE_RULE_FILES, "Reference members matching the core with chirality enabled.", "count"),
+    "core_coverage_fraction": _entry(CORE_RULE_FILES, "Matching reference members divided by group size.", "fraction 0–1"),
+    "core_target_met": _entry(CORE_RULE_FILES, "Whether the coverage target is met; empty for most_frequent.", "boolean or empty"),
+    "candidates": _entry(CORE_RULE_FILES, "Candidates evaluated; FMCS does not enumerate this candidate pool.", "count"),
+    "seconds": _entry(CORE_RULE_FILES, "Elapsed core calculation time for this group.", "seconds"),
+    "brics_candidates": _entry(CORE_RULE_FILES, "BRICS candidates absent from the original scaffold/ring-fragment pool; only for coverage_brics.", "count"),
+    "brics_single_pass_members": _entry(CORE_RULE_FILES, "Members with more than 10 BRICS bonds, decomposed with singlePass=True; only for coverage_brics.", "count"),
+    "fmcs_timed_out": _entry((CORE_RULE_FILES[1],), "FMCS reached its fixed 10-second comparison budget; the returned result may be incomplete.", "boolean"),
+})
+
+
+def _unit(entry, filename):
+    return entry.get("by_file_units", {}).get(filename, entry["unit_or_values"])
+
+
 def describe(columns, files):
     """Return one dictionary entry per emitted column, expanding class patterns."""
     rows = []
@@ -353,7 +379,7 @@ def describe(columns, files):
             "file": files,
             "column": column,
             "description": _description(item, files),
-            "unit_or_values": item["unit_or_values"],
+            "unit_or_values": _unit(item, files),
         })
     return rows
 
@@ -367,7 +393,7 @@ def output_columns_markdown(frames=None) -> str:
         else:
             listed_files = entry["files"]
         for filename in listed_files:
-            rows.append((filename, files, _description(entry, filename), entry["unit_or_values"]))
+            rows.append((filename, files, _description(entry, filename), _unit(entry, filename)))
     if frames:
         for filename, frame in frames.items():
             describe(frame.columns, filename)
@@ -379,6 +405,16 @@ def output_columns_markdown(frames=None) -> str:
                 lines.append(f"| `{column}` | {description} | {unit} |")
         lines.append("")
     lines.extend([
+        "## Optional core-rule outputs", "",
+        "When building with `coverage_brics`, the existing structure-member tables also use that `core_rule` value.",
+        "Their legacy column-dictionary text remains unchanged for byte-identical default exports.",
+        "Map-page switches write only `core_rules/<stem>_cores_<rule>.csv` and the matching `.json`.",
+        "The JSON records the rule, build coverage target, RDKit version, each group's `structure_sha256`,",
+        "the original run manifest SHA-256, and total elapsed seconds. Structure hashes use the grouping",
+        "protocol's sorted canonical-structure serialization. Existing run files, manifest and ZIP are unchanged.",
+        "The comparison CSV uses the first 12 hexadecimal digits of the group identifier SHA-256 for `<group-hash>`.",
+        "BRICS columns are present for BRICS rule exports and in the four-rule comparison table.",
+        "Comparison ZIPs for non-build rules also live under `core_rules/` and include the rule in their names.", "",
         "## Optional own-data outputs and metadata", "",
         "Reference filenames retain the run's `<name>_` prefix and never change on insertion.",
         "New results live in `new_molecules/<input-stem>/`, with numeric suffixes for existing names.",
@@ -424,6 +460,29 @@ def api_markdown() -> str:
             f"## `{name}`", "", "```python", f"{name}{signature}", "```", "",
             documentation, "",
         ])
+    from .cores import brics_candidate_cores, select_core
+    from .comparison import summarize_group_core
+    from .inspection import build_source_index
+    from .app import AppSession
+    for value in (brics_candidate_cores, select_core, summarize_group_core, build_source_index,
+                  AppSession.source_members, AppSession.set_core_rule, AppSession.group_cores):
+        name = value.__module__ + "." + value.__qualname__
+        lines.extend([f"## `{name}`", "", "```python", f"{name}{inspect.signature(value)}", "```", "",
+                      inspect.getdoc(value) or "", ""])
+    lines.extend([
+        "## Local browser endpoints", "",
+        "All endpoints retain the local session-token requirement; errors return HTTP 400.",
+        "`GET /api/source-members?source=ID&source=ID` returns source metadata, distinct molecule counts",
+        "and the union of mapped members (`grid_row`, `grid_col`, molecule ID and identity key).",
+        "Add `scope=new` to limit the index to the current inserted molecules and their batches.",
+        "`GET /api/inspect` adds `map_molecule_count` to retained sources and a `source_union_molecule_count`;",
+        "inserted molecules expose `new_molecule_sources`. Possible source-lookup matches are excluded.",
+        "`POST /api/core-rule` accepts `{\"rule\": \"coverage_brics\"}` (or `coverage`, `most_frequent`).",
+        "It returns the current rule, build rule, group summaries, downloadable files and cache status.",
+        "FMCS can be restored only when it was the build rule; global switching never starts new FMCS jobs.",
+        "`GET /api/group-cores?group=ID` returns four core summaries with SVGs, timing and the comparison CSV;",
+        "FMCS receives a fixed 10-second budget. Existing group membership and map coordinates are unchanged.", "",
+    ])
     return "\n".join(lines)
 
 

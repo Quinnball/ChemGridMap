@@ -86,6 +86,13 @@ The browser keeps files on the computer, lets you choose CSV columns, displays
 all three reliability layers, and exports the source-record audit with the map.
 Select a structure group to highlight its members on any color layer in the grid
 or 2D projection, and see its selected core structure and coverage.
+Use the map-page **Core rule** selector to compare the most frequent scaffold,
+the default coverage core, and **coverage including BRICS fragments** without
+changing groups or coordinates. The group card's **Compare core rules** table
+also computes FMCS on demand with a 10-second budget. Rule results are cached
+and downloaded separately under `core_rules/`; original exports stay unchanged.
+The CLI accepts `--core-rule coverage_brics`, and the build form offers the same
+option. Default builds still use `coverage`.
 For your own records, choose **Generic activity records**, select the activity
 unit or a unit column, and optionally supply evidence-unit identifiers or an
 assumed σ in Advanced settings. First build the **reference map**, then use
@@ -117,6 +124,12 @@ in a new browser tab. Documents without another identifier retain their ChEMBL
 document-page link; laboratory evidence units without references are shown as
 having no available links. Inspector source-record CSV downloads and evidence
 ZIPs include the document identifiers and ChEMBL document-page URL.
+Each retained source can highlight its distinct molecules on the map; sources
+shared with the selected molecule can also be highlighted as a union. A source
+represented by only that molecule shows a note instead of a button. Uploaded
+batch identifiers highlight only the current new molecules. Source highlighting
+and structure-group highlighting are mutually exclusive. **Possible sources**
+found by structure lookup are excluded from these source counts and controls.
 
 The package also contains a CA II smoke test:
 

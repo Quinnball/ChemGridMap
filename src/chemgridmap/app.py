@@ -20,11 +20,12 @@ import webbrowser
 import zipfile
 
 import pandas as pd
+from rdkit import Chem, rdBase
 
 from . import __version__
 from .chembl import curate_chembl_activity_data, detect_chembl_columns, save_chembl_curation
 from .evidence import annotate_activity_confidence, prepare_generic_activity_records
-from .inspection import (build_sources, document_coverage, enrich_source_records,
+from .inspection import (build_sources, build_source_index, document_coverage, enrich_source_records,
                          inspect_entry, load_audit_context, offset_pair_details,
                          match_source_lookup, validate_source_lookup)
 from .pipeline import build_grid_map
@@ -32,7 +33,7 @@ from .queries import insert_new_molecules
 from .plotting import render_svg
 from .provenance import file_digests
 from .neighborhoods import neighborhood_evidence
-from .comparison import group_comparison, molecule_keys
+from .comparison import group_comparison, molecule_keys, summarize_group_core
 from .plotting import _svg_molecule_content
 from .units import validate_assumed_sigma
 
@@ -159,6 +160,12 @@ class AppSession:
         self.files = {}
         self.group_cache = {}
         self.group_detail_cache = {}
+        self.core_compute_lock = threading.Lock()
+        self.core_result = None
+        self.core_rule_cache = {}
+        self.group_core_cache = {}
+        self.current_core_rule = None
+        self.source_index_cache = {}
         self.job = {"state": "empty", "message": "Choose a CSV or open the example."}
 
     def load(self, content, filename):
@@ -230,7 +237,153 @@ class AppSession:
         return point_rows(pd.concat([reference, new], ignore_index=True))
 
     def groups(self):
-        return self.new_result.structure_groups if self.new_result is not None else self.result.structure_groups
+        self._ensure_core_state()
+        groups = self.core_rule_cache[self.current_core_rule]
+        if self.new_result is None:
+            return groups
+        counts = {g["structure_group"]: {key: g[key] for key in ("n_query_members", "n_new_members")
+                                          if key in g}
+                  for g in self.new_result.structure_groups}
+        return [{**group, **counts.get(group["structure_group"], {})} for group in groups]
+
+    def _ensure_core_state(self):
+        if self.result is None:
+            raise ValueError("Build a map first.")
+        if self.core_result is not self.result:
+            self.core_result = self.result
+            self.current_core_rule = self.job["options"]["core_rule"]
+            self.core_rule_cache = {self.current_core_rule: self.result.structure_groups}
+            self.group_core_cache = {}
+
+    @staticmethod
+    def _core_members(result, summary):
+        members = result.data[result.data.structure_group.eq(summary["structure_group"])].copy()
+        members = members.sort_values(["canonical_smiles", "comparison_id"])
+        center = members.comparison_id.eq(summary["representative_id"])
+        # Both Butina and external groups use center first, then canonical input order.
+        return pd.concat([members[center], members[~center]])
+
+    @staticmethod
+    def _calculate_group_core(result, summary, rule, target, timeout=1):
+        members = AppSession._core_members(result, summary)
+        mols = [Chem.MolFromSmiles(smiles) for smiles in members.canonical_smiles]
+        core, metrics = summarize_group_core(
+            mols, members.comparison_id.tolist(), core_rule=rule,
+            core_min_coverage=target, fmcs_timeout=timeout, return_metrics=True)
+        identity = {key: summary[key] for key in (
+            "structure_group", "size", "color", "representative_id", "representative_smiles",
+            "representative_role")}
+        return {**identity, **core, "minimum_center_similarity": summary["minimum_center_similarity"]}, metrics
+
+    def _register_core_file(self, path):
+        name = path.relative_to(Path(self.job["output_dir"])).as_posix()
+        self.files[name] = path
+        self.reference_files[name] = path
+        self.job["files"] = list(self.files)
+        return name
+
+    @staticmethod
+    def _core_table_rows(groups, metrics):
+        fields = ("structure_group", "size", "core_rule", "core_smiles", "core_smiles_attached",
+                  "core_heavy_atoms", "core_coverage_count", "core_coverage_fraction",
+                  "core_coverage_target", "core_target_met")
+        rows = []
+        for group, timing in zip(groups, metrics):
+            row = {key: group.get(key) for key in fields}
+            row.update(candidates=timing["candidates"], seconds=timing["seconds"])
+            for key in ("brics_candidates", "brics_single_pass_members"):
+                if key in group:
+                    row[key] = group[key]
+            rows.append(row)
+        return rows
+
+    def set_core_rule(self, rule):
+        """Recompute only fixed-group cores; never mutate an original map or its files."""
+        with self.core_compute_lock:
+            with self.lock:
+                self._ensure_core_state()
+                built_rule = self.job["options"]["core_rule"]
+                allowed = {"most_frequent", "coverage", "coverage_brics"}
+                if built_rule == "fmcs":
+                    allowed.add("fmcs")
+                if not isinstance(rule, str) or rule not in allowed:
+                    raise ValueError("Unknown or unavailable core rule.")
+                if not self.result.structure_groups:
+                    raise ValueError("This map has no structure groups.")
+                cached = rule in self.core_rule_cache
+                result, options = self.result, dict(self.job["options"])
+            if not cached:
+                # Chemistry runs outside the session lock, so point/inspect requests remain available.
+                started = time.perf_counter()
+                calculated = [self._calculate_group_core(
+                    result, group, rule, options["core_min_coverage"], options["fmcs_timeout"])
+                    for group in result.structure_groups]
+                summaries, metrics = map(list, zip(*calculated))
+                elapsed = time.perf_counter() - started
+                hashes = {}
+                for group in result.structure_groups:
+                    members = self._core_members(result, group).sort_values(["canonical_smiles", "comparison_id"])
+                    hashes[group["structure_group"]] = hashlib.sha256(
+                        members.canonical_smiles.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
+                with self.lock:
+                    if self.result is not result:
+                        raise ValueError("The map changed during core calculation. Try again.")
+                    directory = Path(self.job["output_dir"]) / "core_rules"
+                    directory.mkdir(exist_ok=True)
+                    stem = Path(result.output_files["structure_groups"]).name.removesuffix("_structure_groups.json")
+                    path = directory / f"{stem}_cores_{rule}.csv"
+                    pd.DataFrame(self._core_table_rows(summaries, metrics)).to_csv(
+                        path, index=False, encoding="utf-8", lineterminator="\n")
+                    self._register_core_file(path)
+                    path = directory / f"{stem}_cores_{rule}.json"
+                    metadata = {"core_rule": rule, "parameters": {"core_min_coverage": options["core_min_coverage"]},
+                                "rdkit_version": rdBase.rdkitVersion, "structure_sha256": hashes,
+                                "run_manifest_sha256": hashlib.sha256(
+                                    Path(result.output_files["run_manifest"]).read_bytes()).hexdigest(),
+                                "seconds": elapsed}
+                    path.write_text(json.dumps(metadata, indent=2, allow_nan=False), encoding="utf-8", newline="\n")
+                    self._register_core_file(path)
+                    self.core_rule_cache[rule] = summaries
+            with self.lock:
+                if self.result is not result:
+                    raise ValueError("The map changed during core calculation. Try again.")
+                self.current_core_rule = rule
+                self.group_detail_cache = {}
+                return {"rule": rule, "build_rule": built_rule, "groups": self.groups(),
+                        "files": list(self.files), "cached": cached}
+
+    def group_cores(self, group_id):
+        """Compare four core rules for one fixed group; FMCS has a ten-second budget."""
+        with self.core_compute_lock:
+            with self.lock:
+                self._ensure_core_state()
+                if group_id in self.group_core_cache:
+                    return {**self.group_core_cache[group_id], "rule": self.current_core_rule}
+                summary = next((g for g in self.result.structure_groups
+                                if g["structure_group"] == group_id), None)
+                if summary is None:
+                    raise ValueError("Unknown structure group.")
+                result = self.result
+                target = self.job["options"]["core_min_coverage"]
+            rows, cores = [], []
+            for rule in ("most_frequent", "coverage", "coverage_brics", "fmcs"):
+                group, metrics = self._calculate_group_core(result, summary, rule, target, timeout=10)
+                row = self._core_table_rows([group], [metrics])[0]
+                row["fmcs_timed_out"] = group["fmcs_timed_out"]
+                rows.append(row)
+                cores.append({**group, **metrics, "core_svg": _group_drawing(group, "core_smiles")})
+            with self.lock:
+                if self.result is not result:
+                    raise ValueError("The map changed during core calculation. Try again.")
+                directory = Path(self.job["output_dir"]) / "core_rules"
+                directory.mkdir(exist_ok=True)
+                name = "group_" + hashlib.sha256(group_id.encode()).hexdigest()[:12] + "_core_comparison.csv"
+                path = directory / name
+                pd.DataFrame(rows).to_csv(path, index=False, encoding="utf-8", lineterminator="\n")
+                payload = {"group": group_id, "cores": cores, "file": self._register_core_file(path),
+                           "fmcs_timeout": 10}
+                self.group_core_cache[group_id] = payload
+                return {**payload, "rule": self.current_core_rule}
 
     def insert_new(self, options=None):
         with self.lock:
@@ -609,9 +762,12 @@ class AppSession:
         with self.lock:
             if self.result is None:
                 raise ValueError("Build a map first.")
-            if group_id in self.group_cache:
-                return self.group_cache[group_id]
-            summary = next((g for g in self.result.structure_groups if g['structure_group'] == group_id), None)
+            self._ensure_core_state()
+            cache_key = (self.current_core_rule, group_id)
+            if cache_key in self.group_cache:
+                return self.group_cache[cache_key]
+            summary = next((g for g in self.core_rule_cache[self.current_core_rule]
+                            if g['structure_group'] == group_id), None)
             if summary is None:
                 raise ValueError("Unknown structure group.")
             selected, svg, atom_audit = group_comparison(self.result.data, summary)
@@ -621,23 +777,31 @@ class AppSession:
                        'members': json_rows(members), 'selected_count': len(selected),
                        'selection_rule': 'Representative first; then scaffold, canonical SMILES and identifier. At most 12 cards; all members are exported.',
                        'atom_matches': atom_audit}
+            protocol = self.result.grouping_protocol
+            is_build_rule = self.current_core_rule == self.job["options"]["core_rule"]
+            if not is_build_rule:
+                protocol = {**protocol, "core_rule": self.current_core_rule,
+                            "core_min_coverage": summary["core_coverage_target"]}
             files = {'comparison.svg': svg.encode(), 'members.csv': members.to_csv(
                          index=False, lineterminator="\n").encode(),
                      'selected_members.csv': selected.to_csv(
                          index=False, lineterminator="\n").encode(),
                      'atom_matches.json': json.dumps(atom_audit, indent=2).encode(),
-                     'group_summary.json': json.dumps({'summary': summary, 'protocol': self.result.grouping_protocol}, indent=2).encode()}
+                     'group_summary.json': json.dumps({'summary': summary, 'protocol': protocol}, indent=2).encode()}
             digests = {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}
             files['file_digests.json'] = json.dumps(digests, indent=2).encode()
             name = 'comparison_' + hashlib.sha256(group_id.encode()).hexdigest()[:12] + '.zip'
+            if not is_build_rule:
+                name = 'core_rules/' + name.removesuffix('.zip') + '_' + self.current_core_rule + '.zip'
             path = Path(self.job['output_dir']) / name
+            path.parent.mkdir(exist_ok=True)
             with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as archive:
                 for filename, content in files.items():
                     archive.writestr(filename, content)
             self.files[name] = path
             self.reference_files[name] = path
             payload['archive'] = name
-            self.group_cache[group_id] = payload
+            self.group_cache[cache_key] = payload
             return payload
 
     def reference_map_info(self):
@@ -671,6 +835,71 @@ class AppSession:
             if self.result is not None:
                 snapshot["reference_map"] = self.reference_map_info()
             return snapshot
+
+    def _new_source_records(self):
+        """Use retained measurements, or uploaded batches for unmeasured molecules."""
+        options = self.query_options or {}
+        column = options.get("document_column")
+        if self.new_result is None or not column:
+            return pd.DataFrame(), column
+        if options.get("value_col"):
+            records = self.new_result.records.copy()
+            if not records.empty:
+                records["molecule_identity_key"] = "query:" + records.query_id.astype(str)
+            return records, column
+        checks = self.new_result.check
+        records = self.query_frame.copy().reset_index(drop=True)
+        identities = {}
+        for row in checks.itertuples(index=False):
+            if row.status == "mapped":
+                identities[row.source_row] = "query:" + str(row.query_id)
+            elif row.status == "duplicate_query" and not row.reference_id:
+                identities[row.source_row] = "query:" + str(row.first_query_id)
+        records["molecule_identity_key"] = records.index.map(identities)
+        return records.dropna(subset=["molecule_identity_key"]), column
+
+    def _source_index(self, scope="reference"):
+        if self.result is None:
+            raise ValueError("Build a map first.")
+        if scope not in {"reference", "new"}:
+            raise ValueError("Unknown source scope.")
+        owner = self.result if scope == "reference" else self.new_result
+        cached = self.source_index_cache.get(scope)
+        if cached is not None and cached[0] is owner:
+            return cached[1]
+        if scope == "new":
+            records, document = self._new_source_records()
+            molecules = owner.data if owner is not None else pd.DataFrame()
+            reference = None
+        else:
+            options = self.job["options"]
+            records = self.curation.retained_records if self.curation is not None else self.generic_records
+            document = (self.curation.report["detected_columns"].get("document_id")
+                        if self.curation is not None else options["document_column"])
+            reference = options.get("reference_column")
+            if records is not None:
+                records = self._reference_records(records, options)
+            molecules = self.result.data
+        index = build_source_index(molecules, records, document, reference)
+        self.source_index_cache[scope] = (owner, index)
+        return index
+
+    def source_members(self, sources, scope="reference"):
+        """Return a source union without rebuilding or writing any map files."""
+        with self.lock:
+            index = self._source_index(scope)
+            identifiers = list(dict.fromkeys(str(source).strip() for source in sources))
+            if not identifiers:
+                raise ValueError("Choose at least one source.")
+            for identifier in identifiers:
+                if identifier not in index:
+                    raise ValueError(f"Unknown source: {identifier}.")
+            members = {member["molecule_identity_key"]: member for identifier in identifiers
+                       for member in index[identifier]["members"]}
+            return {"sources": [{key: value for key, value in index[identifier].items() if key != "members"}
+                                for identifier in identifiers],
+                    "map_molecule_count": len(members), "scope": scope,
+                    "members": [members[key] for key in sorted(members)]}
 
     def _reference_records(self, records, options):
         """Recover selected reference strings without altering calculation records."""
@@ -797,6 +1026,21 @@ class AppSession:
                               "records": json_rows(records), "record_columns": records.columns.tolist(),
                               "total_records": len(records), "summary": {
                                   "reference_support_assessed": self.new_result.report["reference_support_assessed"]}}
+                    identity = str(query.molecule_identity_key)
+                    detail["new_molecule_sources"] = [
+                        {key: value for key, value in source.items() if key != "members"}
+                        for source in self._source_index("new").values()
+                        if any(str(member["molecule_identity_key"]) == identity for member in source["members"])]
+                    group = next((group for group in self.groups()
+                                  if group["structure_group"] == query.structure_group), None)
+                    if group is not None:
+                        pattern = (Chem.MolFromSmarts(group["core_smarts"]) if group.get("core_smarts")
+                                   else Chem.MolFromSmiles(group["core_smiles"]) if group["core_smiles"] else None)
+                        detail["molecule"]["contains_group_core"] = bool(
+                            pattern is not None and Chem.MolFromSmiles(query.canonical_smiles).HasSubstructMatch(
+                                pattern, useChirality=True))
+                    detail["molecule"]["contains_group_core_rule"] = self.current_core_rule
+                    detail["group_core"] = group
                     if query_match is not None:
                         detail["query_match"] = query_match
                     return detail, records
@@ -833,6 +1077,11 @@ class AppSession:
                                if curation is not None else options["document_column"])
             source_records = self._reference_records(records, options)
             sources = build_sources(source_records, document_column, options.get("reference_column"))
+            index = self._source_index()
+            sources = [{**source, "map_molecule_count": index.get(source["id"], {}).get("map_molecule_count", 0)}
+                       for source in sources]
+            source_union_count = len({member["molecule_identity_key"] for source in sources
+                                      for member in index.get(source["id"], {}).get("members", [])})
             # Keep the on-screen record schema intact; the four appended fields are downloads.
             display_records = records
             if not records.empty:
@@ -875,6 +1124,7 @@ class AppSession:
             self.reference_files[archive.name] = archive
             detail = {"molecule": json_rows(chosen)[0], "summary": summary,
                     "sources": sources,
+                    "source_union_molecule_count": source_union_count,
                     "records": json_rows(display_records if self.generic_records is not None else display_records.head(100)),
                     "total_records": len(records),
                     "neighbors": json_rows(neighbor_table), "audit_file": archive.name,
@@ -895,6 +1145,8 @@ class AppSession:
                         "own_median", "reference_median", "median_difference", "own_n_records")}
             if self.new_result is not None:
                 detail["molecule"]["measurement_status"] = "measured"
+            detail["group_core"] = next((group for group in self.groups()
+                                         if group["structure_group"] == selected.get("structure_group")), None)
             return detail, records
 
 
@@ -945,7 +1197,7 @@ def validate_options(options):
                "structure_policy": {"auto", "parent", "as-recorded"},
                "molecule_identity": {"auto", "parent-id", "canonical-smiles"},
                "grid_refinement": {"none", "neighbors"},
-               "core_rule": {"most_frequent", "coverage", "fmcs"},
+               "core_rule": {"most_frequent", "coverage", "coverage_brics", "fmcs"},
                "evidence_model": {"gaussian", "exclude-flagged"},
                "offset_display": {"uncertain", "none"},
                "identity_conflicts": {"error", "exclude"}}
@@ -1072,9 +1324,15 @@ class LocalHandler(BaseHTTPRequestHandler):
             elif path == "/api/groups":
                 if session.result is None:
                     raise ValueError("Build a map first.")
-                self.send({'groups': session.groups(), 'protocol': session.result.grouping_protocol})
+                self.send({'groups': session.groups(), 'protocol': session.result.grouping_protocol,
+                           'rule': session.current_core_rule, 'build_rule': session.job['options']['core_rule']})
+            elif path == "/api/source-members":
+                query = parse_qs(parsed.query)
+                self.send(session.source_members(query.get("source", []), query.get("scope", ["reference"])[0]))
             elif path == "/api/group":
                 self.send(session.group_detail(parse_qs(parsed.query).get('group', [''])[0]))
+            elif path == "/api/group-cores":
+                self.send(session.group_cores(parse_qs(parsed.query).get('group', [''])[0]))
             elif path == "/api/compare":
                 self.send(session.compare_group(parse_qs(parsed.query).get('group', [''])[0]))
             elif path == "/api/file":
@@ -1130,6 +1388,8 @@ class LocalHandler(BaseHTTPRequestHandler):
             elif path == "/api/build":
                 session.start(json.loads(content))
                 self.send(session.snapshot(), status=202)
+            elif path == "/api/core-rule":
+                self.send(session.set_core_rule(json.loads(content).get("rule")))
             elif path == "/api/shutdown":
                 if session.snapshot()["state"] == "running":
                     raise ValueError("Wait for the current map to finish before closing the app.")

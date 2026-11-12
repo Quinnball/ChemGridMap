@@ -81,6 +81,9 @@ details { margin-top: 18px; }summary { font-size: 12px; font-weight: bold; paddi
 #map-stage .reference-evidence-faded { opacity: .25; }
 #map-stage .group-highlight>rect, #map-stage circle.group-highlight { stroke: #172536 !important; stroke-width: calc(2.5 * var(--zoom-inverse, 1)) !important; stroke-opacity: 1 !important; }
 #map-stage .group-faded { opacity: .2; }
+#map-stage .source-highlight { opacity: 1; }
+.source-highlight-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 15px; font-size: 12px; background: #f1eef6; overflow-wrap: anywhere; }
+.source-highlight-status button { flex-shrink: 0; }
 #map-stage>svg { overflow: visible; }
 #map-stage g:hover>rect, #map-stage circle:hover { stroke: #193e91; stroke-width: calc(2 * var(--zoom-inverse, 1)); }
 #map-viewport.color-overview g[data-grid-row]>g { display: none; }
@@ -125,7 +128,8 @@ footer { display: flex; justify-content: space-between; gap: 15px; padding: 18px
 #map-stage .neighbor-shared>rect, #map-stage circle.neighbor-shared, #map-stage [data-outline=shared] { stroke: #0072B2 !important; stroke-width: calc(2.5 * var(--zoom-inverse, 1)) !important; stroke-opacity: 1; }
 #map-stage .neighbor-grid_only>rect, #map-stage circle.neighbor-grid_only, #map-stage [data-outline=grid_only] { stroke: #D55E00 !important; stroke-width: calc(2.5 * var(--zoom-inverse, 1)) !important; stroke-dasharray: calc(6 * var(--zoom-inverse, 1)) calc(3 * var(--zoom-inverse, 1)); stroke-opacity: 1; }
 #map-stage .neighbor-representation_only>rect, #map-stage circle.neighbor-representation_only, #map-stage [data-outline=representation_only] { stroke: #7A5195 !important; stroke-width: calc(2.5 * var(--zoom-inverse, 1)) !important; stroke-dasharray: calc(1.5 * var(--zoom-inverse, 1)) calc(2.5 * var(--zoom-inverse, 1)); stroke-linecap: round; stroke-opacity: 1; }
-#map-stage g.selected-cell>rect, #map-stage circle.selected-cell, #map-stage [data-outline=selected] { stroke: #193e91 !important; stroke-width: calc(3.5 * var(--zoom-inverse, 1)) !important; stroke-opacity: 1 !important; stroke-dasharray: none; }
+#map-stage .source-highlight>rect, #map-stage circle.source-highlight { stroke: #372d54 !important; stroke-width: calc(2.5 * var(--zoom-inverse, 1)) !important; stroke-dasharray: calc(6 * var(--zoom-inverse, 1)) calc(3 * var(--zoom-inverse, 1)) !important; stroke-opacity: 1 !important; }
+#map-stage g.selected-cell>rect, #map-stage circle.selected-cell, #map-stage [data-outline=selected] { stroke: #193e91 !important; stroke-width: calc(3.5 * var(--zoom-inverse, 1)) !important; stroke-opacity: 1 !important; stroke-dasharray: none !important; }
 @media(max-width:760px) { .core-summary { grid-template-columns: 1fr 1fr; }.core-summary>div { grid-column: 1 / -1; }.group-controls>label { flex: 1 1 40%; }.group-controls>button { width: 100%; } }
 
 /* Local language controls and help never alter input values or map data. */
@@ -135,6 +139,15 @@ footer { display: flex; justify-content: space-between; gap: 15px; padding: 18px
 .language-switch>span { opacity: .5; }
 .parameter-help { display: inline-flex; width: 15px; height: 15px; min-width: 15px; align-items: center; justify-content: center; padding: 0; margin-left: 5px; border: 1px solid currentColor; border-radius: 50%; font: 10px/1 var(--sans); color: var(--muted); vertical-align: 1px; opacity: .5; cursor: help; }
 .parameter-help:hover, .parameter-help:focus { opacity: 1; color: var(--green); }
+.group-core-card { flex-wrap: wrap; max-width: 860px; }
+#group-core-comparison { flex: 1 1 100%; min-width: 0; }
+#group-core-comparison summary { cursor: pointer; }
+#core-comparison-table table { font-size: 11px; }
+#core-comparison-table td { white-space: normal; min-width: 75px; }
+#core-comparison-table .core-comparison-image { min-width: 120px; width: 140px; }
+.core-comparison-image svg { width: 140px; height: 100px; }
+.current-core-rule { background: #edf4e8; }
+#core-rule-status { flex-basis: 100%; }
 .checkbox .parameter-help { flex: 0 0 15px; margin-left: 0; }
 .parameter-tooltip { position: fixed; z-index: 10000; width: max-content; max-width: min(320px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; padding: 11px 13px; background: #183e34; color: #fff; border: 1px solid #426759; border-radius: 7px; box-shadow: 0 6px 24px #173e3438; font: 12px/1.6 var(--sans); overflow-wrap: anywhere; white-space: pre-line; }
 html[lang="zh-CN"] .eyebrow, html[lang="zh-CN"] .brand-tag { letter-spacing: .08em; }

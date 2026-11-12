@@ -4,6 +4,7 @@
 from chemgridmap.inspection import (
     load_documents, normalize_doi, reference_link, build_sources,
     document_coverage, enrich_source_records,
+    build_source_index,
 )
 
 load_documents() -> dict
@@ -12,6 +13,7 @@ reference_link(value) -> dict | None
 build_sources(records, document_column, reference_column=None) -> list[dict]
 document_coverage(sources) -> dict
 enrich_source_records(records, document_column=None) -> pandas.DataFrame
+build_source_index(molecules, records, document_column, reference_column=None) -> dict
 ```
 
 `load_documents` lazily reads the bundled ChEMBL 37 document table and caches
@@ -46,6 +48,39 @@ specified, `document_chembl_id` is used when present. The helper is intended
 for inspector CSV and evidence-ZIP downloads, separate from map output files.
 Existing same-named input fields stay in their original positions; the appended
 fields then have repeated CSV headings. The on-screen record table keeps its original schema.
+
+## Highlight molecules from retained sources
+
+`build_source_index` groups the **retained records** with exactly the same
+column choice and `_reference_text(value).strip()` normalization as
+`build_sources`: ChEMBL document ID, a selected generic document/batch column,
+or the reference-column fallback. A molecule belongs to a source if at least
+one retained record has that identifier. Counts include only distinct mapped
+reference molecules; excluded records never contribute. The source metadata
+(`doc_type`, journal, year and links) comes from `build_sources`.
+
+The browser builds this index lazily once per reference map. Its
+`GET /api/source-members?source=ID` response contains `sources`,
+`map_molecule_count` and `members` with grid coordinates and identifiers.
+Repeated `source` parameters form a union. Unknown sources or a missing map
+return HTTP 400. Inspector sources gain `map_molecule_count`, and the inspector
+also supplies `source_union_molecule_count` for the shared-source button.
+
+Source highlighting dims other molecules and uses a dark dashed outline in
+the grid and projection. It replaces structure-group highlighting, preserves
+the selected-cell outline and provides an explicit clear button. Rebuilding,
+inserting or removing new molecules clears it.
+
+For inserted molecules, `scope=new` uses only the current inserted population.
+Measured batches use retained measurement records; unmeasured batches use the
+selected uploaded batch/document column. Duplicate structures count once and
+reference matches do not become new molecules. The new-molecule inspector
+exposes `new_molecule_sources`; replacing/removing the upload invalidates that
+separate index. No original export is rewritten by either kind of highlight.
+
+The possible-source lookup described below identifies structural matches,
+not retained-record provenance, and therefore never supplies highlight buttons
+or contributes to this index.
 
 ## Optional source lookup file
 

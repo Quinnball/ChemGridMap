@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add retained-source highlighting with distinct mapped-molecule counts,
+  source unions and separate inserted-molecule batches on all map layers.
+- Add the optional `coverage_brics` core rule, cached map-page rule switches,
+  and per-group comparisons with a fixed 10-second FMCS budget. Keep reference
+  groups, coordinates and existing exports unchanged; save rule outputs under
+  `core_rules/`, with bilingual controls and help.
+
 - Fix reference SVG display after inserting new molecules, bilingual control
   labels and modal help. Show the selected new molecule’s similar references
   and placement link, clarify signed comparisons and export excluded

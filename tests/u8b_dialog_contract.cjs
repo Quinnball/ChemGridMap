@@ -10,7 +10,7 @@ async function labels() {
     ['new-relation-col', 's.058'], ['new-document-col', 's.056'], ['new-label-col', 'u8.labelColumn'],
     ['new-class-filter', 'u8.categoryFilter'], ['new-label-filter', 'u8.labelFilter'],
   ]);
-  assert.equal(document.querySelectorAll('[data-help]').length, 58);
+  assert.equal(document.querySelectorAll('[data-help]').length, 60);
   assert.equal(document.querySelectorAll('dialog [data-help]').length, expected.size);
   for (const language of ['en', 'zh', 'en']) {
     api.setLanguage(language);

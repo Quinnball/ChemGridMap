@@ -35,7 +35,7 @@ const measured = {molecule_id: 'CHEMBL538536', molecule_identity_key: 'CHEMBL118
 const query = {query_id: 'Q1', molecule_id: 'Q1', structure_group: 'G161', measurement_status: 'not_measured',
   nearest_measured_id: 'CHEMBL1189346', nearest_measured_similarity: .8};
 const group = {structure_group: 'G161', size: 1, core_smiles: 'c1ccccc1', core_coverage_count: 1, core_exact_scaffold_count: 1};
-const context = vm.createContext({$, document, ChemGridMapI18n:i18n, newMolecules:null, points: [measured, query], structureGroups: [group],
+const context = vm.createContext({$, document, t:i18n.t, ChemGridMapI18n:i18n, newMolecules:null, points: [measured, query], structureGroups: [group],
   highlightedGroup: '', groupRequestNumber: 0, job: {options: {input_format: 'molecule'}, molecules: 889,
     report: {input_rows: 1100, retained_activity_records: 1100, repeated_conflicted_molecules: 17}},
   transform: {s: 1, x: 0, y: 0}, view: 'grid', tileWidth: 100, hasStructures: false,
@@ -51,9 +51,9 @@ $('color-mode').value = 'activity'; $('measurement-filter').value = 'all';
 $('measurement-filter').selectedOptions = [{textContent: 'All molecules'}];
 const names = ['stat', 'countLabel', 'measuredLabel', 'showQuerySelection', 'selectGroup',
   'format', 'percentage', 'legendItem', 'renderLegend', 'applyTransform', 'showDataAudit',
-  'showSourceInput', 'loadInput', 'showInput', 'selectColumns', 'showSources'];
+  'showSourceInput', 'loadInput', 'showInput', 'selectColumns', 'showSources', 'renderNewBatchSources', 'clearSourceHighlight', 'highlightSources', 'loadCoreComparison'];
 const summaryBody = fragment('showResult', '  const report = job.report;', "  $('summary').hidden = false;");
-const dropdownBody = fragment('showResult', "  $('group-select').replaceChildren();", "  $('group-select').value = highlightedGroup;");
+const dropdownBody = fragment('renderGroupOptions', "  $('group-select').replaceChildren();", "  $('group-select').value = highlightedGroup;");
 const inspectorBody = fragment('inspect', '    const group = structureGroups.find', '    const wasClosed');
 const inspectorTitle = realFunction('inspect').split('\n').find(line => line.includes("$('selected-id').textContent ="));
 const outlineBody = fragment('colorMap', "    const unmeasured = point.measurement_status", '    let fill');

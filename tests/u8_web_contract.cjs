@@ -30,7 +30,7 @@ const scenarios={
     assert.equal($('query-csv').closest('form').id,'new-molecules-form');
     assert.equal($('query-smiles-col').hasAttribute('required'),true);
     assert.equal($('options').querySelector('#query-csv'),null);
-    assert.equal(document.querySelectorAll('[data-help]').length,58);
+    assert.equal(document.querySelectorAll('[data-help]').length,60);
     for(const language of ['en','zh']){
       api.setLanguage(language);context.updateNewNavigation();$('open-new-molecules').click();assert.equal($('new-molecules-dialog').open,true);
       assert.equal($('open-new-molecules').textContent,api.t('u8.add'));$('new-molecules-dialog').close();

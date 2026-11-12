@@ -9,6 +9,7 @@ import html
 import json
 from pathlib import Path
 import re
+import time
 
 import numpy as np
 import pandas as pd
@@ -49,6 +50,72 @@ def fingerprint_distances(smiles, radius=2, n_bits=2048):
     return mols, distances
 
 
+def summarize_group_core(selected, member_ids, *, core_rule="coverage", core_min_coverage=0.8,
+                         fmcs_timeout=1, return_metrics=False):
+    """Calculate one fixed group's core; build and interactive switching share this path.
+
+    Members must be ordered with the representative first and the remaining
+    members by canonical SMILES and identifier, as in the grouping protocol.
+    Optional telemetry is kept outside legacy summaries to preserve run files.
+    """
+    if core_rule not in {"most_frequent", "coverage", "coverage_brics", "fmcs"}:
+        raise ValueError("Unknown core rule.")
+    started = time.perf_counter()
+    scaffolds = [MurckoScaffold.MurckoScaffoldSmiles(mol=m, includeChirality=True) for m in selected]
+    counts = Counter(s for s in scaffolds if s)
+    ranked = sorted(counts, key=lambda s: (-counts[s], -Chem.MolFromSmiles(s).GetNumHeavyAtoms(), s))
+    most_frequent = ranked[0] if ranked else ""
+    frequent_pattern = Chem.MolFromSmiles(most_frequent) if most_frequent else None
+    frequent_matched = [bool(frequent_pattern and m.HasSubstructMatch(frequent_pattern, useChirality=True))
+                        for m in selected]
+    if core_rule == "coverage_brics" or (core_rule == "coverage" and most_frequent):
+        choice = select_core(selected, min_coverage=core_min_coverage, include_brics=core_rule == "coverage_brics")
+        core, matched = choice["core_smiles"], choice["matched"]
+    elif core_rule == "fmcs":
+        choice = mcs_core(selected, min_coverage=core_min_coverage, timeout=int(fmcs_timeout))
+        core, matched = choice["core_smiles"], [
+            bool(pattern is not None and mol.HasSubstructMatch(pattern, useChirality=True))
+            for mol in selected
+        ] if (pattern := Chem.MolFromSmarts(choice["core_smarts"])) is not None else [False] * len(selected)
+    else:
+        choice, core, matched = None, most_frequent, frequent_matched
+    covered = sum(matched)
+    summary = {
+        "core_smiles": core, "core_smiles_attached": choice.get("core_smiles_attached", "") if choice else "",
+        "core_smiles_attached_source": (
+            choice.get("core_smiles_attached_source", "") if choice else ""
+        ),
+        "core_exact_scaffold_count": counts.get(core, 0),
+        "core_coverage_count": covered, "core_coverage_fraction": covered / len(selected),
+        "core_member_ids": [key for key, yes in zip(member_ids, matched) if yes],
+        "core_rule": core_rule,
+        "core_heavy_atoms": (
+            int(choice["core_heavy_atoms"]) if core_rule == "fmcs"
+            else Chem.MolFromSmiles(core).GetNumHeavyAtoms() if core else 0
+        ),
+        "core_smarts": choice.get("core_smarts") if choice else None,
+        "core_coverage_target": core_min_coverage if core_rule in {"coverage", "coverage_brics", "fmcs"} else None,
+        "core_target_met": (
+            bool(choice["target_met"]) if core_rule in {"coverage", "coverage_brics"} and choice
+            else bool(choice["coverage_fraction"] >= core_min_coverage) if core_rule == "fmcs" and choice
+            else None
+        ),
+        "fmcs_timed_out": bool(choice.get("timed_out", False)) if core_rule == "fmcs" and choice else False,
+        "most_frequent_scaffold": most_frequent,
+        "most_frequent_scaffold_coverage_count": sum(frequent_matched),
+        "distinct_scaffolds": len(counts), "acyclic_members": scaffolds.count(""),
+        "core_status": "no ring scaffold" if not core else "selected scaffold has majority coverage" if covered > len(selected) / 2 else "selected scaffold has no majority coverage",
+        "scaffold_counts": [{"smiles": s, "count": counts[s]} for s in ranked],
+    }
+    metrics = {"candidates": choice.get("candidates", 0) if choice else len(counts),
+               "seconds": time.perf_counter() - started}
+    if core_rule == "coverage_brics":
+        summary.update(candidates=metrics["candidates"],
+                       brics_candidates=choice.get("brics_candidates", 0) if choice else 0,
+                       brics_single_pass_members=choice.get("brics_single_pass_members", 0) if choice else 0)
+    return (summary, metrics) if return_metrics else summary
+
+
 def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=None,
                       radius=2, n_bits=2048, core_rule="most_frequent", core_min_coverage=0.8,
                       fmcs_timeout=1):
@@ -71,7 +138,7 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
         Morgan fingerprint radius.
     n_bits : int, default 2048
         Morgan fingerprint length.
-    core_rule : {"coverage", "most_frequent", "fmcs"}, default "most_frequent"
+    core_rule : {"coverage", "coverage_brics", "most_frequent", "fmcs"}, default "most_frequent"
         Group-core selection rule.
     core_min_coverage : float, default 0.8
         Coverage target for coverage and FMCS cores.
@@ -89,8 +156,8 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
     """
     if not 0 < similarity <= 1:
         raise ValueError("Group similarity must be in (0, 1].")
-    if core_rule not in {"most_frequent", "coverage", "fmcs"}:
-        raise ValueError("core_rule must be 'most_frequent', 'coverage' or 'fmcs'.")
+    if core_rule not in {"most_frequent", "coverage", "coverage_brics", "fmcs"}:
+        raise ValueError("core_rule must be 'most_frequent', 'coverage', 'coverage_brics' or 'fmcs'.")
     if int(fmcs_timeout) < 1:
         raise ValueError("fmcs_timeout must be a positive integer.")
     if not 0 < core_min_coverage <= 1:
@@ -123,25 +190,10 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
     summaries = []
     for rank, (label, indices) in enumerate(clusters):
         selected = [mols[i] for i in indices]
+        core_summary = summarize_group_core(
+            selected, [keys[order[i]] for i in indices], core_rule=core_rule,
+            core_min_coverage=core_min_coverage, fmcs_timeout=fmcs_timeout)
         scaffolds = [MurckoScaffold.MurckoScaffoldSmiles(mol=m, includeChirality=True) for m in selected]
-        counts = Counter(s for s in scaffolds if s)
-        ranked = sorted(counts, key=lambda s: (-counts[s], -Chem.MolFromSmiles(s).GetNumHeavyAtoms(), s))
-        most_frequent = ranked[0] if ranked else ""
-        frequent_pattern = Chem.MolFromSmiles(most_frequent) if most_frequent else None
-        frequent_matched = [bool(frequent_pattern and m.HasSubstructMatch(frequent_pattern, useChirality=True))
-                            for m in selected]
-        if core_rule == "coverage" and most_frequent:
-            choice = select_core(selected, min_coverage=core_min_coverage)
-            core, matched = choice["core_smiles"], choice["matched"]
-        elif core_rule == "fmcs":
-            choice = mcs_core(selected, min_coverage=core_min_coverage, timeout=int(fmcs_timeout))
-            core, matched = choice["core_smiles"], [
-                bool(pattern is not None and mol.HasSubstructMatch(pattern, useChirality=True))
-                for mol in selected
-            ] if (pattern := Chem.MolFromSmarts(choice["core_smarts"])) is not None else [False] * len(selected)
-        else:
-            choice, core, matched = None, most_frequent, frequent_matched
-        covered = sum(matched)
         original_positions = [order[i] for i in indices]
         color = GROUP_COLORS[rank % len(GROUP_COLORS)]
         frame.loc[original_positions, "structure_group"] = label
@@ -152,31 +204,7 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
             "representative_id": keys[order[indices[0]]],
             "representative_smiles": str(ordered.canonical_smiles.iloc[indices[0]]),
             "representative_role": "group medoid" if cluster_col else "Butina center",
-            "core_smiles": core, "core_smiles_attached": choice.get("core_smiles_attached", "") if choice else "",
-            "core_smiles_attached_source": (
-                choice.get("core_smiles_attached_source", "") if choice else ""
-            ),
-            "core_exact_scaffold_count": counts.get(core, 0),
-            "core_coverage_count": covered, "core_coverage_fraction": covered / len(indices),
-            "core_member_ids": [keys[order[i]] for i, yes in zip(indices, matched) if yes],
-            "core_rule": core_rule,
-            "core_heavy_atoms": (
-                int(choice["core_heavy_atoms"]) if core_rule == "fmcs"
-                else Chem.MolFromSmiles(core).GetNumHeavyAtoms() if core else 0
-            ),
-            "core_smarts": choice.get("core_smarts") if choice else None,
-            "core_coverage_target": core_min_coverage if core_rule in {"coverage", "fmcs"} else None,
-            "core_target_met": (
-                bool(choice["target_met"]) if core_rule == "coverage" and choice
-                else bool(choice["coverage_fraction"] >= core_min_coverage) if core_rule == "fmcs" and choice
-                else None
-            ),
-            "fmcs_timed_out": bool(choice.get("timed_out", False)) if core_rule == "fmcs" and choice else False,
-            "most_frequent_scaffold": most_frequent,
-            "most_frequent_scaffold_coverage_count": sum(frequent_matched),
-            "distinct_scaffolds": len(counts), "acyclic_members": scaffolds.count(""),
-            "core_status": "no ring scaffold" if not core else "selected scaffold has majority coverage" if covered > len(indices) / 2 else "selected scaffold has no majority coverage",
-            "scaffold_counts": [{"smiles": s, "count": counts[s]} for s in ranked],
+            **core_summary,
             "minimum_center_similarity": float(1 - distances[indices[0], indices].max()),
         })
     protocol = {"method": "external" if cluster_col else "RDKit Butina", "source": cluster_source if cluster_col else "normalized molecular structures",
@@ -188,11 +216,15 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
                 "core_rule": ("FMCS matching at least "
                               f"{core_min_coverage:.0%} of members; timeout {int(fmcs_timeout)} s"
                               if core_rule == "fmcs" else
+                              "largest member scaffold, scaffold-network ring fragment or BRICS fragment "
+                              "(ring-containing, dummy atoms removed) matching at least "
+                              f"{core_min_coverage:.0%} of members; otherwise the highest-coverage candidate"
+                              if core_rule == "coverage_brics" else
                               "largest member scaffold or scaffold-network ring fragment matching at least "
                               f"{core_min_coverage:.0%} of members; otherwise the highest-coverage candidate"
                               if core_rule == "coverage" else
                               "most frequent nonempty exact scaffold; ties: heavy atoms descending, then SMILES"),
-                "core_min_coverage": core_min_coverage if core_rule in {"coverage", "fmcs"} else None,
+                "core_min_coverage": core_min_coverage if core_rule in {"coverage", "coverage_brics", "fmcs"} else None,
                 "fmcs_timeout": int(fmcs_timeout) if core_rule == "fmcs" else None,
                 "coverage_rule": "explicit substructure matches with chirality; not inferred from cluster membership",
                 "interpretation": "Groups are representation- and threshold-dependent, not chemical ground truth. Scaffold summaries do not explain every fingerprint bit. Colors may repeat; use group IDs.",

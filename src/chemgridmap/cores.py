@@ -13,7 +13,7 @@ import time
 from typing import Dict, Sequence
 
 from rdkit import Chem, rdBase
-from rdkit.Chem import rdFMCS
+from rdkit.Chem import BRICS, rdFMCS
 from rdkit.Chem.Scaffolds import MurckoScaffold, rdScaffoldNetwork
 
 
@@ -51,6 +51,29 @@ def candidate_cores(mols: Sequence[Chem.Mol]) -> list:
 
 def _coverage(pattern: Chem.Mol, mols: Sequence[Chem.Mol]) -> list:
     return [bool(m.HasSubstructMatch(pattern, useChirality=True)) for m in mols]
+
+
+def brics_candidate_cores(mols: Sequence[Chem.Mol]) -> tuple[list, int]:
+    """Return ring-containing BRICS fragments without dummy atoms and the guard count."""
+    found, single_pass_members = set(), 0
+    for mol in mols:
+        single_pass = len(list(BRICS.FindBRICSBonds(mol))) > 10
+        single_pass_members += int(single_pass)
+        fragments = BRICS.BRICSDecompose(
+            mol, keepNonLeafNodes=True, returnMols=True, singlePass=single_pass)
+        for fragment in fragments:
+            clean = Chem.RWMol(fragment)
+            for index in reversed([atom.GetIdx() for atom in clean.GetAtoms()
+                                   if atom.GetAtomicNum() == 0]):
+                clean.RemoveAtom(index)
+            clean = clean.GetMol()
+            try:
+                Chem.SanitizeMol(clean)
+            except Exception:
+                continue
+            if clean.GetRingInfo().NumRings():
+                found.add(Chem.MolToSmiles(clean, isomericSmiles=True))
+    return sorted(found), single_pass_members
 
 
 def _attached_candidate(pattern: Chem.Mol, member: Chem.Mol, match: tuple, *,
@@ -133,7 +156,8 @@ def _core_smiles_with_attachments(pattern: Chem.Mol, mols: Sequence[Chem.Mol]) -
     return "", ""
 
 
-def select_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8) -> Dict:
+def select_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8,
+                include_brics: bool = False) -> Dict:
     """Largest candidate core matching at least ``min_coverage`` of the members.
 
     Candidates meeting the target are ranked by heavy atoms, then coverage;
@@ -144,6 +168,14 @@ def select_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8) -> Dict:
         raise ValueError("min_coverage must lie in (0, 1].")
     started = time.perf_counter()
     candidates = candidate_cores(mols)
+    extra = {}
+    rule = "coverage_aware"
+    if include_brics:
+        fragments, guarded = brics_candidate_cores(mols)
+        extra = {"brics_candidates": len(set(fragments) - set(candidates)),
+                 "brics_single_pass_members": guarded}
+        candidates = sorted(set(candidates).union(fragments))
+        rule = "coverage_brics"
     scored = []
     for smiles in candidates:
         pattern = Chem.MolFromSmiles(smiles)
@@ -155,19 +187,19 @@ def select_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8) -> Dict:
         scored.append((not meets, rank, smiles, matched, heavy))
     if not scored:
         return {"core_smiles": "", "core_smiles_attached": "", "core_smiles_attached_source": "",
-                "core_rule": "coverage_aware", "coverage_target": min_coverage,
+                "core_rule": rule, "coverage_target": min_coverage,
                 "coverage_count": 0, "coverage_fraction": 0.0, "core_heavy_atoms": 0, "matched": [False] * len(mols),
-                "target_met": False, "candidates": 0, "seconds": time.perf_counter() - started}
+                "target_met": False, "candidates": 0, "seconds": time.perf_counter() - started, **extra}
     missed, _, smiles, matched, heavy = min(scored, key=lambda item: (item[0], item[1], item[2]))
     pattern = Chem.MolFromSmiles(smiles)
     attached, attached_source = _core_smiles_with_attachments(pattern, mols)
     return {"core_smiles": smiles,
             "core_smiles_attached": attached,
             "core_smiles_attached_source": attached_source,
-            "core_rule": "coverage_aware", "coverage_target": min_coverage,
+            "core_rule": rule, "coverage_target": min_coverage,
             "coverage_count": int(sum(matched)), "coverage_fraction": sum(matched) / len(mols),
             "core_heavy_atoms": int(heavy), "matched": matched, "target_met": not missed,
-            "candidates": len(candidates), "seconds": time.perf_counter() - started}
+            "candidates": len(candidates), "seconds": time.perf_counter() - started, **extra}
 
 
 def mcs_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8, timeout: int = 10) -> Dict:

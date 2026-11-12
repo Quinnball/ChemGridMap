@@ -297,8 +297,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Refine the minimum-displacement grid so representation neighbours sit closer "
              "('none' reproduces 0.4.0 layouts).")
     parser.add_argument(
-        "--core-rule", choices=["coverage", "most_frequent", "fmcs"], default="coverage",
-        help="Group core: largest scaffold or ring fragment covering --core-min-coverage of members, "
+        "--core-rule", choices=["coverage", "coverage_brics", "most_frequent", "fmcs"], default="coverage",
+        help="Group core: largest scaffold or ring fragment (optionally including BRICS fragments) "
+             "covering --core-min-coverage of members, "
              "the most frequent scaffold (0.4.0 rule), or FMCS.")
     parser.add_argument(
         "--fmcs-timeout", type=int, default=1,
