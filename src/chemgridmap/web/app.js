@@ -376,27 +376,43 @@ function resetResult() {
   $('figure-downloads').replaceChildren(); $('legend').replaceChildren();
   $('run-caption').textContent = ''; closeInspector(); updateNavigation();
 }
+function previousRunTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const pad = value => String(value).padStart(2,'0');
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+function previousRunReference(run) {
+  return run.reference_map?.label || run.reference_map?.description || '—';
+}
 function previousRunLabel(run) {
-  const reference = run.reference_map?.label || run.reference_map?.description || '—';
-  return t('u9c.previousRow', {time:run.created_at,filename:run.filename,reference,
+  return t('u9c.previousRow', {time:previousRunTime(run.created_at),filename:run.filename,reference:previousRunReference(run),
     molecules:run.molecules,rule:coreRuleName(run.core_rule),newCount:run.new_molecules || 0});
 }
 function renderPreviousRuns(result) {
   loadPreviousRuns.lastResult = result;
-  const select = $('previous-run-select'), selected = select.value;
+  const select = $('previous-run-select'), runs = (result.runs || []).slice(0,20);
+  const selected = runs.some(run => run.run_name === select.value) ? select.value : runs[0]?.run_name || '';
+  select.value = selected;
   select.replaceChildren();
-  for (const run of (result.runs || []).slice(0,20)) {
-    const option = document.createElement('option'); option.value = run.run_name;
-    option.textContent = previousRunLabel(run); option.title = option.textContent; select.append(option);
+  for (const run of runs) {
+    const option = document.createElement('label'); option.className = 'previous-run-option'; option.title = previousRunLabel(run);
+    const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'previous-run'; radio.value = run.run_name;
+    radio.checked = run.run_name === selected;
+    radio.addEventListener('change', () => { if (radio.checked) { select.value = radio.value; updateNavigation(); } });
+    const content = document.createElement('span'); content.className = 'previous-run-content';
+    for (const [tag,text] of [['strong',previousRunTime(run.created_at)],['span',previousRunReference(run)],
+      ['span',t('u9c.previousCounts',{molecules:run.molecules,newCount:run.new_molecules || 0})],['span',coreRuleName(run.core_rule)]]) {
+      const line = document.createElement(tag); line.textContent = text; content.append(line);
+    }
+    option.append(radio,content); select.append(option);
   }
-  if (Array.from(select.options).some(option => option.value === selected)) select.value = selected;
-  else select.value = select.options[0]?.value || '';
   const unavailable = result.unavailable || {};
   const count = Object.values(unavailable).reduce((sum,value) => sum + Number(value || 0),0);
   $('previous-results-unavailable').hidden = !count;
   $('previous-results-unavailable').textContent = count ? t('u9c.unavailable',{count,
     missing:unavailable.missing_snapshot || 0,incompatible:unavailable.incompatible || 0,modified:unavailable.modified || 0}) : '';
-  $('previous-results-status').textContent = t(select.options.length ? 'u9c.previousReady' : 'u9c.previousEmpty',{count:select.options.length});
+  $('previous-results-status').textContent = t(runs.length ? 'u9c.previousReady' : 'u9c.previousEmpty',{count:runs.length});
   $('previous-results-status').className = 'micro';
   updateNavigation();
 }
@@ -2204,6 +2220,8 @@ function refreshValidation(input) {
 async function refreshLanguage() {
   const focus = document.activeElement;
   const scroll = [window.scrollX, window.scrollY];
+  // 在任何异步刷新前更新原标记及顶层副本，缩放比例不变时也立即切换语言。
+  renderMismatchOverlay();
   updateInputType();
   $('build').textContent = t(busy ? 'd.Building map...' : 'd.Generate map →');
   $('selection-hint').textContent = t('d.Select a molecule on the map.');

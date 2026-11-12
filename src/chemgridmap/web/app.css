@@ -215,7 +215,14 @@ html[lang="zh-CN"] #query-csv:disabled + .localized-file-picker, html[lang="zh-C
 .previous-results { margin-top: 20px; }
 .previous-actions { display: flex; gap: 8px; align-items: center; }
 #previous-results-panel { margin-top: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; }
-#previous-results-panel label { display: block; font-size: 12px; margin-bottom: 7px; }
-#previous-run-select { display: block; width: 100%; max-width: 100%; font-size: 11px; }
-#previous-run-select option { padding: 8px; white-space: normal; overflow-wrap: anywhere; }
+.previous-run-heading { font-size: 12px; margin-bottom: 7px; }
+/* 五条固定高度记录；长说明只截断显示，完整内容保留在每条的 title 中。 */
+#previous-run-select { display: block; width: 100%; min-width: 0; height: 452px; margin: 0; padding: 0; overflow-y: auto; border: 1px solid var(--line); border-radius: 5px; }
+#previous-run-select .previous-run-option { display: flex; align-items: center; gap: 10px; height: 90px; margin: 0; padding: 8px; border-bottom: 1px solid var(--line); font-size: 12px; line-height: 18px; cursor: pointer; }
+#previous-run-select .previous-run-option:has(input:checked) { background: var(--pale); }
+#previous-run-select .previous-run-option:focus-within { outline: 2px solid var(--green); outline-offset: -2px; }
+#previous-run-select input[type=radio] { flex: 0 0 16px; width: 16px; height: 16px; margin: 0; padding: 0; accent-color: var(--green); }
+.previous-run-content { min-width: 0; }
+.previous-run-content > * { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#previous-run-select:disabled { opacity: .6; }
 #previous-results-status.error { color: #962f37; }

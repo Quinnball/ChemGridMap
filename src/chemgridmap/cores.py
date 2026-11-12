@@ -56,23 +56,24 @@ def _coverage(pattern: Chem.Mol, mols: Sequence[Chem.Mol]) -> list:
 def brics_candidate_cores(mols: Sequence[Chem.Mol]) -> tuple[list, int]:
     """Return ring-containing BRICS fragments without dummy atoms and the guard count."""
     found, single_pass_members = set(), 0
-    for mol in mols:
-        single_pass = len(list(BRICS.FindBRICSBonds(mol))) > 10
-        single_pass_members += int(single_pass)
-        fragments = BRICS.BRICSDecompose(
-            mol, keepNonLeafNodes=True, returnMols=True, singlePass=single_pass)
-        for fragment in fragments:
-            clean = Chem.RWMol(fragment)
-            for index in reversed([atom.GetIdx() for atom in clean.GetAtoms()
-                                   if atom.GetAtomicNum() == 0]):
-                clean.RemoveAtom(index)
-            clean = clean.GetMol()
-            try:
-                Chem.SanitizeMol(clean)
-            except Exception:
-                continue
-            if clean.GetRingInfo().NumRings():
-                found.add(Chem.MolToSmiles(clean, isomericSmiles=True))
+    with rdBase.BlockLogs():
+        for mol in mols:
+            single_pass = len(list(BRICS.FindBRICSBonds(mol))) > 10
+            single_pass_members += int(single_pass)
+            fragments = BRICS.BRICSDecompose(
+                mol, keepNonLeafNodes=True, returnMols=True, singlePass=single_pass)
+            for fragment in fragments:
+                clean = Chem.RWMol(fragment)
+                for index in reversed([atom.GetIdx() for atom in clean.GetAtoms()
+                                       if atom.GetAtomicNum() == 0]):
+                    clean.RemoveAtom(index)
+                clean = clean.GetMol()
+                try:
+                    Chem.SanitizeMol(clean)
+                except Exception:
+                    continue
+                if clean.GetRingInfo().NumRings():
+                    found.add(Chem.MolToSmiles(clean, isomericSmiles=True))
     return sorted(found), single_pass_members
 
 

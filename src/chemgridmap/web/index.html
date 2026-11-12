@@ -37,8 +37,8 @@
         <section id="previous-results" class="previous-results" aria-label="Previous results" data-i18n-aria-label="u9c.previousTitle">
           <div class="previous-actions"><button id="open-previous-results" type="button" class="secondary" data-i18n-text="u9c.previousTitle">Open a previous result</button><button id="open-previous-results-help" type="button" class="parameter-help" data-help="h.open-previous-results" data-help-control="open-previous-results" aria-describedby="parameter-tooltip">?</button></div>
           <div id="previous-results-panel" hidden>
-            <label for="previous-run-select"><span data-i18n="u9c.previousList">Latest 20 results</span><button id="previous-run-select-help" type="button" class="parameter-help" data-help="h.previous-run-select" data-help-control="previous-run-select" aria-describedby="parameter-tooltip">?</button></label>
-            <select id="previous-run-select" size="6" aria-label="Previous results" data-i18n-aria-label="u9c.previousList"></select>
+            <div class="previous-run-heading"><span data-i18n-text="u9c.previousList">Latest 20 results</span><button id="previous-run-select-help" type="button" class="parameter-help" data-help="h.previous-run-select" data-help-control="previous-run-select" aria-describedby="parameter-tooltip">?</button></div>
+            <fieldset id="previous-run-select" aria-label="Previous results" data-i18n-aria-label="u9c.previousList"></fieldset>
             <p id="previous-results-status" class="micro" role="status"></p>
             <p id="previous-results-unavailable" class="micro" hidden></p>
             <div class="previous-actions"><button id="open-selected-run" type="button" class="primary" disabled data-i18n-text="u9c.openRun">Open</button><button id="open-selected-run-help" type="button" class="parameter-help" data-help="h.open-selected-run" data-help-control="open-selected-run" aria-describedby="parameter-tooltip">?</button></div>

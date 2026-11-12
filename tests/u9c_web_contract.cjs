@@ -29,10 +29,10 @@ const scenarios={
   const {context,$,api,calls}=await setup();
   for(const language of ['en','zh']){
    api.setLanguage(language);await context.loadPreviousRuns();assert.equal($('previous-results-panel').hidden,false);assert.equal(calls.at(-1)[0],'/api/previous-runs');
-   assert.equal($('previous-run-select').options.length,1);assert.equal($('previous-run-select').value,sample.run_name);
-   const label=$('previous-run-select').options[0].textContent;for(const value of ['2026-11-12','CAII.csv','CHEMBL205','1145','294',context.coreRuleName('coverage_brics')])assert.ok(label.includes(value),value);
+   assert.equal($('previous-run-select').querySelectorAll('input').length,1);assert.equal($('previous-run-select').value,sample.run_name);
+   const row=$('previous-run-select').querySelector('label'),label=row.textContent;for(const value of ['2026-11-12','CHEMBL205','1145','294',context.coreRuleName('coverage_brics')])assert.ok(label.includes(value),value);assert.ok(row.title.includes('CAII.csv'));
    assert.equal($('previous-results-unavailable').textContent,api.t('u9c.unavailable',{count:6,missing:2,incompatible:1,modified:3}));assert.equal($('open-selected-run').disabled,false);
-   context.renderPreviousRuns({runs:Array.from({length:25},(_,i)=>({...sample,run_name:'r'+i})),unavailable:{}});assert.equal($('previous-run-select').options.length,20);
+   context.renderPreviousRuns({runs:Array.from({length:25},(_,i)=>({...sample,run_name:'r'+i})),unavailable:{}});assert.equal($('previous-run-select').querySelectorAll('input').length,20);
    context.renderPreviousRuns({runs:[],unavailable:{}});assert.equal($('previous-results-status').textContent,api.t('u9c.previousEmpty'));assert.equal($('open-selected-run').disabled,true);
   }
  },
