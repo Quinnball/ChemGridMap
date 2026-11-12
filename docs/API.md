@@ -107,7 +107,7 @@ Assign each projected point to a unique dense- or sparse-matched cell.
 ## `build_grid_map`
 
 ```python
-build_grid_map(data: 'pd.DataFrame', output_dir: 'Optional[Path]' = None, name: 'str' = 'grid_map', smiles_col: 'str' = 'smiles', value_col: 'Optional[str]' = None, label_col: 'Optional[str]' = None, representation: 'str' = 'morgan', projection: 'str' = 'umap', umap_metric: 'str' = 'auto', x_col: 'Optional[str]' = None, y_col: 'Optional[str]' = None, embedding_prefix: 'str' = 'emb_', radius: 'int' = 2, n_bits: 'int' = 2048, lower_threshold: 'float' = 6.0, upper_threshold: 'float' = 7.0, duplicate_policy: 'str' = 'error', random_state: 'int' = 42, k: 'int' = 10, trustworthiness_sample_size: 'int' = 3000, grid_padding: 'Optional[int]' = None, grid_occupancy: 'float' = 0.4, coordinate_scaling: 'str' = 'isotropic', assignment_method: 'str' = 'auto', dense_max_pairs: 'int' = 20000000, sparse_neighbors: 'int' = 128, render_detail: 'str' = 'auto', output_formats: 'Optional[List[str]]' = None, color_map: 'Optional[Dict[str, str]]' = None, provenance: 'Optional[Dict]' = None, sparse_adaptive: 'bool' = True, sparse_max_neighbors: 'int' = 1024, grouping: 'str' = 'butina', group_similarity: 'float' = 0.6, cluster_col: 'Optional[str]' = None, cluster_source: 'Optional[str]' = None, grid_refinement: 'str' = 'neighbors', core_rule: 'str' = 'coverage', core_min_coverage: 'float' = 0.8, fmcs_timeout: 'int' = 1, compound_col: 'Optional[str]' = None, document_col: 'Optional[str]' = None, relation_col: 'Optional[str]' = None, evidence_model: 'str' = 'gaussian', merge_identical_documents: 'bool' = True, confidence_threshold: 'float' = 0.8, offset_display: 'str' = 'none', offset_min_shared: 'int' = 3, offset_threshold: 'float' = 1.0, offset_sign_agreement: 'float' = 0.8, map_color_modes: 'Optional[List[str]]' = None, map_color_formats: 'Optional[Sequence[str]]' = None, value_unit: 'str' = 'p', unit_column: 'Optional[str]' = None, assumed_sigma: 'Optional[float]' = None, query_data: 'Optional[pd.DataFrame]' = None, query_smiles_col: 'Optional[str]' = None, query_id_col: 'Optional[str]' = None, query_structure_policy: 'str' = 'canonical') -> 'GridMapResult'
+build_grid_map(data: 'pd.DataFrame', output_dir: 'Optional[Path]' = None, name: 'str' = 'grid_map', smiles_col: 'str' = 'smiles', value_col: 'Optional[str]' = None, label_col: 'Optional[str]' = None, representation: 'str' = 'morgan', projection: 'str' = 'umap', umap_metric: 'str' = 'auto', x_col: 'Optional[str]' = None, y_col: 'Optional[str]' = None, embedding_prefix: 'str' = 'emb_', radius: 'int' = 2, n_bits: 'int' = 2048, lower_threshold: 'float' = 6.0, upper_threshold: 'float' = 7.0, duplicate_policy: 'str' = 'error', random_state: 'int' = 42, k: 'int' = 10, trustworthiness_sample_size: 'int' = 3000, grid_padding: 'Optional[int]' = None, grid_occupancy: 'float' = 0.4, coordinate_scaling: 'str' = 'isotropic', assignment_method: 'str' = 'auto', dense_max_pairs: 'int' = 20000000, sparse_neighbors: 'int' = 128, render_detail: 'str' = 'auto', output_formats: 'Optional[List[str]]' = None, color_map: 'Optional[Dict[str, str]]' = None, provenance: 'Optional[Dict]' = None, sparse_adaptive: 'bool' = True, sparse_max_neighbors: 'int' = 1024, grouping: 'str' = 'butina', group_similarity: 'float' = 0.6, cluster_col: 'Optional[str]' = None, cluster_source: 'Optional[str]' = None, grid_refinement: 'str' = 'neighbors', core_rule: 'str' = 'coverage', core_min_coverage: 'float' = 0.8, fmcs_timeout: 'int' = 1, jobs: 'int' = 1, compound_col: 'Optional[str]' = None, document_col: 'Optional[str]' = None, relation_col: 'Optional[str]' = None, evidence_model: 'str' = 'gaussian', merge_identical_documents: 'bool' = True, confidence_threshold: 'float' = 0.8, offset_display: 'str' = 'none', offset_min_shared: 'int' = 3, offset_threshold: 'float' = 1.0, offset_sign_agreement: 'float' = 0.8, map_color_modes: 'Optional[List[str]]' = None, map_color_formats: 'Optional[Sequence[str]]' = None, value_unit: 'str' = 'p', unit_column: 'Optional[str]' = None, assumed_sigma: 'Optional[float]' = None, query_data: 'Optional[pd.DataFrame]' = None, query_smiles_col: 'Optional[str]' = None, query_id_col: 'Optional[str]' = None, query_structure_policy: 'str' = 'canonical') -> 'GridMapResult'
 ```
 
 Build and optionally save a one-molecule-per-cell grid chemical map.
@@ -198,6 +198,8 @@ core_min_coverage : float, default 0.8
     Coverage target for coverage and FMCS cores.
 fmcs_timeout : int, default 1
     FMCS search budget in seconds.
+jobs : int, default 1
+    Core worker processes; small maps and FMCS remain serial.
 compound_col : str, optional
     Compound identifier for generic activity records.
 document_col : str, optional
@@ -604,7 +606,7 @@ are broken by canonical SMILES.
 ## `structural_groups`
 
 ```python
-structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=None, radius=2, n_bits=2048, core_rule='most_frequent', core_min_coverage=0.8, fmcs_timeout=1)
+structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=None, radius=2, n_bits=2048, core_rule='most_frequent', core_min_coverage=0.8, fmcs_timeout=1, jobs=1, progress=None)
 ```
 
 Butina groups use a center threshold, not an all-pairs similarity bound.
@@ -632,6 +634,10 @@ core_min_coverage : float, default 0.8
     Coverage target for coverage and FMCS cores.
 fmcs_timeout : int, default 1
     FMCS search budget in seconds.
+jobs : int, default 1
+    Core worker processes. Small maps and FMCS always use the serial path.
+progress : callable, optional
+    Called with completed and total group counts during core calculation.
 
 Returns
 -------
@@ -769,8 +775,8 @@ Its rows expose `result_source` (`upload`, `manual`, `recorded` or empty),
 `note` and `recorded_at`. The report adds `manual_count` and
 `feedback_counts={recorded,agrees,disagrees,no_comparison}`. The inspector adds
 `measured_result`, including editability and the current neighbor comparison.
-The session remains available after browser refresh, but is not restored
-automatically after restarting the application.
+The session remains available after browser refresh. After restarting, opening a
+saved result restores the active collection, manual additions and recorded results.
 
 Hand-entered changes update the collection's CSVs, SVG, manifest and ZIP.
 `manual_entries.csv` records manual additions and its SHA-256 and row count are
@@ -778,3 +784,49 @@ stored in the manifest. `neighbor_evidence_feedback.csv` covers all currently
 measured new molecules, including uploaded results. Original uploaded bytes and
 reference exports are never rewritten. File-only insertion retains its previous
 output contract until a manual action or explicit feedback download is requested.
+
+
+## Saved sessions and core progress
+
+Browser computation uses separate loky processes for `most_frequent`, `coverage`
+and `coverage_brics` when there are at least 64 groups; smaller runs stay serial.
+Defaults use
+`min(8, os.cpu_count() - 1)`, at least 1; `CHEMGRIDMAP_JOBS` overrides the browser
+worker count only. `build_grid_map(..., jobs=1)` and CLI `--jobs 1` remain serial
+by default and do not read this environment variable;
+explicit `jobs>1` requires a guarded Python main entry point on spawn platforms.
+FMCS remains serial even when `jobs>1` because parallel load changes timeout
+solutions. Returned group ordering and scientific values are unchanged.
+
+- `GET /api/core-progress` returns `{running, rule, done, total}`. Poll every second
+  while the existing `POST /api/core-rule` request is pending; the map stays usable.
+- `GET /api/previous-runs` returns `{runs, unavailable}`. `runs` contains up to 20
+  newest compatible runs under the current launcher output root. Each row has
+  `run_name`, `created_at`, `filename`, `reference_map`, `molecules`, `core_rule`
+  and integer `new_molecules`. `unavailable` counts `missing_snapshot`,
+  `incompatible`, and `modified` runs without listing individual old runs.
+- `POST /api/open-run` accepts only `{"run_name":"directory-name"}` from that list.
+  Absolute paths and traversal are rejected, as is opening during a build. The
+  response has the same session envelope as `GET /api/session`, plus
+  `restored={new_set,total,manual,recorded}` for the restoration status message.
+  The Python method `AppSession.open_run(name)` returns the job snapshot plus
+  `restored`. Opening restores original input/settings, cached core rules,
+  last-selected rule, active inserted collection, manual additions and measured
+  results without recalculating or rewriting the run's existing files. Switching
+  to an already computed rule returns `cached: true`. A new build creates a new run.
+
+Snapshot failures return HTTP 400 with `error`, `code`, `files`, and `details`.
+The client translates `session_missing`, `session_version`, `session_modified`,
+`session_unsafe`, `session_invalid`, `run_not_listed`, and `map_running`; affected
+relative filenames remain visible. Invalid files or incompatible versions require
+regeneration. No partial state is applied.
+
+`session/` stores compressed pickle state and a `session_manifest.json` with
+SHA-256 hashes, `source_tree_digest`, Python/pandas/numpy/RDKit versions and the
+run-manifest hash/creation time. Restore verifies both snapshot and scientific
+output hashes before restricted deserialization. Paths are relative to the run,
+so copying the whole folder to another output root preserves reopening support.
+Active new-molecule collections have their own `session/`, updated after insertion
+or manual changes. These private caches consume additional disk space and never
+enter existing export ZIPs or run manifests. Deleting `session/` disables reopening
+without removing exports; delete the entire run folder when no longer needed.

@@ -115,7 +115,7 @@ const scenarios = {
     context.resetResult = () => { resets++; context.job = null; };
     context.showPage = value => { context.page = value; };
     context.getJSON = async (url, options) => { requests.push({url, options}); return url === '/api/input' ? measured : input; };
-    assert.equal(document.querySelectorAll('[data-help]').length, 77);
+    assert.equal(document.querySelectorAll('[data-help]').length, 80);
     for (const language of ['en', 'zh']) {
       api.setLanguage(language);
       $('input-format').value = 'generic'; context.updateInputType();
@@ -241,7 +241,7 @@ const scenarios = {
     assert.equal(siblings[relationIndex - 1], $('reference-column-control'));
     assert.equal(siblings[relationIndex + 1], sourceControl);
     assert.equal(siblings[relationIndex + 2].dataset.i18nText, 's.060');
-    assert.equal(document.querySelectorAll('[data-help]').length, 77);
+    assert.equal(document.querySelectorAll('[data-help]').length, 80);
     assert.equal(sourceControl.querySelectorAll('[data-help]').length, 1);
     for (const language of ['en', 'zh']) {
       api.setLanguage(language);

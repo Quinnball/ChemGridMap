@@ -11,7 +11,7 @@ async function labels() {
     ['new-class-filter', 'u8.categoryFilter'], ['new-label-filter', 'u8.labelFilter'],
     ...['smiles','id','label','mode','value','unit','class','batch','note'].map(name => ['single-'+name,'u9b.'+name]),
   ]);
-  assert.equal(document.querySelectorAll('[data-help]').length, 77);
+  assert.equal(document.querySelectorAll('[data-help]').length, 80);
   assert.equal(document.querySelectorAll('dialog [data-help]').length, expected.size + 1);
   for (const language of ['en', 'zh', 'en']) {
     api.setLanguage(language);

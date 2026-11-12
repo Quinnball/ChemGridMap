@@ -7,7 +7,7 @@ const assets = process.argv[2], scenario = process.argv[3];
 const html = fs.readFileSync(path.join(assets, 'index.html'), 'utf8');
 const source = fs.readFileSync(path.join(assets, 'app.js'), 'utf8');
 const dictionaries = JSON.parse(fs.readFileSync(path.join(assets, 'i18n.json'), 'utf8'));
-const controls = ['single-smiles','single-id','single-label','single-mode','single-value','single-unit','single-class','single-batch','single-note','measured-result','result-mode','result-value','result-unit','result-class','result-batch','result-note','new-mismatch-filter', 'input-format', 'target', 'activity-type', 'compound-column', 'smiles-col',
+const controls = ['open-previous-results','previous-run-select','open-selected-run','single-smiles','single-id','single-label','single-mode','single-value','single-unit','single-class','single-batch','single-note','measured-result','result-mode','result-value','result-unit','result-class','result-batch','result-note','new-mismatch-filter', 'input-format', 'target', 'activity-type', 'compound-column', 'smiles-col',
   'value-col', 'value-unit', 'unit-column', 'document-column', 'reference-column', 'relation-column', 'label-col',
   'new-activity-col', 'new-unit', 'new-unit-col', 'new-relation-col', 'new-document-col', 'new-label-col', 'new-class-filter', 'new-label-filter', 'source-csv', 'query-csv', 'query-smiles-col', 'query-id-col', 'representation', 'projection', 'occupancy',
   'grouping', 'group-similarity', 'cluster-col', 'cluster-source', 'core-rule', 'core-coverage-target',
@@ -50,6 +50,7 @@ function environment({saved = null, browserLanguage = 'en-US', blockedStorage = 
       get offsetHeight() { return this.id === 'parameter-tooltip' ? 140 : 16; },
       append(...items) { for (let item of items) { if (typeof item === 'string') item = textNode(item); item.remove?.(); item.parentNode = this; this.childNodes.push(item); } },
       appendChild(item) { this.append(item); return item; },
+      cloneNode(deep=false) { const copy=node(this.tagName.toLowerCase()); for(const [key,value] of Object.entries(this.attributes))copy.setAttribute(key,value); Object.assign(copy.dataset,this.dataset); if(deep)for(const child of this.childNodes)copy.append(child.nodeType===3?textNode(child.textContent):child.cloneNode(true)); return copy; },
       prepend(...items) { for (const item of items.reverse()) { item.parentNode = this; this.childNodes.unshift(item); } },
       replaceChildren(...items) { this.childNodes = []; this.append(...items); },
       remove() { if (this.parentNode) this.parentNode.childNodes = this.parentNode.childNodes.filter(item => item !== this); this.parentNode = null; },
@@ -158,6 +159,7 @@ function environment({saved = null, browserLanguage = 'en-US', blockedStorage = 
 
 async function runtime(options) {
   const env = environment(options);
+  env.context.mapCells = [];
   const start = source.indexOf('// BEGIN CHEMGRIDMAP I18N RUNTIME');
   const end = source.indexOf('// END CHEMGRIDMAP I18N RUNTIME', start);
   assert.ok(start >= 0 && end > start, 'Production i18n runtime markers');
@@ -167,7 +169,7 @@ async function runtime(options) {
   env.context.ChemGridMapI18n = env.api;
   await env.api.ready;
   // 新增控件的依赖函数与旧契约共享同一生产实现。
-  const coreAndSourceFunctions = ['setNewMoleculeTab','updateMeasurementForm','readMeasurement','resetMeasurementForm','renderSinglePreview','previewSingleMolecule','scheduleSinglePreview','addedFeedbackCounts','resultCounts','resultSource','confirmNewMoleculeReplacement','patchNewMoleculeCell','refreshNewMoleculeMutation','addSingleMolecule','renderMeasuredResult','saveMeasuredResult','bindMeasuredMolecules', 'clearSourceHighlight','renderSourceHighlight','highlightSources','renderNewBatchSources','coreRuleName','renderCoreRuleOptions','renderGroupOptions','renderCoreRuleStatus','addCoreDownloads','switchCoreRule','renderCoreComparison','loadCoreComparison'];
+  const coreAndSourceFunctions = ['previousRunLabel','renderPreviousRuns','loadPreviousRuns','restoredSessionMessage','applySessionSnapshot','openSelectedRun','pollCoreProgress','mismatchMarkerSize','mismatchMarkerTitle','updateMismatchMarker','renderMismatchOverlay','setNewMoleculeTab','updateMeasurementForm','readMeasurement','resetMeasurementForm','renderSinglePreview','previewSingleMolecule','scheduleSinglePreview','addedFeedbackCounts','resultCounts','resultSource','confirmNewMoleculeReplacement','patchNewMoleculeCell','refreshNewMoleculeMutation','addSingleMolecule','renderMeasuredResult','saveMeasuredResult','bindMeasuredMolecules', 'clearSourceHighlight','renderSourceHighlight','highlightSources','renderNewBatchSources','coreRuleName','renderCoreRuleOptions','renderGroupOptions','renderCoreRuleStatus','addCoreDownloads','switchCoreRule','renderCoreComparison','loadCoreComparison'];
   vm.runInContext(coreAndSourceFunctions.map(realFunction).join('\n'), env.context);
   return env;
 }

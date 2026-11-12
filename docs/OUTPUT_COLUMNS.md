@@ -756,7 +756,8 @@ Class-only results use `class_source=user_class` and leave numeric activity empt
 `no_comparison` covers absent, insufficient or mixed neighbor evidence. These tables
 record observations and their agreement with reference evidence; no activity is predicted.
 Timestamps use ISO 8601 with a timezone; unknown uploaded recording times remain blank.
-Browser refresh retains the current session; restarting does not restore it automatically.
+Browser refresh retains the current session. After restarting, **Open a previous
+result** restores the saved active collection, manual entries and measured results.
 
 Exact CSV column order:
 
@@ -773,6 +774,39 @@ Exact CSV column order:
 | `--query-file PATH` | Insert unmeasured CSV/TSV molecules into a completed Morgan reference grid, up to 1,000 after checking. Measured new molecules use the browser. |
 | `--query-smiles-column COL` | Override automatic SMILES-column detection. |
 | `--query-id-column COL` | Query IDs, unique within the input; default generated IDs preserve input order. |
+
+
+## Session cache (browser runs)
+
+A successful browser build additionally writes `session/reference.pkl.gz`,
+`session/state.pkl.gz` and `session/session_manifest.json`. The reference blob
+contains the complete built result and source-lookup data; the state blob retains
+current core-rule caches, comparisons, selected rule, output paths and active
+new-molecule collection. The active collection stores `session/overlay.pkl.gz`
+and its own `session_manifest.json` under `new_molecules/<set>/`. Input frames are
+reconstructed from the byte-preserved run `input.csv`.
+
+The JSON sidecar records SHA-256 hashes for snapshot files, `source_tree_digest`,
+Python/pandas/numpy/RDKit versions, run-manifest SHA-256 and creation time. Both
+snapshots and existing scientific outputs are verified before opening; changed
+CSV files, missing files or incompatible versions require regeneration. Stored
+paths are relative, so a complete run folder can move to another output root.
+Opening is read-only and restores cached rules and the active collection without
+recomputing; core/feedback operations subsequently update their session state.
+
+These compressed caches occupy additional disk space and are excluded from the
+existing run manifest and ZIP. They are not new scientific result columns.
+Deleting `session/` preserves exports but prevents restoring that session; delete
+the entire run folder when the result is no longer needed. The import-page list
+only scans this launcher's output root and shows its latest 20 compatible results.
+
+Browser core computation uses parallel loky workers from 64 groups, with a default of
+`min(8, os.cpu_count() - 1)` (at least 1), overridden by `CHEMGRIDMAP_JOBS`.
+Library `jobs=1` and CLI `--jobs 1` remain serial by default and do not read that
+environment variable. FMCS is always serial
+because load changes its timeout solution. No parallel setting changes output
+column order, core selection or pre-existing exported files. Browser-only marker
+sizes/tooltips do not change the exported `map_with_new_molecules.svg`.
 
 ## Offset display default
 

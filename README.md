@@ -382,9 +382,41 @@ Manual changes update the current collection's outputs and ZIP, adding
 `manual_entries.csv` for manually added molecules and
 `neighbor_evidence_feedback.csv` for measured results. The original uploaded
 input stays byte-identical. Refreshing the browser retains these changes in the
-running session; restarting the software does not automatically restore them.
+running session. After restarting, choose **Open a previous result** on the import
+page to restore the saved reference map, core-rule caches and active new-molecule
+collection, including manual additions and recorded results.
 Uploading a replacement file asks for confirmation when manual work is present,
 and keeps its saved output folder. Endpoint details are in [API.md](docs/API.md).
+
+### Saved results and parallel cores
+
+The import page lists the latest 20 compatible results in this launcher's output
+folder, with creation time, input filename, reference-map description, molecule
+count, original build rule and new-molecule count. Opening a result restores the
+input and settings without regenerating the map; generating again creates a new
+run. Older runs without a snapshot are summarized separately. A changed software
+or dependency version, changed CSV or missing output prevents opening: regenerate
+that result. Moving the entire run folder to another output folder is supported.
+
+Browser builds and map-page core switches compute independent structure-group
+cores in separate `joblib`/loky processes when there are at least 64 groups.
+Smaller runs stay serial. The default is
+`min(8, os.cpu_count() - 1)`, with at least one worker; `CHEMGRIDMAP_JOBS` overrides
+it. The Python API's `jobs=1` and CLI's `--jobs 1` keep the default serial and do
+not read this browser-only environment override.
+For example, `chemgridmap input.csv --jobs 4` explicitly opts the CLI into parallel
+cores. Python scripts enabling multiple workers should use an
+`if __name__ == "__main__":` guard. FMCS always stays serial because CPU load can
+change its time-limited intermediate solution. While a rule is switching, the
+map remains interactive and completed/total group counts refresh every second.
+
+Each successful browser run adds a compressed `session/` cache beside the existing
+exports; the active new-molecule collection has its own `session/`. These snapshots
+store the complete session and core caches, with file hashes, source and dependency
+versions. They occupy additional disk space, are excluded from result ZIPs and run
+manifests, and are validated before restricted deserialization. Removing only
+`session/` retains scientific exports but removes reopening support. When a result
+is no longer needed, delete the entire run folder. Opening does not rewrite it.
 
 ## Python API
 

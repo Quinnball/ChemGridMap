@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 from collections import Counter
+from concurrent.futures import as_completed
 import hashlib
 import html
 import json
+import os
 from pathlib import Path
 import re
+import threading
 import time
 
 import numpy as np
@@ -25,6 +29,121 @@ from .plotting import DEFAULT_COLORS, render_svg
 
 GROUP_COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#8B6914", "#56B4E9",
                 "#5B536E", "#B26249", "#658235", "#3B6C70", "#A95479", "#777777"]
+
+# Small maps finish faster without starting workers. These are execution choices,
+# not chemical parameters, and therefore stay out of the reproducible manifest.
+# CA II subsets: 32 groups were slower with cold workers; 64 groups were faster
+# both cold and warm. Keep smaller workloads serial even when a pool is available.
+CORE_PARALLEL_MIN_GROUPS = 64
+_core_executor = None
+_core_executor_jobs = None
+_core_executor_lock = threading.Lock()
+
+
+def browser_core_jobs():
+    """Browser-only worker default; library/CLI callers continue to default to one."""
+    default = max(1, min(8, (os.cpu_count() or 1) - 1))
+    try:
+        return max(1, int(os.environ.get("CHEMGRIDMAP_JOBS", default)))
+    except ValueError:
+        return default
+
+
+def shutdown_core_workers():
+    """Finish submitted work and close this application's reusable loky pool."""
+    global _core_executor, _core_executor_jobs
+    with _core_executor_lock:
+        executor, _core_executor, _core_executor_jobs = _core_executor, None, None
+    if executor is not None:
+        # Graceful shutdown also works in macOS sandboxes that disallow pgrep,
+        # which loky's kill_workers process-tree traversal otherwise requires.
+        executor.shutdown(wait=True)
+
+
+atexit.register(shutdown_core_workers)
+
+
+def _get_core_executor(jobs):
+    global _core_executor, _core_executor_jobs
+    from joblib.externals.loky import ProcessPoolExecutor
+    from joblib.externals.loky.backend.context import get_context
+
+    with _core_executor_lock:
+        if _core_executor is not None and _core_executor_jobs != jobs:
+            _core_executor.shutdown(wait=True)
+            _core_executor = None
+        if _core_executor is None:
+            # loky starts a fresh interpreter, never fork a multithreaded server.
+            # Limit nested numerical libraries inside the chemistry workers.
+            _core_executor = ProcessPoolExecutor(
+                max_workers=jobs, context=get_context("loky"),
+                env={name: "1" for name in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS",
+                                            "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS")})
+            _core_executor_jobs = jobs
+        return _core_executor
+
+
+def _summarize_core_payload(smiles, member_ids, core_rule, core_min_coverage, fmcs_timeout):
+    """Workers receive only strings, IDs and numeric rule parameters."""
+    selected = [Chem.MolFromSmiles(value) for value in smiles]
+    return summarize_group_core(
+        selected, member_ids, core_rule=core_rule, core_min_coverage=core_min_coverage,
+        fmcs_timeout=fmcs_timeout, return_metrics=True)
+
+
+def group_core_members(data, summaries):
+    """Collect fixed groups once, preserving the interactive center-first order."""
+    ordered = data.sort_values(["canonical_smiles", "comparison_id"])
+    grouped = dict(tuple(ordered.groupby("structure_group", sort=False)))
+    members = []
+    for summary in summaries:
+        frame = grouped[summary["structure_group"]]
+        center = frame.comparison_id.eq(summary["representative_id"])
+        members.append(pd.concat([frame[center], frame[~center]]))
+    return members
+
+
+def summarize_group_cores(groups, *, core_rule="coverage", core_min_coverage=0.8,
+                          fmcs_timeout=1, jobs=1, progress=None):
+    """Compute ordered ``(summary, metrics)`` pairs from ``(SMILES, IDs)`` groups.
+
+    Each group's representative must be first, followed by the unchanged member
+    order used by :func:`summarize_group_core`. Only plain data enters workers.
+    Large groups are submitted first, then results return in original group order.
+    FMCS is always serial because process load can change its timeout solution.
+    ``progress(done, total)`` runs in the caller thread, never in a subprocess.
+    """
+    jobs = int(jobs)
+    if jobs < 1:
+        raise ValueError("jobs must be a positive integer.")
+    payloads = [(list(smiles), list(ids)) for smiles, ids in groups]
+    total = len(payloads)
+    if progress is not None:
+        progress(0, total)
+    parallel = jobs > 1 and core_rule != "fmcs" and total >= CORE_PARALLEL_MIN_GROUPS
+    results = [None] * total
+    if parallel:
+        executor = _get_core_executor(min(jobs, total))
+        futures = {
+            executor.submit(_summarize_core_payload, *payloads[index], core_rule,
+                            core_min_coverage, fmcs_timeout): index
+            for index in sorted(range(total), key=lambda index: -len(payloads[index][0]))}
+        try:
+            for done, future in enumerate(as_completed(futures), 1):
+                results[futures[future]] = future.result()
+                if progress is not None:
+                    progress(done, total)
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
+    else:
+        for index, (smiles, ids) in enumerate(payloads):
+            results[index] = _summarize_core_payload(
+                smiles, ids, core_rule, core_min_coverage, fmcs_timeout)
+            if progress is not None:
+                progress(index + 1, total)
+    return results
 
 
 def molecule_keys(data):
@@ -118,7 +237,7 @@ def summarize_group_core(selected, member_ids, *, core_rule="coverage", core_min
 
 def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=None,
                       radius=2, n_bits=2048, core_rule="most_frequent", core_min_coverage=0.8,
-                      fmcs_timeout=1):
+                      fmcs_timeout=1, jobs=1, progress=None):
     """Butina groups use a center threshold, not an all-pairs similarity bound.
 
     ``core_rule="coverage"`` selects the largest member scaffold or scaffold-network
@@ -144,6 +263,10 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
         Coverage target for coverage and FMCS cores.
     fmcs_timeout : int, default 1
         FMCS search budget in seconds.
+    jobs : int, default 1
+        Core worker processes. Small maps and FMCS always use the serial path.
+    progress : callable, optional
+        Called with completed and total group counts during core calculation.
 
     Returns
     -------
@@ -187,12 +310,15 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
     frame["structure_group"] = ""
     frame["structure_group_color"] = ""
     frame["scaffold_smiles"] = ""
+    core_results = summarize_group_cores(
+        [([str(ordered.canonical_smiles.iloc[i]) for i in indices],
+          [keys[order[i]] for i in indices]) for _, indices in clusters],
+        core_rule=core_rule, core_min_coverage=core_min_coverage,
+        fmcs_timeout=fmcs_timeout, jobs=jobs, progress=progress)
     summaries = []
     for rank, (label, indices) in enumerate(clusters):
         selected = [mols[i] for i in indices]
-        core_summary = summarize_group_core(
-            selected, [keys[order[i]] for i in indices], core_rule=core_rule,
-            core_min_coverage=core_min_coverage, fmcs_timeout=fmcs_timeout)
+        core_summary = core_results[rank][0]
         scaffolds = [MurckoScaffold.MurckoScaffoldSmiles(mol=m, includeChirality=True) for m in selected]
         original_positions = [order[i] for i in indices]
         color = GROUP_COLORS[rank % len(GROUP_COLORS)]

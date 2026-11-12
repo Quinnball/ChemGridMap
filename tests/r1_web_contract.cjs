@@ -16,7 +16,7 @@ function node() {
     createTBody() { const body = node(); this.append(body); return body; },
     insertRow() { const row = node(); this.append(row); return row; },
     insertCell() { const cell = node(); this.append(cell); return cell; },
-    querySelectorAll() { return this.children; }};
+    querySelector() { return null; }, querySelectorAll() { return this.children; }};
 }
 const $ = id => { if (!elements.has(id)) elements.set(id, node()); return elements.get(id); };
 const document = {createElement: node, createTextNode: text => ({textContent: text})};
@@ -50,7 +50,7 @@ const context = vm.createContext({$, document, t:i18n.t, ChemGridMapI18n:i18n, n
 $('color-mode').value = 'activity'; $('measurement-filter').value = 'all';
 $('measurement-filter').selectedOptions = [{textContent: 'All molecules'}];
 const names = ['renderMeasuredResult', 'resultSource', 'resetMeasurementForm', 'updateMeasurementForm', 'readMeasurement', 'saveMeasuredResult', 'addedFeedbackCounts', 'resultCounts', 'stat', 'countLabel', 'measuredLabel', 'showQuerySelection', 'selectGroup',
-  'format', 'percentage', 'legendItem', 'renderLegend', 'applyTransform', 'showDataAudit',
+  'format', 'percentage', 'legendItem', 'renderLegend', 'renderMismatchOverlay', 'applyTransform', 'showDataAudit',
   'showSourceInput', 'loadInput', 'showInput', 'selectColumns', 'showSources', 'renderNewBatchSources', 'clearSourceHighlight', 'highlightSources', 'loadCoreComparison'];
 const summaryBody = fragment('showResult', '  const report = job.report;', "  $('summary').hidden = false;");
 const dropdownBody = fragment('renderGroupOptions', "  $('group-select').replaceChildren();", "  $('group-select').value = highlightedGroup;");

@@ -285,6 +285,9 @@ function updateNavigation() {
   $('adjust-settings').disabled = busy;
   $('open-audit').disabled = $('open-export').disabled = !job || busy;
   updateNewNavigation();
+  $('open-previous-results').disabled = busy;
+  $('previous-run-select').disabled = busy;
+  $('open-selected-run').disabled = busy || !$('previous-run-select').value;
   $('build').disabled = busy || !inputInfo;
   $('demo').disabled = busy || !demoAvailable;
   $('projection').querySelector('[value=umap]').disabled = !umapAvailable;
@@ -314,7 +317,7 @@ async function api(path, options = {}) {
   const response = await fetch(path, {...options, headers: {...options.headers, 'X-ChemGridMap-Token': token || ''}});
   if (!response.ok) {
     const data = await response.json();
-    throw new Error(data.error || 'The request failed.');
+    throw new Error(data.code ? t('u9c.error.' + data.code, {files:(data.files || []).join(', '),details:data.details || data.error || ''}) : data.error || 'The request failed.');
   }
   return response;
 }
@@ -372,6 +375,62 @@ function resetResult() {
   $('empty-map').hidden = false; $('saved-location').textContent = '';
   $('figure-downloads').replaceChildren(); $('legend').replaceChildren();
   $('run-caption').textContent = ''; closeInspector(); updateNavigation();
+}
+function previousRunLabel(run) {
+  const reference = run.reference_map?.label || run.reference_map?.description || '—';
+  return t('u9c.previousRow', {time:run.created_at,filename:run.filename,reference,
+    molecules:run.molecules,rule:coreRuleName(run.core_rule),newCount:run.new_molecules || 0});
+}
+function renderPreviousRuns(result) {
+  loadPreviousRuns.lastResult = result;
+  const select = $('previous-run-select'), selected = select.value;
+  select.replaceChildren();
+  for (const run of (result.runs || []).slice(0,20)) {
+    const option = document.createElement('option'); option.value = run.run_name;
+    option.textContent = previousRunLabel(run); option.title = option.textContent; select.append(option);
+  }
+  if (Array.from(select.options).some(option => option.value === selected)) select.value = selected;
+  else select.value = select.options[0]?.value || '';
+  const unavailable = result.unavailable || {};
+  const count = Object.values(unavailable).reduce((sum,value) => sum + Number(value || 0),0);
+  $('previous-results-unavailable').hidden = !count;
+  $('previous-results-unavailable').textContent = count ? t('u9c.unavailable',{count,
+    missing:unavailable.missing_snapshot || 0,incompatible:unavailable.incompatible || 0,modified:unavailable.modified || 0}) : '';
+  $('previous-results-status').textContent = t(select.options.length ? 'u9c.previousReady' : 'u9c.previousEmpty',{count:select.options.length});
+  $('previous-results-status').className = 'micro';
+  updateNavigation();
+}
+async function loadPreviousRuns() {
+  if (busy) return;
+  $('previous-results-panel').hidden = false;
+  $('previous-results-status').textContent = t('u9c.loadingPrevious');
+  $('open-previous-results').disabled = true;
+  try { renderPreviousRuns(await getJSON('/api/previous-runs')); }
+  catch (error) { $('previous-results-status').textContent = translateServer(error.message); $('previous-results-status').className = 'micro error'; }
+  finally { updateNavigation(); }
+}
+function restoredSessionMessage(restored) {
+  return restored?.new_set ? t('u9c.restoredNew',{name:restored.new_set,total:restored.total || 0,manual:restored.manual || 0,recorded:restored.recorded || 0}) : t('u9c.restoredRun');
+}
+async function applySessionSnapshot(info) {
+  if (info.input) showInput(info.input);
+  newMolecules = info.new_molecules || null;
+  showQueryInput(info.query_input || null, newMolecules?.options || {});
+  showSourceInput(info.source_input || null);
+  job = info.job;
+  await showResult();
+  if (info.restored) status(() => restoredSessionMessage(info.restored));
+  else status('');
+}
+async function openSelectedRun() {
+  if (busy || !$('previous-run-select').value) return;
+  const run_name = $('previous-run-select').value;
+  setBusy(true); status(() => t('u9c.openingRun'));
+  try {
+    const info = await getJSON('/api/open-run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_name})});
+    resetResult(); await applySessionSnapshot(info);
+  } catch (error) { fail(error); }
+  finally { setBusy(false); }
 }
 async function loadInput(demo = false, droppedFile = null) {
   var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
@@ -1251,14 +1310,12 @@ function colorMap(cells = null) {
     let mismatchMarker = el.querySelector(':scope > [data-neighbor-mismatch]');
     if (isNew && point.neighbor_comparison === 'disagrees') {
       if (!mismatchMarker) {
-        const x = Number(mark.getAttribute('x') || 0), y = Number(mark.getAttribute('y') || 0);
-        const size = Number(mark.getAttribute('width') || 100) * .22;
         mismatchMarker = document.createElementNS('http://www.w3.org/2000/svg','path');
-        mismatchMarker.setAttribute('data-neighbor-mismatch','true');
-        mismatchMarker.setAttribute('d',`M${x+size/2},${y+2} L${x+size},${y+size/2} L${x+size/2},${y+size} L${x+2},${y+size/2} Z`);
-        mismatchMarker.setAttribute('fill','#6f1d6b'); mismatchMarker.setAttribute('stroke','#fff'); mismatchMarker.setAttribute('stroke-width','1');
-        el.append(mismatchMarker);
+        mismatchMarker.setAttribute('data-neighbor-mismatch','true'); el.append(mismatchMarker);
       }
+      mismatchMarker.dataset.measuredClass = point.measured_class || point.activity_class;
+      mismatchMarker.dataset.neighborClass = point.neighbor_evidence;
+      updateMismatchMarker(mismatchMarker,mark);
     } else if (mismatchMarker) mismatchMarker.remove();
     let offsetMarker = el.querySelector(':scope > [data-offset-pair-marker]');
     if (!isNew && mode === 'support' && point.offset_pair_touched) {
@@ -1287,7 +1344,47 @@ function colorMap(cells = null) {
       }
     } else if (conflictMarker) conflictMarker.remove();
   });
-  renderLegend(mode);
+  renderLegend(mode); renderMismatchOverlay();
+}
+function mismatchMarkerSize(width, scale) {
+  // 小于 20 px 的格子无法同时容纳 9 px 标记和 45% 上限；优先保留格子上限。
+  return Math.min(width * .45, Math.max(width * .22, 9 / scale));
+}
+function mismatchMarkerTitle(marker) {
+  return t('u9c.mismatchTooltip',{measured:t('d.' + marker.dataset.measuredClass),neighbor:t('d.' + marker.dataset.neighborClass)});
+}
+function updateMismatchMarker(marker, rect) {
+  const scale = typeof transform === 'undefined' ? 1 : transform.s;
+  const width = Number(rect.getAttribute('width') || 100), size = mismatchMarkerSize(width,scale);
+  const x = Number(rect.getAttribute('x') || 0), y = Number(rect.getAttribute('y') || 0);
+  marker.setAttribute('d',`M${x+size/2},${y} L${x+size},${y+size/2} L${x+size/2},${y+size} L${x},${y+size/2} Z`);
+  marker.setAttribute('fill','#6f1d6b'); marker.setAttribute('stroke','#fff'); marker.setAttribute('stroke-width',String(1/scale));
+  let title = marker.querySelector('title');
+  if (!title) { title = document.createElementNS('http://www.w3.org/2000/svg','title'); marker.append(title); }
+  title.textContent = mismatchMarkerTitle(marker); title.dataset.originalText = title.textContent;
+  marker.setAttribute('aria-label',title.textContent);
+}
+function renderMismatchOverlay() {
+  const svg = $('map-stage').querySelector('svg');
+  if (!svg) return;
+  renderMismatchOverlay.scale = typeof transform === 'undefined' ? 1 : transform.s;
+  svg.querySelector('[data-mismatch-overlay]')?.remove();
+  const overlay = document.createElementNS('http://www.w3.org/2000/svg','g'); overlay.setAttribute('data-mismatch-overlay','true');
+  for (const cell of mapCells) {
+    const marker = cell.querySelector(':scope > [data-neighbor-mismatch]'), rect = cell.querySelector(':scope > rect');
+    if (!marker || !rect) continue;
+    updateMismatchMarker(marker,rect);
+    const copy = marker.cloneNode(true), transforms = [];
+    copy.removeAttribute('data-neighbor-mismatch');
+    for (let parent = cell; parent && parent !== svg; parent = parent.parentNode) {
+      const value = parent.getAttribute('transform'); if (value) transforms.unshift(value);
+    }
+    if (transforms.length) copy.setAttribute('transform',transforms.join(' '));
+    if (cell.classList.contains('group-faded')) copy.setAttribute('opacity','.2');
+    copy.onclick = () => inspect(`row=${cell.dataset.gridRow}&col=${cell.dataset.gridCol}`);
+    overlay.append(copy);
+  }
+  if (overlay.children.length) svg.append(overlay);
 }
 function legendItem(color, text) {
   const item = document.createElement('span'), swatch = document.createElement('i');
@@ -1359,6 +1456,7 @@ function applyTransform() {
   var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   $('map-stage').style.transform = `translate(${transform.x}px,${transform.y}px) scale(${transform.s})`;
   $('map-stage').style.setProperty('--zoom-inverse', String(1 / transform.s));
+  if (renderMismatchOverlay.scale !== transform.s) renderMismatchOverlay();
   // Suppress unreadable bonds only in the browser; exported SVGs remain untouched.
   const overview = view === 'grid' && tileWidth * transform.s < 24;
   $('map-viewport').classList.toggle('color-overview', overview);
@@ -1450,6 +1548,7 @@ function highlight() {
     }
   }
   if (outlines.children.length) svg.append(outlines);
+  renderMismatchOverlay();
   const selectedGroup = currentCell && groups.get(`${currentCell.row},${currentCell.col}`);
   $('selected-group-highlight').textContent = selectedGroup && selectedGroup === highlightedGroup ? t("d.Clear highlight") : t("d.Highlight on map");
 }
@@ -1527,7 +1626,7 @@ function renderGroupOptions() {
 function renderCoreRuleStatus() {
   const message = switchCoreRule.message;
   $('core-rule-status').hidden = !message;
-  $('core-rule-status').textContent = message ? t(switchCoreRule.busy ? 'u9.computingCores' : 'u9.currentRule', {rule:coreRuleName(message.rule),n:message.n}) : '';
+  $('core-rule-status').textContent = message ? t(switchCoreRule.busy ? 'u9c.coreProgress' : 'u9.currentRule', {rule:coreRuleName(message.rule),n:message.n,done:message.done || 0,total:message.total ?? message.n}) : '';
 }
 function addCoreDownloads(files) {
   for (const name of files) {
@@ -1538,10 +1637,23 @@ function addCoreDownloads(files) {
     $('downloads').append(button);
   }
 }
+async function pollCoreProgress(request) {
+  if (!switchCoreRule.busy || request !== switchCoreRule.request) return;
+  try {
+    const progress = await getJSON('/api/core-progress');
+    if (!switchCoreRule.busy || request !== switchCoreRule.request) return;
+    if (progress.rule === switchCoreRule.message.rule) {
+      Object.assign(switchCoreRule.message,{done:progress.done,total:progress.total}); renderCoreRuleStatus();
+    }
+  } catch (_) { /* 进度请求失败不取消正在进行的核心计算。 */ }
+  if (switchCoreRule.busy && request === switchCoreRule.request) switchCoreRule.timer = setTimeout(() => pollCoreProgress(request),1000);
+}
 async function switchCoreRule() {
   if (switchCoreRule.busy || !job) return;
   const rule = $('map-core-rule').value, oldRule = job.current_core_rule || job.options.core_rule;
-  switchCoreRule.busy = true; switchCoreRule.message = {rule,n:structureGroups.length};
+  switchCoreRule.busy = true; switchCoreRule.message = {rule,n:structureGroups.length,done:0,total:structureGroups.length};
+  const request = switchCoreRule.request = (switchCoreRule.request || 0) + 1;
+  switchCoreRule.timer = setTimeout(() => pollCoreProgress(request),1000);
   groupRequestNumber++; renderCoreRuleStatus(); updateNavigation();
   try {
     const result = await getJSON('/api/core-rule', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rule})});
@@ -1561,7 +1673,7 @@ async function switchCoreRule() {
   } catch (error) {
     $('map-core-rule').value = oldRule; switchCoreRule.message = null; fail(error);
   } finally {
-    switchCoreRule.busy = false; renderCoreRuleStatus(); updateNavigation();
+    switchCoreRule.busy = false; clearTimeout(switchCoreRule.timer); renderCoreRuleStatus(); updateNavigation();
   }
 }
 function renderCoreComparison(result) {
@@ -1976,6 +2088,9 @@ $('measurement-filter').addEventListener('change', () => { highlight(); renderLe
 $('color-mode').addEventListener('change', () => { colorMap(); highlight(); });
 $('show-neighbor-links').addEventListener('change', highlight);
 $('demo').addEventListener('click', () => loadInput(true));
+$('open-previous-results').addEventListener('click',loadPreviousRuns);
+$('previous-run-select').addEventListener('change',updateNavigation);
+$('open-selected-run').addEventListener('click',openSelectedRun);
 $('csv').addEventListener('change', () => loadInput());
 $('query-csv').addEventListener('change', loadQueryInput);
 $('remove-query-input').addEventListener('click', removeQueryInput);
@@ -2121,6 +2236,7 @@ async function refreshLanguage() {
   for (const id of ['map-stage','molecule-svg','neighborhood-svg','comparison-svg']) translateSVGText($(id));
   if (previewSingleMolecule.last) renderSinglePreview(previewSingleMolecule.last);
   if (addSingleMolecule.lastMessage && !$('single-feedback').classList.contains('error')) $('single-feedback').textContent = addSingleMolecule.lastMessage();
+  if (loadPreviousRuns.lastResult) renderPreviousRuns(loadPreviousRuns.lastResult);
   if (status.last) status(status.last.message, status.last.kind);
   else $('build-progress').textContent = t('d.Preparing input records...');
   for (const input of document.querySelectorAll('#options input,#options select,#single-molecule-form input,#single-molecule-form textarea,#single-molecule-form select,#measured-result-form input,#measured-result-form textarea,#measured-result-form select')) refreshValidation(input);

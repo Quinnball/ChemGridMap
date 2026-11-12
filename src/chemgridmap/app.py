@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import copy
+from dataclasses import fields, is_dataclass
 from datetime import datetime, timezone
+import gzip
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
@@ -11,9 +14,12 @@ import io
 import json
 import math
 import mimetypes
+import pickle
+import platform
 from pathlib import Path
 import re
 import secrets
+import signal
 import threading
 import time
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -36,7 +42,8 @@ from .queries import (insert_new_molecules, prepare_query_molecules, place_new_m
 from .plotting import render_svg
 from .provenance import file_digests, source_tree_digest
 from .neighborhoods import neighborhood_evidence
-from .comparison import group_comparison, molecule_keys, summarize_group_core
+from .comparison import (group_comparison, molecule_keys, summarize_group_core, summarize_group_cores,
+                         browser_core_jobs, shutdown_core_workers, group_core_members)
 from .plotting import _svg_molecule_content
 from .units import validate_assumed_sigma, convert_activity_values
 
@@ -555,16 +562,329 @@ class ManualMoleculesMixin:
                         files=list(self.files), molecules=len(self.result.data) + len(result.data))
         self.group_detail_cache = {}
         self.source_index_cache.pop("new", None)
+        self.save_session(overlay=True)
 
     def feedback_csv(self):
         with self.lock:
             if self.new_result is None:
                 raise ValueError("Insert new molecules first.")
-            self._write_manual_outputs()
+            # Reading an existing feedback export must not rewrite its manifest/ZIP.
+            if "neighbor_evidence_feedback" not in self.new_result.output_files:
+                self._write_manual_outputs()
             return Path(self.new_result.output_files["neighbor_evidence_feedback"]).read_bytes()
 
 
-class AppSession(ManualMoleculesMixin):
+# Snapshots are private local caches; none of these files enter exported manifests or ZIPs.
+class SessionSnapshotError(ValueError):
+    def __init__(self, code, details="", files=()):
+        self.code, self.details, self.files = code, str(details), list(files)
+        super().__init__(f"{code}: {details}. Please regenerate the map.")
+
+    def payload(self):
+        return {"error": str(self), "code": self.code, "details": self.details, "files": self.files}
+
+
+class SessionUnpickler(pickle.Unpickler):
+    """Allow only the constructors used by our tables/arrays/result containers.
+
+    A module-prefix allowlist would also allow numpy.load or pandas.read_pickle.
+    Exact globals deliberately exclude such I/O and executable callables.
+    """
+    allowed = {
+        "builtins": {"set", "frozenset", "slice", "complex", "range", "bytearray"},
+        "collections": {"OrderedDict", "defaultdict"},
+        "datetime": {"datetime", "date", "time", "timedelta", "timezone"},
+        "numpy": {"ndarray", "dtype"},
+        "numpy.core.multiarray": {"_reconstruct", "scalar"},
+        "numpy._core.multiarray": {"_reconstruct", "scalar"},
+        "numpy.core.numeric": {"_frombuffer"},
+        "numpy._core.numeric": {"_frombuffer"},
+        "pandas": {"DataFrame", "Series", "Index", "RangeIndex", "StringDtype"},
+        "pandas.arrays": {"StringArray"},
+        "pandas.core.frame": {"DataFrame"},
+        "pandas.core.series": {"Series"},
+        "pandas.core.internals.managers": {"BlockManager", "SingleBlockManager"},
+        "pandas._libs.internals": {"_unpickle_block"},
+        "pandas._libs.arrays": {"__pyx_unpickle_NDArrayBacked"},
+        "pandas.core.indexes.base": {"_new_Index", "Index"},
+        "pandas.core.indexes.range": {"RangeIndex"},
+        "pandas.core.indexes.multi": {"MultiIndex"},
+        "pandas.core.arrays.string_": {"StringArray", "StringDtype"},
+        "pandas.core.arrays.boolean": {"BooleanArray", "BooleanDtype"},
+        "pandas.core.arrays.integer": {"IntegerArray", "Int64Dtype"},
+        "pandas._libs.missing": {"NAType"},
+        "pandas._libs.tslibs.nattype": {"__nat_unpickle"},
+        "pandas._libs.tslibs.timestamps": {"_unpickle_timestamp"},
+        "chemgridmap.pipeline": {"GridMapResult"},
+        "chemgridmap.chembl": {"ChemblCurationResult"},
+        "chemgridmap.queries": {"NewMoleculesResult"},
+    }
+
+    def find_class(self, module, name):
+        if name not in self.allowed.get(module, set()):
+            raise SessionSnapshotError("session_unsafe", f"Disallowed snapshot global: {module}.{name}")
+        return super().find_class(module, name)
+
+
+def _session_path(root, relative):
+    """Reject absolute paths, traversal and symlinks leaving the selected run."""
+    path = Path(str(relative))
+    if path.is_absolute() or ".." in path.parts:
+        raise SessionSnapshotError("session_invalid", "Invalid relative snapshot path", [str(relative)])
+    resolved = (root / path).resolve()
+    if not resolved.is_relative_to(root.resolve()):
+        raise SessionSnapshotError("session_invalid", "Snapshot path leaves the run", [str(relative)])
+    return resolved
+
+
+def _session_paths(value, root, *, restore=False):
+    """Relocate only explicit paths, leaving DataFrame values and arrays untouched."""
+    if restore and isinstance(value, dict) and set(value) == {"__session_path__", "kind"}:
+        path = _session_path(root, value["__session_path__"])
+        return path if value["kind"] == "path" else str(path)
+    if not restore and isinstance(value, (str, Path)):
+        if isinstance(value, Path) or str(value).startswith(str(root) + "/") or str(value) == str(root):
+            relative = Path(value).resolve().relative_to(root.resolve()).as_posix()
+            return {"__session_path__": relative, "kind": "path" if isinstance(value, Path) else "str"}
+    if is_dataclass(value) and not isinstance(value, type):
+        result = copy.copy(value)
+        for field in fields(value):
+            setattr(result, field.name, _session_paths(getattr(value, field.name), root, restore=restore))
+        return result
+    if isinstance(value, dict):
+        return {key: _session_paths(item, root, restore=restore) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        items = [_session_paths(item, root, restore=restore) for item in value]
+        return tuple(items) if isinstance(value, tuple) else items
+    return value
+
+
+def _session_versions():
+    return {"python": platform.python_version(), "pandas": pd.__version__,
+            "numpy": np.__version__, "rdkit": rdBase.rdkitVersion}
+
+
+def _session_sha(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+class SavedSessionMixin:
+    _reference_fields = ("filename", "result", "curation", "generic_records", "activity_confidence",
+                         "possible_sources", "source_frame", "source_filename")
+    _runtime_fields = ("files", "reference_files", "reference_report", "job", "core_rule_cache",
+                       "group_core_cache", "current_core_rule", "group_cache")
+    _overlay_fields = ("new_result", "query_options", "query_frame", "query_raw", "query_filename",
+                       "manual_entries", "manual_entry_notes", "measured_results", "measurement_originals")
+
+    def _write_session_blob(self, directory, name, state):
+        root = Path(self.job["output_dir"]).resolve()
+        encoded = pickle.dumps(_session_paths(state, root), protocol=5)
+        path = directory / name
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_bytes(gzip.compress(encoded, compresslevel=1, mtime=0))
+        temporary.replace(path)
+        return path
+
+    def _session_manifest(self, directory, blobs, artifacts, **extra):
+        root = Path(self.job["output_dir"]).resolve()
+        run_manifest = Path(self.result.output_files["run_manifest"])
+        manifest = {"format_version": 1, "source_tree_digest": source_tree_digest(),
+                    "versions": _session_versions(),
+                    "created_at": datetime.fromtimestamp(self.job["started"], timezone.utc).isoformat(),
+                    "run_manifest": {"file": run_manifest.relative_to(root).as_posix(),
+                                     "sha256": _session_sha(run_manifest)},
+                    "files": {path.relative_to(root).as_posix(): _session_sha(path) for path in blobs},
+                    "artifacts": {Path(path).relative_to(root).as_posix(): _session_sha(path)
+                                  for path in artifacts}, **extra}
+        path = directory / "session_manifest.json"
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(path)
+        return path
+
+    def save_session(self, *, initial=False, overlay=False):
+        """Persist completed state without touching any existing scientific export."""
+        if self.result is None or self.job.get("state") != "done":
+            return
+        started = time.perf_counter()
+        self._ensure_core_state()
+        root = Path(self.job["output_dir"]).resolve()
+        directory = root / "session"
+        directory.mkdir(exist_ok=True)
+        reference_path = directory / "reference.pkl.gz"
+        if initial or not reference_path.exists():
+            self._write_session_blob(directory, reference_path.name,
+                                     {key: getattr(self, key) for key in self._reference_fields})
+        active = None
+        overlay_manifest = None
+        if self.new_result is not None:
+            overlay_root = Path(self.new_result.output_files["new_molecules_input"]).parent
+            active = overlay_root.relative_to(root).as_posix()
+            overlay_directory = overlay_root / "session"
+            overlay_manifest = overlay_directory / "session_manifest.json"
+            if overlay or not overlay_manifest.exists():
+                overlay_directory.mkdir(exist_ok=True)
+                blob = self._write_session_blob(overlay_directory, "overlay.pkl.gz",
+                                               {key: getattr(self, key) for key in self._overlay_fields})
+                self._session_manifest(overlay_directory, [blob], self.new_result.output_files.values())
+        state = {key: getattr(self, key) for key in self._runtime_fields}
+        state["active_set"] = active
+        runtime_path = self._write_session_blob(directory, "state.pkl.gz", state)
+        blobs = [reference_path, runtime_path]
+        if overlay_manifest:
+            blobs.append(overlay_manifest)
+        # On-demand inspection archives are regenerated by inspect(), so they are
+        # not part of the durable map/cache integrity contract.
+        artifacts = [path for path in self.reference_files.values()
+                     if not Path(path).name.startswith("audit_")]
+        info = self.reference_map_info()
+        self._session_manifest(directory, blobs, artifacts, active_set=active,
+            summary={"filename": self.filename, "reference_map": {**info, "label": info["description"]},
+                     "molecules": len(self.result.data), "core_rule": self.job["options"]["core_rule"],
+                     "new_molecules": len(self.new_result.data) if self.new_result is not None else 0})
+        self.session_write_seconds = time.perf_counter() - started
+
+    @staticmethod
+    def _validate_session_manifest(root, directory):
+        try:
+            manifest = json.loads((directory / "session_manifest.json").read_text(encoding="utf-8"))
+            if (manifest["format_version"] != 1 or manifest["versions"] != _session_versions()
+                    or manifest["source_tree_digest"] != source_tree_digest()):
+                raise SessionSnapshotError("session_version", "Software source or dependency versions differ")
+            binding = manifest["run_manifest"]
+            manifest_path = _session_path(root, binding["file"])
+            expected = {binding["file"]: binding["sha256"], **manifest["files"], **manifest["artifacts"]}
+            changed = [name for name, digest in expected.items()
+                       if not _session_path(root, name).is_file() or _session_sha(_session_path(root, name)) != digest]
+            if changed:
+                raise SessionSnapshotError("session_modified", "Files were changed or deleted", changed)
+            run_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            output_digests = dict(run_manifest["output_digests"])
+            output_digests.update(run_manifest.get("source", {}).get("curation_outputs", {}))
+            changed = [item["file"] for item in output_digests.values()
+                       if not _session_path(root, item["file"]).is_file()
+                       or _session_sha(_session_path(root, item["file"])) != item["sha256"]]
+            if changed:
+                raise SessionSnapshotError("session_modified", "Run outputs were changed or deleted", changed)
+            return manifest
+        except SessionSnapshotError:
+            raise
+        except FileNotFoundError as exc:
+            raise SessionSnapshotError("session_missing", "No complete session snapshot") from exc
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise SessionSnapshotError("session_invalid", "Invalid session manifest") from exc
+
+    def _validate_saved_run(self, root):
+        manifest = self._validate_session_manifest(root, root / "session")
+        summary_fields = {"filename", "reference_map", "molecules", "core_rule", "new_molecules"}
+        if (not isinstance(manifest.get("created_at"), str)
+                or not isinstance(manifest.get("summary"), dict)
+                or not summary_fields <= set(manifest["summary"])):
+            raise SessionSnapshotError("session_invalid", "Invalid previous-result metadata")
+        required = {"session/reference.pkl.gz", "session/state.pkl.gz"}
+        if manifest.get("active_set"):
+            directory = _session_path(root, manifest["active_set"]) / "session"
+            required.add(directory.relative_to(root).as_posix() + "/session_manifest.json")
+            overlay = self._validate_session_manifest(root, directory)
+            if directory.relative_to(root).as_posix() + "/overlay.pkl.gz" not in overlay["files"]:
+                raise SessionSnapshotError("session_invalid", "Missing overlay checksum")
+        if not required <= set(manifest["files"]):
+            raise SessionSnapshotError("session_invalid", "Missing snapshot checksum")
+        return manifest
+
+    def previous_runs(self):
+        runs, unavailable = [], {"missing_snapshot": 0, "incompatible": 0, "modified": 0}
+        if self.output_root.exists():
+            for root in self.output_root.iterdir():
+                if not root.is_dir() or root.is_symlink():
+                    continue
+                try:
+                    manifest = self._validate_saved_run(root)
+                    runs.append({"run_name": root.name, "created_at": manifest["created_at"],
+                                 **manifest["summary"]})
+                except SessionSnapshotError as exc:
+                    key = ("missing_snapshot" if exc.code == "session_missing" else
+                           "incompatible" if exc.code == "session_version" else "modified")
+                    unavailable[key] += 1
+        runs.sort(key=lambda row: (row["created_at"], row["run_name"]), reverse=True)
+        self._listed_run_names = {row["run_name"] for row in runs[:20]}
+        return {"runs": runs[:20], "unavailable": unavailable}
+
+    @staticmethod
+    def _read_session_blob(root, relative):
+        try:
+            with gzip.open(_session_path(root, relative), "rb") as stream:
+                state = SessionUnpickler(stream).load()
+            if not isinstance(state, dict):
+                raise ValueError("Expected a session state mapping")
+            return _session_paths(state, root, restore=True)
+        except SessionSnapshotError:
+            raise
+        except Exception as exc:
+            raise SessionSnapshotError("session_invalid", "Cannot decode the session snapshot") from exc
+
+    def open_run(self, run_name):
+        # Build/open/cache operations cannot replace one another mid-restore.
+        with self.core_compute_lock, self.lock:
+            if self.job.get("state") == "running":
+                raise SessionSnapshotError("map_running", "Wait for the running map")
+            if (not isinstance(run_name, str) or run_name in {"", ".", ".."}
+                    or Path(run_name).name != run_name or "/" in run_name or "\\" in run_name):
+                raise SessionSnapshotError("run_not_listed", "Choose a run from the previous-results list")
+            root = self.output_root / run_name
+            if not root.is_dir() or root.is_symlink():
+                raise SessionSnapshotError("run_not_listed", "Choose a run from the previous-results list")
+            # Validate before checking membership so modified files receive a useful reason.
+            manifest = self._validate_saved_run(root)
+            if getattr(self, "_listed_run_names", None) is None:
+                self.previous_runs()
+            if run_name not in self._listed_run_names:
+                raise SessionSnapshotError("run_not_listed", "Choose a run from the previous-results list")
+            restored = self._read_session_blob(root, "session/reference.pkl.gz")
+            runtime = self._read_session_blob(root, "session/state.pkl.gz")
+            restored.update(runtime)
+            if "active_set" not in restored or restored.pop("active_set") != manifest.get("active_set"):
+                raise SessionSnapshotError("session_invalid", "Active new-molecule set differs")
+            overlay_state = {"new_result": None, "query_options": None, "query_frame": None,
+                             "query_raw": b"", "query_filename": "", "manual_entries": [],
+                             "manual_entry_notes": {}, "measured_results": {}, "measurement_originals": {}}
+            if manifest.get("active_set"):
+                overlay_state = self._read_session_blob(root, manifest["active_set"] + "/session/overlay.pkl.gz")
+            restored.update(overlay_state)
+            expected = set(self._reference_fields + self._runtime_fields + self._overlay_fields)
+            if (set(restored) != expected or not isinstance(restored.get("job"), dict)
+                    or restored["job"].get("state") != "done"):
+                raise SessionSnapshotError("session_invalid", "Incomplete completed session")
+            try:
+                from .pipeline import GridMapResult
+                if not isinstance(restored["result"], GridMapResult):
+                    raise ValueError("Missing reference result")
+                candidate = AppSession(self.output_root)
+                candidate.__dict__.update(restored)
+                candidate.raw = (root / "input.csv").read_bytes()
+                candidate.frame = _read_input(candidate.raw)
+                candidate.core_result = candidate.result
+                # Exercise the same view required by the browser before committing any live state.
+                candidate.session_info()
+                summary = {"run_name": run_name,
+                           "new_set": Path(manifest["active_set"]).name if manifest.get("active_set") else None,
+                           "total": len(candidate.new_result.data) if candidate.new_result is not None else 0,
+                           "manual": len(candidate.manual_entries), "recorded": len(candidate.measured_results)}
+                response = {**candidate.snapshot(), "restored": summary}
+            except (ValueError, TypeError, AttributeError, KeyError, OSError) as exc:
+                raise SessionSnapshotError("session_invalid", "Incomplete session state") from exc
+            # Preserve this server's token and locks; restoration itself writes no files.
+            restored.update(raw=candidate.raw, frame=candidate.frame, core_result=candidate.result,
+                            pending_query=None, group_detail_cache={}, source_index_cache={})
+            self.__dict__.update(restored)
+            return response
+
+
+class AppSession(SavedSessionMixin, ManualMoleculesMixin):
     """One local workspace; a single worker avoids concurrent chemistry/render jobs."""
 
     def __init__(self, output_root):
@@ -594,6 +914,7 @@ class AppSession(ManualMoleculesMixin):
         self.group_cache = {}
         self.group_detail_cache = {}
         self.core_compute_lock = threading.Lock()
+        self.core_progress = {"running": False, "rule": None, "done": 0, "total": 0}
         self.core_result = None
         self.core_rule_cache = {}
         self.group_core_cache = {}
@@ -651,6 +972,7 @@ class AppSession(ManualMoleculesMixin):
                 self.job.update(report=self.reference_report, files=list(self.files),
                                 molecules=len(self.result.data))
             self.group_detail_cache = {}
+            self.save_session()
             return {"query_input": None}
 
     def new_molecules_info(self):
@@ -739,57 +1061,81 @@ class AppSession(ManualMoleculesMixin):
     def set_core_rule(self, rule):
         """Recompute only fixed-group cores; never mutate an original map or its files."""
         with self.core_compute_lock:
-            with self.lock:
-                self._ensure_core_state()
-                built_rule = self.job["options"]["core_rule"]
-                allowed = {"most_frequent", "coverage", "coverage_brics"}
-                if built_rule == "fmcs":
-                    allowed.add("fmcs")
-                if not isinstance(rule, str) or rule not in allowed:
-                    raise ValueError("Unknown or unavailable core rule.")
-                if not self.result.structure_groups:
-                    raise ValueError("This map has no structure groups.")
-                cached = rule in self.core_rule_cache
-                result, options = self.result, dict(self.job["options"])
-            if not cached:
-                # Chemistry runs outside the session lock, so point/inspect requests remain available.
-                started = time.perf_counter()
-                calculated = [self._calculate_group_core(
-                    result, group, rule, options["core_min_coverage"], options["fmcs_timeout"])
-                    for group in result.structure_groups]
-                summaries, metrics = map(list, zip(*calculated))
-                elapsed = time.perf_counter() - started
-                hashes = {}
-                for group in result.structure_groups:
-                    members = self._core_members(result, group).sort_values(["canonical_smiles", "comparison_id"])
-                    hashes[group["structure_group"]] = hashlib.sha256(
-                        members.canonical_smiles.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
-                with self.lock:
-                    if self.result is not result:
-                        raise ValueError("The map changed during core calculation. Try again.")
-                    directory = Path(self.job["output_dir"]) / "core_rules"
-                    directory.mkdir(exist_ok=True)
-                    stem = Path(result.output_files["structure_groups"]).name.removesuffix("_structure_groups.json")
-                    path = directory / f"{stem}_cores_{rule}.csv"
-                    pd.DataFrame(self._core_table_rows(summaries, metrics)).to_csv(
-                        path, index=False, encoding="utf-8", lineterminator="\n")
-                    self._register_core_file(path)
-                    path = directory / f"{stem}_cores_{rule}.json"
-                    metadata = {"core_rule": rule, "parameters": {"core_min_coverage": options["core_min_coverage"]},
-                                "rdkit_version": rdBase.rdkitVersion, "structure_sha256": hashes,
-                                "run_manifest_sha256": hashlib.sha256(
-                                    Path(result.output_files["run_manifest"]).read_bytes()).hexdigest(),
-                                "seconds": elapsed}
-                    path.write_text(json.dumps(metadata, indent=2, allow_nan=False), encoding="utf-8", newline="\n")
-                    self._register_core_file(path)
-                    self.core_rule_cache[rule] = summaries
+            try:
+                return self._set_core_rule(rule)
+            finally:
+                self.core_progress["running"] = False
+
+    def _set_core_rule(self, rule):
+        # The public entry point owns core_compute_lock throughout this operation.
+        with self.lock:
+            self._ensure_core_state()
+            built_rule = self.job["options"]["core_rule"]
+            allowed = {"most_frequent", "coverage", "coverage_brics"}
+            if built_rule == "fmcs":
+                allowed.add("fmcs")
+            if not isinstance(rule, str) or rule not in allowed:
+                raise ValueError("Unknown or unavailable core rule.")
+            if not self.result.structure_groups:
+                raise ValueError("This map has no structure groups.")
+            cached = rule in self.core_rule_cache
+            result, options = self.result, dict(self.job["options"])
+        if not cached:
+            # Chemistry runs outside the session lock, so point/inspect requests remain available.
+            started = time.perf_counter()
+            self.core_progress = {"running": True, "rule": rule, "done": 0,
+                                  "total": len(result.structure_groups)}
+            try:
+                members_by_group = group_core_members(result.data, result.structure_groups)
+                calculated = summarize_group_cores(
+                    [(members.canonical_smiles.tolist(), members.comparison_id.tolist())
+                     for members in members_by_group], core_rule=rule,
+                    core_min_coverage=options["core_min_coverage"],
+                    fmcs_timeout=options["fmcs_timeout"], jobs=browser_core_jobs(),
+                    progress=lambda done, total: self.core_progress.update(done=done, total=total))
+                identity_fields = ("structure_group", "size", "color", "representative_id",
+                                   "representative_smiles", "representative_role", "minimum_center_similarity")
+                summaries = [{**{key: group[key] for key in identity_fields}, **core}
+                             for group, (core, _) in zip(result.structure_groups, calculated)]
+                metrics = [metrics for _, metrics in calculated]
+            except Exception:
+                self.core_progress["running"] = False
+                raise
+            elapsed = time.perf_counter() - started
+            hashes = {}
+            for group, members in zip(result.structure_groups, members_by_group):
+                members = members.sort_values(["canonical_smiles", "comparison_id"])
+                hashes[group["structure_group"]] = hashlib.sha256(
+                    members.canonical_smiles.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
             with self.lock:
                 if self.result is not result:
                     raise ValueError("The map changed during core calculation. Try again.")
-                self.current_core_rule = rule
-                self.group_detail_cache = {}
-                return {"rule": rule, "build_rule": built_rule, "groups": self.groups(),
-                        "files": list(self.files), "cached": cached}
+                directory = Path(self.job["output_dir"]) / "core_rules"
+                directory.mkdir(exist_ok=True)
+                stem = Path(result.output_files["structure_groups"]).name.removesuffix("_structure_groups.json")
+                path = directory / f"{stem}_cores_{rule}.csv"
+                pd.DataFrame(self._core_table_rows(summaries, metrics)).to_csv(
+                    path, index=False, encoding="utf-8", lineterminator="\n")
+                self._register_core_file(path)
+                path = directory / f"{stem}_cores_{rule}.json"
+                metadata = {"core_rule": rule, "parameters": {"core_min_coverage": options["core_min_coverage"]},
+                            "rdkit_version": rdBase.rdkitVersion, "structure_sha256": hashes,
+                            "run_manifest_sha256": hashlib.sha256(
+                                Path(result.output_files["run_manifest"]).read_bytes()).hexdigest(),
+                            "seconds": elapsed}
+                path.write_text(json.dumps(metadata, indent=2, allow_nan=False), encoding="utf-8", newline="\n")
+                self._register_core_file(path)
+                self.core_rule_cache[rule] = summaries
+        with self.lock:
+            if self.result is not result:
+                raise ValueError("The map changed during core calculation. Try again.")
+            self.current_core_rule = rule
+            self.group_detail_cache = {}
+            self.save_session()
+            self.core_progress = {"running": False, "rule": rule,
+                                  "done": len(result.structure_groups), "total": len(result.structure_groups)}
+            return {"rule": rule, "build_rule": built_rule, "groups": self.groups(),
+                    "files": list(self.files), "cached": cached}
 
     def group_cores(self, group_id):
         """Compare four core rules for one fixed group; FMCS has a ten-second budget."""
@@ -822,6 +1168,7 @@ class AppSession(ManualMoleculesMixin):
                 payload = {"group": group_id, "cores": cores, "file": self._register_core_file(path),
                            "fmcs_timeout": 10}
                 self.group_core_cache[group_id] = payload
+                self.save_session()
                 return {**payload, "rule": self.current_core_rule}
 
     def insert_new(self, options=None):
@@ -887,6 +1234,7 @@ class AppSession(ManualMoleculesMixin):
                     "min": min(differences), "max": max(differences), "count": len(differences)}
             self.group_detail_cache = {}
             self.job.update(report=report, files=list(self.files), molecules=len(self.result.data) + len(inserted.data))
+            self.save_session(overlay=True)
             return self.snapshot()
 
     def load_source(self, content, filename):
@@ -1111,6 +1459,7 @@ class AppSession(ManualMoleculesMixin):
                 cluster_col=options["cluster_col"], cluster_source=options["cluster_source"],
                 grid_refinement=options["grid_refinement"], core_rule=options["core_rule"],
                 core_min_coverage=options["core_min_coverage"], fmcs_timeout=options["fmcs_timeout"],
+                jobs=browser_core_jobs(),
                 confidence_threshold=options["support_level"],
                 offset_display=options["offset_display"],
                 offset_min_shared=options["offset_min_shared"],
@@ -1180,6 +1529,8 @@ class AppSession(ManualMoleculesMixin):
                                 options=options, files=list(files), elapsed=time.time() - self.job["started"])
                 if self.query_frame is not None:
                     self.insert_new(self.query_options)
+                else:
+                    self.save_session(initial=True)
         except Exception as exc:
             self.update(state="error", message=str(exc), output_dir=str(directory))
 
@@ -1244,6 +1595,7 @@ class AppSession(ManualMoleculesMixin):
             self.reference_files[name] = path
             payload['archive'] = name
             self.group_cache[cache_key] = payload
+            self.save_session()
             return payload
 
     def reference_map_info(self):
@@ -1277,6 +1629,18 @@ class AppSession(ManualMoleculesMixin):
             if self.result is not None:
                 snapshot["reference_map"] = self.reference_map_info()
             return snapshot
+
+    def session_info(self):
+        payload = {"version": __version__, "umap": importlib.util.find_spec("umap") is not None,
+                   "output_root": str(self.output_root), "demo_available": DEMO.exists(),
+                   "input": self.input_info(), "job": self.snapshot()}
+        if self.query_input_info() is not None:
+            payload["query_input"] = self.query_input_info()
+        if self.new_result is not None:
+            payload["new_molecules"] = self.new_molecules_info()
+        if self.source_frame is not None:
+            payload["source_input"] = self.source_input_info()
+        return payload
 
     def _uploaded_new_source_records(self):
         """Use retained measurements, or uploaded batches for unmeasured molecules."""
@@ -1765,16 +2129,11 @@ class LocalHandler(BaseHTTPRequestHandler):
                 asset = ASSETS / ("index.html" if path == "/" else path[1:])
                 self.send(asset.read_bytes(), mimetypes.guess_type(asset.name)[0] or "text/plain")
             elif path == "/api/session":
-                payload = {"version": __version__, "umap": importlib.util.find_spec("umap") is not None,
-                           "output_root": str(session.output_root), "demo_available": DEMO.exists(),
-                           "input": session.input_info(), "job": session.snapshot()}
-                if session.query_input_info() is not None:
-                    payload["query_input"] = session.query_input_info()
-                if session.new_result is not None:
-                    payload["new_molecules"] = session.new_molecules_info()
-                if session.source_frame is not None:
-                    payload["source_input"] = session.source_input_info()
-                self.send(payload)
+                self.send(session.session_info())
+            elif path == "/api/core-progress":
+                self.send(dict(session.core_progress))
+            elif path == "/api/previous-runs":
+                self.send(session.previous_runs())
             elif path == "/api/job":
                 self.send(session.snapshot())
             elif path == "/api/points":
@@ -1816,6 +2175,8 @@ class LocalHandler(BaseHTTPRequestHandler):
                     self.send(detail)
             else:
                 self.send({"error": "Not found."}, status=404)
+        except SessionSnapshotError as exc:
+            self.send(exc.payload(), status=400)
         except (ValueError, KeyError, OSError) as exc:
             self.send({"error": str(exc)}, status=400)
 
@@ -1861,13 +2222,20 @@ class LocalHandler(BaseHTTPRequestHandler):
                 self.send(session.snapshot(), status=202)
             elif path == "/api/core-rule":
                 self.send(session.set_core_rule(json.loads(content).get("rule")))
+            elif path == "/api/open-run":
+                restored = session.open_run(json.loads(content).get("run_name"))["restored"]
+                self.send({**session.session_info(), "restored": restored})
             elif path == "/api/shutdown":
                 if session.snapshot()["state"] == "running":
                     raise ValueError("Wait for the current map to finish before closing the app.")
+                with session.core_compute_lock:
+                    shutdown_core_workers()
                 self.send({"message": "Local app stopped. Your saved results remain on disk."})
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
             else:
                 self.send({"error": "Not found."}, status=404)
+        except SessionSnapshotError as exc:
+            self.send(exc.payload(), status=400)
         except (ValueError, OSError) as exc:
             self.send({"error": str(exc)}, status=400)
 
@@ -1900,12 +2268,18 @@ def main(argv=None):
     print(f"ChemGridMap {__version__} | Local files stay on this computer.\n{url}\nUse Quit in the interface or Ctrl+C to stop.", flush=True)
     if not args.no_browser:
         threading.Timer(.5, webbrowser.open, args=(url,)).start()
+    def stop_app(signum, frame):
+        raise KeyboardInterrupt
+
+    previous_term = signal.signal(signal.SIGTERM, stop_app)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        shutdown_core_workers()
         server.server_close()
+        signal.signal(signal.SIGTERM, previous_term)
     return 0
 
 

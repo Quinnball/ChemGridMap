@@ -91,6 +91,7 @@ def build_grid_map(
     core_rule: str = "coverage",
     core_min_coverage: float = 0.8,
     fmcs_timeout: int = 1,
+    jobs: int = 1,
     compound_col: Optional[str] = None,
     document_col: Optional[str] = None,
     relation_col: Optional[str] = None,
@@ -199,6 +200,8 @@ def build_grid_map(
         Coverage target for coverage and FMCS cores.
     fmcs_timeout : int, default 1
         FMCS search budget in seconds.
+    jobs : int, default 1
+        Core worker processes; small maps and FMCS remain serial.
     compound_col : str, optional
         Compound identifier for generic activity records.
     document_col : str, optional
@@ -480,7 +483,7 @@ def build_grid_map(
             cluster_col=cluster_col if grouping == "external" else None,
             cluster_source=cluster_source if grouping == "external" else None,
             core_rule=core_rule, core_min_coverage=core_min_coverage,
-            fmcs_timeout=fmcs_timeout)
+            fmcs_timeout=fmcs_timeout, jobs=jobs)
         result_data = group_data
 
     values = None

@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from rdkit import Chem
 
-from chemgridmap import cores
+from chemgridmap import cores, app as app_module
 from chemgridmap.app import AppSession, validate_options
 from chemgridmap.cli import build_parser
 from chemgridmap.comparison import structural_groups
@@ -30,7 +30,7 @@ def make_session(tmp_path, rule='coverage'):
 
 def hashes(directory):
     return {p.relative_to(directory).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in directory.rglob('*') if p.is_file()}
+            for p in directory.rglob('*') if p.is_file() and 'session' not in p.relative_to(directory).parts}
 
 
 def test_brics_candidates_are_ring_containing_dummy_free_and_deterministic():
@@ -160,13 +160,13 @@ def test_new_molecule_uses_current_rule_without_rewriting_exports(tmp_path, meas
 
 def test_core_computation_does_not_hold_session_lock(tmp_path, monkeypatch):
     session = make_session(tmp_path)
-    original = session._calculate_group_core
+    original = app_module.summarize_group_cores
     entered, release = threading.Event(), threading.Event()
     def paused(*args, **kwargs):
         entered.set()
         assert release.wait(5)
         return original(*args, **kwargs)
-    monkeypatch.setattr(session, '_calculate_group_core', paused)
+    monkeypatch.setattr(app_module, 'summarize_group_cores', paused)
     errors = []
     def calculate():
         try:
@@ -181,11 +181,17 @@ def test_core_computation_does_not_hold_session_lock(tmp_path, monkeypatch):
         session.lock.release()
         assert len(session.points()) == len(SMILES)
         assert session.snapshot()['state'] == 'done'
+        from test_app_u8_session import api
+        progress = api(session, '/api/core-progress')
+        assert progress['status'] == 200 and progress['data'] == {
+            'running': True, 'rule': 'coverage_brics', 'done': 0, 'total': len(session.result.structure_groups)}
         assert session.group_detail(session.groups()[0]['structure_group'])['summary']['core_rule'] == 'coverage'
     finally:
         release.set()
         worker.join(10)
     assert not errors and not worker.is_alive()
+    assert session.core_progress['running'] is False
+    assert session.core_progress['done'] == session.core_progress['total']
 
 
 def test_invalid_rules_and_fmcs_build_rule(tmp_path):

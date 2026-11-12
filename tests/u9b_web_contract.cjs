@@ -37,13 +37,13 @@ const scenarios={
  async errors(){
   const {api}=await setup();
   const appSource=fs.readFileSync(path.join(process.argv[2],'..','app.py'),'utf8');
-  const source=appSource.slice(appSource.indexOf('def normalize_measurement('),appSource.indexOf('\nclass AppSession('));
+  const source=appSource.slice(appSource.indexOf('def normalize_measurement('),appSource.indexOf('\n# Snapshots are private local caches'));
   assert.match(source,/class ManualMoleculesMixin/);
   for(const [,message] of source.matchAll(/raise ValueError\("([^"]+)"\)/g)){api.setLanguage('en');assert.equal(api.translateServer(message),message);api.setLanguage('zh');assert.notEqual(api.translateServer(message),message,message);}
  },
  async controls(){
   const {context,$,api,document}=await setup();
-  assert.equal(document.querySelectorAll('[data-help]').length,77);
+  assert.equal(document.querySelectorAll('[data-help]').length,80);
   for(const language of ['en','zh']){
    api.setLanguage(language);
    for(const tab of ['upload','one']){$('new-'+tab+'-tab').click();assert.equal($('new-'+tab+'-panel').hidden,false);assert.equal($('new-'+tab+'-tab').getAttribute('aria-selected'),'true');assert.equal($('new-'+(tab==='one'?'upload':'one')+'-panel').hidden,true);}
@@ -158,7 +158,7 @@ const scenarios={
   cell.querySelector=selector=>selector===':scope > rect'?rect:cell.children.find(item=>selector.includes('data-neighbor-mismatch')&&item.dataset.neighborMismatch)||null;
   $('map-stage').querySelectorAll=()=>[cell];
   for(const language of ['en','zh'])for(const mode of ['activity','support','reliability','structure','neighbor_evidence']){
-   api.setLanguage(language);$('color-mode').value=mode;context.colorMap();const markers=cell.children.filter(item=>item.dataset.neighborMismatch);assert.equal(markers.length,1);assert.match(markers[0].getAttribute('d'),/^M111,202/);assert.ok($('legend').textContent.includes(api.t('u9b.mismatchLegend')));
+   api.setLanguage(language);$('color-mode').value=mode;context.colorMap();const markers=cell.children.filter(item=>item.dataset.neighborMismatch);assert.equal(markers.length,1);assert.match(markers[0].getAttribute('d'),/^M111,200/);assert.ok($('legend').textContent.includes(api.t('u9b.mismatchLegend')));
   }
   const backendMarker=cell.children.find(item=>item.dataset.neighborMismatch);backendMarker.setAttribute('data-rendered-by','server');context.colorMap();assert.equal(cell.children.filter(item=>item.dataset.neighborMismatch).length,1);assert.equal(cell.children.find(item=>item.dataset.neighborMismatch),backendMarker);assert.equal(backendMarker.getAttribute('fill'),'#6f1d6b');assert.equal($('legend').querySelector('.neighbor-mismatch-legend').firstElementChild.style.background,'#6f1d6b');
   context.points=[reference,{...measured,neighbor_comparison:'agrees'}];context.colorMap();assert.equal(cell.children.filter(item=>item.dataset.neighborMismatch).length,0);

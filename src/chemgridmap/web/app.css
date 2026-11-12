@@ -207,5 +207,15 @@ html[lang="zh-CN"] #query-csv:disabled + .localized-file-picker, html[lang="zh-C
 #measured-result-summary dl { margin: 8px 0; }
 #measured-result-location { overflow-wrap: anywhere; }
 #new-list-feedback-counts { font-weight: bold; }
-#map-stage [data-neighbor-mismatch] { pointer-events: none; }
+#map-stage [data-neighbor-mismatch] { visibility: hidden; pointer-events: none; }
+#map-stage [data-mismatch-overlay] { pointer-events: none; }
+#map-stage [data-mismatch-overlay] path { pointer-events: visiblePainted; cursor: help; }
 .neighbor-mismatch-legend i { border: 1px solid #fff; transform: rotate(45deg); }
+
+.previous-results { margin-top: 20px; }
+.previous-actions { display: flex; gap: 8px; align-items: center; }
+#previous-results-panel { margin-top: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; }
+#previous-results-panel label { display: block; font-size: 12px; margin-bottom: 7px; }
+#previous-run-select { display: block; width: 100%; max-width: 100%; font-size: 11px; }
+#previous-run-select option { padding: 8px; white-space: normal; overflow-wrap: anywhere; }
+#previous-results-status.error { color: #962f37; }

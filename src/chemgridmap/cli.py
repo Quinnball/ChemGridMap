@@ -46,6 +46,13 @@ def _positive_float(value: str) -> float:
     return number
 
 
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("Value must be a positive integer.")
+    return number
+
+
 def _assumed_sigma(value: str) -> float:
     number = float(value)
     if not math.isfinite(number) or number <= 0:
@@ -305,6 +312,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--fmcs-timeout", type=int, default=1,
         help="FMCS search budget in seconds. Timeout may make results machine-dependent.")
     parser.add_argument(
+        "--jobs", type=_positive_int, default=1,
+        help="Core worker processes; small maps and FMCS remain serial. "
+             "Only the browser reads CHEMGRIDMAP_JOBS.")
+    parser.add_argument(
         "--core-min-coverage", type=_core_min_coverage, default=0.8,
         help="Coverage target for coverage/FMCS rules; range: 0.5–1.")
     parser.add_argument(
@@ -542,6 +553,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         grid_refinement=args.grid_refinement,
         core_rule=args.core_rule,
         fmcs_timeout=args.fmcs_timeout,
+        jobs=args.jobs,
         core_min_coverage=args.core_min_coverage,
         confidence_threshold=args.support_level,
         offset_display=args.offset_display,

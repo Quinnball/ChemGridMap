@@ -125,7 +125,7 @@ const scenarios={
     assert.equal($('map-core-rule').options.at(-1).textContent,language==='zh'?'FMCS（建图时计算）':'FMCS (computed when building the map)');
     assert.equal($('map-core-rule').value,'fmcs');
     assert.ok($('core-rule').options.some(o=>o.value==='coverage_brics'));
-    assert.equal(document.querySelectorAll('[data-help]').length,77);
+    assert.equal(document.querySelectorAll('[data-help]').length,80);
     assert.equal($('map-core-rule-help').dataset.help,'h.map-core-rule');
     assert.equal($('group-core-comparison-help').dataset.help,'h.group-core-comparison');
     assert.ok(dictionaries[language]['h.core-rule'].includes('BRICS'));
@@ -141,7 +141,7 @@ const scenarios={
     assert.equal($('map-core-rule').disabled,true);assert.equal($('compare-group').disabled,true);assert.equal($('selected-group-button').disabled,true);
     assert.equal($('fit').disabled,false);assert.equal($('zoom-in').disabled,false);assert.equal($('grid-tab').disabled,false);
     context.renderCoreRuleOptions();assert.equal($('map-core-rule').value,'coverage_brics','语言重绘期间保持正在请求的规则');
-    assert.equal($('core-rule-status').textContent,language==='zh'?'正在按「覆盖目标比例的最大核心骨架（含 BRICS 片段）」计算 1 个组的核心…':'Computing cores for 1 groups using “Largest core covering the target share, including BRICS fragments”…');
+    assert.equal($('core-rule-status').textContent,language==='zh'?'正在按「覆盖目标比例的最大核心骨架（含 BRICS 片段）」计算核心：已完成 0/1 组':'Computing cores using “Largest core covering the target share, including BRICS fragments”: 0/1 groups complete');
     const changed={...group,core_rule:'coverage_brics',core_coverage_count:2,core_coverage_fraction:2/3};
     finish({rule:'coverage_brics',groups:[changed],files:['core_rules/run_cores_coverage_brics.csv']});await pending;
     assert.equal(context.job.current_core_rule,'coverage_brics');assert.equal(context.switchCoreRule.busy,false);assert.equal($('map-core-rule').disabled,false);assert.equal($('compare-group').disabled,false);

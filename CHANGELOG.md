@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Compute independent non-FMCS group cores with shared ordered loky workers in
+  browser builds and rule switches; add per-second progress, `CHEMGRIDMAP_JOBS`
+  and opt-in library/CLI `jobs` while retaining serial defaults outside the app.
+  Keep FMCS serial and retain existing scientific output bytes.
+- Save compressed, versioned and hash-verified session caches outside existing
+  exports/ZIPs. Open the latest compatible local results without recomputation,
+  restoring original settings, core caches and active inserted molecules,
+  including manual additions and measured feedback. Restrict deserialization and
+  reject incompatible, modified, incomplete or unsafe sessions before applying them.
+- Improve browser disagreement diamonds with zoom-aware size, bilingual measured
+  versus neighbor-evidence tooltips, and an overlay above selection outlines.
+  Keep the legend text and exported SVG unchanged. Add bilingual restore controls
+  and help, plus Node VM coverage for progress, lists, restoration and markers.
+
 - Add a bilingual one-molecule form with SMILES preview, automatic IDs and
   append-only placement in the fixed reference grid. Record, edit and remove
   manual measured results; retain imported measurements as read-only. Show

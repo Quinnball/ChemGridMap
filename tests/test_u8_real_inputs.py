@@ -32,7 +32,8 @@ def check_insertion_files(inserted, raw, reference_directory):
         expected.add("new_molecules_excluded_records.csv")
     paths = [Path(value) for value in inserted.output_files.values()]
     directory = paths[0].parent
-    assert {path.name for path in directory.iterdir()} == expected
+    # 会话旁路存储不属于科学输出，也不得进入结果 ZIP。
+    assert {path.name for path in directory.iterdir() if path.name != "session"} == expected
     assert (directory / "new_molecules_input.csv").read_bytes() == raw
     assert inserted.check.columns.tolist() == QUERY_CHECK_COLUMNS
     assert inserted.neighbors.columns.tolist() == QUERY_NEIGHBOR_COLUMNS
