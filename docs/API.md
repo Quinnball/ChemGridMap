@@ -722,3 +722,59 @@ It returns the current rule, build rule, group summaries, downloadable files and
 FMCS can be restored only when it was the build rule; global switching never starts new FMCS jobs.
 `GET /api/group-cores?group=ID` returns four core summaries with SVGs, timing and the comparison CSV;
 FMCS receives a fixed 10-second budget. Existing group membership and map coordinates are unchanged.
+
+## Manual new molecules and measured results
+
+These local endpoints use the same session token as the existing new-molecule
+API. A completed Morgan reference map is required. Validation failures return
+HTTP 400 with an `error`; rejected previews return an explicit status.
+
+| Method and path | Payload or response |
+|---|---|
+| `POST /api/new-molecules/preview` | `{"smiles":"CCF"}`; returns `status`, `canonical_smiles`, `svg`, and `reference_id` or `query_id` when matched. Status is `ok`, `invalid`, `in_reference` or `duplicate_new`. |
+| `POST /api/new-molecules/add` | `smiles`, optional `query_id`, `label`, `note`, and `measurement`; appends to the current collection. |
+| `POST /api/new-molecules/result` | `query_id` and `measurement`; records or updates a manual measured result. Uploaded measured results are read-only. |
+| `POST /api/new-molecules/result/clear` | `{"query_id":"M001"}`; removes a manual result and restores the unmeasured state. |
+| `GET /api/new-molecules/feedback` | Downloads `neighbor_evidence_feedback.csv`; also creates the export on demand for an otherwise unchanged uploaded collection. |
+
+An exact value uses this shared measurement object:
+
+```json
+{"mode":"value","value":100,"unit":"nM","batch":"R1","note":"Exact measurement"}
+```
+
+A qualitative or censored result uses:
+
+```json
+{"mode":"class","measured_class":"inactive","batch":"R2","note":"> 10 µM"}
+```
+
+Supported units are `pActivity`, `M`, `mM`, `µM`, `nM` and `pM`; values must be
+finite and strictly positive. `units.convert_activity_values` performs conversion,
+and the reference map's thresholds determine the class. Class-only input accepts
+`active`, `medium` or `inactive`, leaves pActivity empty and sets
+`class_source=user_class`. Batch and note are optional free text.
+
+Successful add/result/clear calls return `status=ok`, `query_id`, `row`, `point`
+and `job`. Add can instead return the same rejected status as preview. IDs default
+to the first unused `M001`, `M002`, etc.; supplied IDs must be unique in the current
+new-molecule set. Normalization and group assignment use the file insertion path.
+Only the new cell is appended in the browser; existing reference and new cells
+remain fixed. Results change only that molecule's measurement and comparison.
+
+`GET /api/new-molecules` adds `directory` and
+`replacement={total,manual,recorded,directory}` for the replacement confirmation.
+Its rows expose `result_source` (`upload`, `manual`, `recorded` or empty),
+`measured_value`, `measured_unit`, `measured_class`, `class_source`, `batch`,
+`note` and `recorded_at`. The report adds `manual_count` and
+`feedback_counts={recorded,agrees,disagrees,no_comparison}`. The inspector adds
+`measured_result`, including editability and the current neighbor comparison.
+The session remains available after browser refresh, but is not restored
+automatically after restarting the application.
+
+Hand-entered changes update the collection's CSVs, SVG, manifest and ZIP.
+`manual_entries.csv` records manual additions and its SHA-256 and row count are
+stored in the manifest. `neighbor_evidence_feedback.csv` covers all currently
+measured new molecules, including uploaded results. Original uploaded bytes and
+reference exports are never rewritten. File-only insertion retains its previous
+output contract until a manual action or explicit feedback download is requested.

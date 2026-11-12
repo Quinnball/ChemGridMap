@@ -9,9 +9,10 @@ async function labels() {
     ['new-activity-col', 'u8.activityColumn'], ['new-unit', 's.054'], ['new-unit-col', 's.055'],
     ['new-relation-col', 's.058'], ['new-document-col', 's.056'], ['new-label-col', 'u8.labelColumn'],
     ['new-class-filter', 'u8.categoryFilter'], ['new-label-filter', 'u8.labelFilter'],
+    ...['smiles','id','label','mode','value','unit','class','batch','note'].map(name => ['single-'+name,'u9b.'+name]),
   ]);
-  assert.equal(document.querySelectorAll('[data-help]').length, 60);
-  assert.equal(document.querySelectorAll('dialog [data-help]').length, expected.size);
+  assert.equal(document.querySelectorAll('[data-help]').length, 77);
+  assert.equal(document.querySelectorAll('dialog [data-help]').length, expected.size + 1);
   for (const language of ['en', 'zh', 'en']) {
     api.setLanguage(language);
     for (const [control, key] of expected) {
@@ -80,7 +81,7 @@ async function dialogHelp() {
     }
     dialog.close();
   }
-  assert.equal(checked, 11, 'Every question mark in every dialog checked');
+  assert.equal(checked, 21, 'Every question mark in every dialog checked');
   const outside = document.querySelector('[data-help-control="input-format"]');
   api.showHelp(outside);
   assert.equal(tooltip.parentNode, document.body, 'Help returns to body outside dialogs');

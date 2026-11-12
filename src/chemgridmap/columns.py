@@ -361,6 +361,42 @@ def _unit(entry, filename):
     return entry.get("by_file_units", {}).get(filename, entry["unit_or_values"])
 
 
+# Optional manual exports extend only their own schemas, preserving all legacy dictionaries.
+from .app import MANUAL_COLUMNS, FEEDBACK_COLUMNS
+
+_MANUAL_DESCRIPTIONS = {
+    "value": ("Exact manually entered value; empty for a qualitative class.", "entered unit"),
+    "unit": ("Unit of the entered exact value.", "pActivity, M, mM, µM, nM, pM"),
+    "measured_value": ("Exact entered value; uploaded multiple-record aggregates use pActivity.", "measured_unit"),
+    "measured_unit": ("Unit of the measured value.", "pActivity, M, mM, µM, nM, pM"),
+    "measured_class": ("Measured class, from an exact value or qualitative user choice.", "active, medium, inactive"),
+    "class_source": ("Origin of the measured class.", "value, user_class"),
+    "result_source": ("Origin of the measured result.", "upload, manual, recorded"),
+    "batch": ("User-supplied batch or publication used as an evidence unit.", "text"),
+    "note": ("User-supplied note.", "text"),
+    "entered_at": ("Time the molecule was manually added.", "ISO 8601 with timezone"),
+    "recorded_at": ("Last manual result save time; empty for uploaded results.", "ISO 8601 with timezone"),
+    "nearest_reference_similarity": ("Morgan Tanimoto similarity to the placement reference.", "0 to 1"),
+    "contains_group_core_rule": ("Rule used for the saved new-molecule core match; API inspection uses the current map rule.", "coverage, coverage_brics, most_frequent, fmcs"),
+}
+for _filename, _names in (("manual_entries.csv", MANUAL_COLUMNS),
+                           ("neighbor_evidence_feedback.csv", FEEDBACK_COLUMNS)):
+    for _name in _names:
+        if _name not in COLUMNS:
+            _meaning, _units = _MANUAL_DESCRIPTIONS[_name]
+            COLUMNS[_name] = _entry((), _meaning, _units)
+        COLUMNS[_name]["files"] += (_filename,)
+        if _name == "neighbor_comparison":
+            COLUMNS[_name]["by_file_units"] = {**COLUMNS[_name].get("by_file_units", {}),
+                                               _filename: "agrees, disagrees, no_comparison"}
+for _name in _MANUAL_DESCRIPTIONS:
+    if _name not in {"value", "unit", "entered_at"}:
+        if _name not in COLUMNS:
+            _meaning, _units = _MANUAL_DESCRIPTIONS[_name]
+            COLUMNS[_name] = _entry((), _meaning, _units)
+        COLUMNS[_name]["files"] += ("new_molecules.csv",)
+
+
 def describe(columns, files):
     """Return one dictionary entry per emitted column, expanding class patterns."""
     rows = []
@@ -434,6 +470,25 @@ def output_columns_markdown(frames=None) -> str:
         "Reference layout, metrics, diagnostics and original ZIP contain reference molecules only.",
         "New-molecule neighbors summarize observed reference evidence, never predictions.",
         "Legacy query-named schema sections below describe the retained low-level query functions.", "",
+        '## Manual-entry and measured-result feedback outputs',
+        '',
+        '`manual_entries.csv` has one row per manually added molecule. Its SHA-256 and row count',
+        'are recorded in `new_molecules_manifest.json`. `neighbor_evidence_feedback.csv` includes',
+        'all currently measured new molecules, including uploaded results. Saving, modifying or',
+        'clearing a manual result rewrites this table and the current collection ZIP. An explicit',
+        'feedback download can also create it for an unchanged uploaded collection. File-only',
+        'insertion retains its original outputs until a manual action or feedback download.',
+        '',
+        'Class-only results use `class_source=user_class` and leave numeric activity empty.',
+        '`no_comparison` covers absent, insufficient or mixed neighbor evidence. These tables',
+        'record observations and their agreement with reference evidence; no activity is predicted.',
+        'Timestamps use ISO 8601 with a timezone; unknown uploaded recording times remain blank.',
+        'Browser refresh retains the current session; restarting does not restore it automatically.',
+        '',
+        'Exact CSV column order:',
+        '',
+        "- `manual_entries.csv`: " + ", ".join(f"`{name}`" for name in MANUAL_COLUMNS) + ".",
+        "- `neighbor_evidence_feedback.csv`: " + ", ".join(f"`{name}`" for name in FEEDBACK_COLUMNS) + ".", "",
         "## Own-data CLI options", "",
         "| Option | Meaning |", "|---|---|",
         "| `--value-unit {p,M,mM,uM,nM,pM}` | Default `p` preserves existing pActivity values; concentrations become −log10 mol/L. |",
@@ -482,6 +537,64 @@ def api_markdown() -> str:
         "FMCS can be restored only when it was the build rule; global switching never starts new FMCS jobs.",
         "`GET /api/group-cores?group=ID` returns four core summaries with SVGs, timing and the comparison CSV;",
         "FMCS receives a fixed 10-second budget. Existing group membership and map coordinates are unchanged.", "",
+    ])
+    lines.extend([
+        '## Manual new molecules and measured results',
+        '',
+        'These local endpoints use the same session token as the existing new-molecule',
+        'API. A completed Morgan reference map is required. Validation failures return',
+        'HTTP 400 with an `error`; rejected previews return an explicit status.',
+        '',
+        '| Method and path | Payload or response |',
+        '|---|---|',
+        '| `POST /api/new-molecules/preview` | `{"smiles":"CCF"}`; returns `status`, `canonical_smiles`, `svg`, and `reference_id` or `query_id` when matched. Status is `ok`, `invalid`, `in_reference` or `duplicate_new`. |',
+        '| `POST /api/new-molecules/add` | `smiles`, optional `query_id`, `label`, `note`, and `measurement`; appends to the current collection. |',
+        '| `POST /api/new-molecules/result` | `query_id` and `measurement`; records or updates a manual measured result. Uploaded measured results are read-only. |',
+        '| `POST /api/new-molecules/result/clear` | `{"query_id":"M001"}`; removes a manual result and restores the unmeasured state. |',
+        '| `GET /api/new-molecules/feedback` | Downloads `neighbor_evidence_feedback.csv`; also creates the export on demand for an otherwise unchanged uploaded collection. |',
+        '',
+        'An exact value uses this shared measurement object:',
+        '',
+        '```json',
+        '{"mode":"value","value":100,"unit":"nM","batch":"R1","note":"Exact measurement"}',
+        '```',
+        '',
+        'A qualitative or censored result uses:',
+        '',
+        '```json',
+        '{"mode":"class","measured_class":"inactive","batch":"R2","note":"> 10 µM"}',
+        '```',
+        '',
+        'Supported units are `pActivity`, `M`, `mM`, `µM`, `nM` and `pM`; values must be',
+        'finite and strictly positive. `units.convert_activity_values` performs conversion,',
+        "and the reference map's thresholds determine the class. Class-only input accepts",
+        '`active`, `medium` or `inactive`, leaves pActivity empty and sets',
+        '`class_source=user_class`. Batch and note are optional free text.',
+        '',
+        'Successful add/result/clear calls return `status=ok`, `query_id`, `row`, `point`',
+        'and `job`. Add can instead return the same rejected status as preview. IDs default',
+        'to the first unused `M001`, `M002`, etc.; supplied IDs must be unique in the current',
+        'new-molecule set. Normalization and group assignment use the file insertion path.',
+        'Only the new cell is appended in the browser; existing reference and new cells',
+        "remain fixed. Results change only that molecule's measurement and comparison.",
+        '',
+        '`GET /api/new-molecules` adds `directory` and',
+        '`replacement={total,manual,recorded,directory}` for the replacement confirmation.',
+        'Its rows expose `result_source` (`upload`, `manual`, `recorded` or empty),',
+        '`measured_value`, `measured_unit`, `measured_class`, `class_source`, `batch`,',
+        '`note` and `recorded_at`. The report adds `manual_count` and',
+        '`feedback_counts={recorded,agrees,disagrees,no_comparison}`. The inspector adds',
+        '`measured_result`, including editability and the current neighbor comparison.',
+        'The session remains available after browser refresh, but is not restored',
+        'automatically after restarting the application.',
+        '',
+        "Hand-entered changes update the collection's CSVs, SVG, manifest and ZIP.",
+        '`manual_entries.csv` records manual additions and its SHA-256 and row count are',
+        'stored in the manifest. `neighbor_evidence_feedback.csv` covers all currently',
+        'measured new molecules, including uploaded results. Original uploaded bytes and',
+        'reference exports are never rewritten. File-only insertion retains its previous',
+        'output contract until a manual action or explicit feedback download is requested.',
+        '',
     ])
     return "\n".join(lines)
 

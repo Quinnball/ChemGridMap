@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Add a bilingual one-molecule form with SMILES preview, automatic IDs and
+  append-only placement in the fixed reference grid. Record, edit and remove
+  manual measured results; retain imported measurements as read-only. Show
+  neighbor-evidence disagreements on every color layer and in a filterable
+  list, with manual-entry and feedback CSVs, manifest hashes and updated ZIPs.
+  Preserve existing reference and file-only insertion outputs.
+- Evaluate coverage cores by descending heavy-atom count with an early failure
+  cutoff, completing tied candidates at the first qualifying size. Preserve
+  the original exhaustive fallback, candidate generation and selection rules.
+
 - Add retained-source highlighting with distinct mapped-molecule counts,
   source unions and separate inserted-molecule batches on all map layers.
 - Add the optional `coverage_brics` core rule, cached map-page rule switches,

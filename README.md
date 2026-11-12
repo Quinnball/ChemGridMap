@@ -363,6 +363,29 @@ one-row-per-molecule results, tie-inclusive neighbors, an activity SVG,
 a manifest and a ZIP. Original reference files are not changed. See
 [新分子详细规则与输出文件](docs/NEW_MOLECULES.md).
 
+“加入新分子”也提供“单个分子”页签：输入 SMILES 后预览结构，填写可选 ID、
+标签、备注及实测结果，再追加到当前集合。未填 ID 时自动使用 `M001`、`M002`
+等不重复编号；已有分子的字段和格子保持不变。没有集合时写入
+`new_molecules/manual/`。数值结果支持 pActivity、M、mM、µM、nM、pM，
+按参照图阈值分类；只有定性或截尾结果时可直接选择类别。
+
+**One molecule** previews a SMILES and appends it to the current set. Optional
+fields include ID, label, batch, note and a measured result. Existing molecules
+keep their cells. The new-molecule inspector can record, edit or remove a manual
+result; measurements imported from a file remain read-only. Disagreement with
+consistent neighbor evidence gets an upper-left marker on every color layer.
+The list can filter these molecules and download the measured-result comparison.
+This evidence is not an activity prediction, and recording a result changes
+neither the reference map nor other molecules' neighbor evidence.
+
+Manual changes update the current collection's outputs and ZIP, adding
+`manual_entries.csv` for manually added molecules and
+`neighbor_evidence_feedback.csv` for measured results. The original uploaded
+input stays byte-identical. Refreshing the browser retains these changes in the
+running session; restarting the software does not automatically restore them.
+Uploading a replacement file asks for confirmation when manual work is present,
+and keeps its saved output folder. Endpoint details are in [API.md](docs/API.md).
+
 ## Python API
 
 The public functions for evidence units, σ_doc, class probabilities, offset

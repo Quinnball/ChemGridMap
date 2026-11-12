@@ -196,3 +196,16 @@ html[lang="zh-CN"] #query-csv:disabled + .localized-file-picker, html[lang="zh-C
 #new-molecules-dialog .query-input { border: 0; padding-top: 0; margin-top: 12px; }
 #new-molecules-dialog { max-height: 90vh; overflow: auto; }
 #new-records { margin-bottom: 16px; }
+
+/* 单条与反馈共用实测字段，不遮挡原有上传入口。 */
+#single-molecule-form label,#measured-result-form label { display: block; margin-top: 12px; }
+#single-molecule-form textarea,#measured-result-form textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 9px; border: 1px solid var(--line); border-radius: 4px; font: inherit; }
+#single-preview-svg { text-align: center; }
+#single-preview-svg svg { max-height: 180px; max-width: 100%; }
+#single-preview-status.error,#single-feedback.error,#result-feedback.error { color: #962f37; }
+#measured-result { margin: 18px 0; padding-top: 12px; border-top: 1px solid var(--line); }
+#measured-result-summary dl { margin: 8px 0; }
+#measured-result-location { overflow-wrap: anywhere; }
+#new-list-feedback-counts { font-weight: bold; }
+#map-stage [data-neighbor-mismatch] { pointer-events: none; }
+.neighbor-mismatch-legend i { border: 1px solid #fff; transform: rotate(45deg); }

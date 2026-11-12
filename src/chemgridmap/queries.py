@@ -299,7 +299,7 @@ def place_new_molecules(reference, queries, *, grid_rows, grid_cols):
     return out
 
 
-def _new_molecules_svg(reference_result, queries, path, *, rows, cols, lower, upper):
+def _new_molecules_svg(reference_result, queries, path, *, rows, cols, lower, upper, show_feedback=False):
     """Reuse existing reference SVG groups; depict only newly inserted structures."""
     from .plotting import DEFAULT_COLORS, _svg_molecule_content
     size = 100
@@ -342,6 +342,13 @@ def _new_molecules_svg(reference_result, queries, path, *, rows, cols, lower, up
             parts.append(f'<g transform="translate({x+13},{y+13})"><rect width="74" height="74" fill="white"/>{drawing}</g>')
         if measured and row.get("wide_record_range", 0) == 1:
             parts.append(f'<path data-conflict-marker="true" d="M{x+70},{y} L{x+100},{y} L{x+100},{y+30} Z" fill="#172536"/>')
+        if show_feedback and row.get("neighbor_comparison") == "disagrees":
+            marker_size = 98 * .22
+            left, top = x + 1, y + 1
+            parts.append(f'<path data-neighbor-mismatch="true" '
+                         f'd="M{left+marker_size/2},{top+2} L{left+marker_size},{top+marker_size/2} '
+                         f'L{left+marker_size/2},{top+marker_size} L{left+2},{top+marker_size/2} Z" '
+                         'fill="#6f1d6b" stroke="#fff" stroke-width="1"/>')
         parts.append('</g>')
     parts.append('<g data-color-legend="activity" font-family="Arial, sans-serif" font-size="14">')
     entries = [(DEFAULT_COLORS["inactive"], f"Inactive ≤ {lower:g}", ""),
@@ -349,10 +356,17 @@ def _new_molecules_svg(reference_result, queries, path, *, rows, cols, lower, up
                (DEFAULT_COLORS["active"], f"Active ≥ {upper:g}", ""),
                ("#FFFFFF", "New molecules: not measured", "#8A99A6"),
                ("#FFFFFF", "New molecules: measured", "#173e34")]
+    if show_feedback:
+        entries.append(("#6f1d6b", "Measured result disagrees with neighbor evidence", "#6f1d6b"))
     for i, (color, label, edge) in enumerate(entries):
         x, y = 12 + (i % 3) * 300, map_height + 20 + (i // 3) * 25
-        parts.append(f'<rect x="{x}" y="{y}" width="14" height="14" fill="{color}" stroke="{edge or color}" '
-                     f'stroke-width="1.5" vector-effect="non-scaling-stroke"/><text x="{x+20}" y="{y+12}">{html.escape(label)}</text>')
+        if show_feedback and i == len(entries) - 1:
+            parts.append(f'<path data-neighbor-mismatch-legend="true" '
+                         f'd="M{x+7},{y} L{x+14},{y+7} L{x+7},{y+14} L{x},{y+7} Z" fill="{color}"/>'
+                         f'<text x="{x+20}" y="{y+12}">{html.escape(label)}</text>')
+        else:
+            parts.append(f'<rect x="{x}" y="{y}" width="14" height="14" fill="{color}" stroke="{edge or color}" '
+                         f'stroke-width="1.5" vector-effect="non-scaling-stroke"/><text x="{x+20}" y="{y+12}">{html.escape(label)}</text>')
     parts.append('</g></svg>')
     Path(path).write_text("\n".join(parts), encoding="utf-8", newline="\n")
 

@@ -176,15 +176,34 @@ def select_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8,
                  "brics_single_pass_members": guarded}
         candidates = sorted(set(candidates).union(fragments))
         rule = "coverage_brics"
+    patterns = [(smiles, Chem.MolFromSmiles(smiles)) for smiles in candidates]
+    patterns.sort(key=lambda item: (-item[1].GetNumHeavyAtoms(), item[0]))
     scored = []
-    for smiles in candidates:
-        pattern = Chem.MolFromSmiles(smiles)
-        matched = _coverage(pattern, mols)
-        fraction = sum(matched) / len(mols)
-        meets = fraction >= min_coverage - 1e-12
+    winning_heavy = None
+    for smiles, pattern in patterns:
         heavy = pattern.GetNumHeavyAtoms()
-        rank = (-heavy, -fraction) if meets else (-fraction, -heavy)
-        scored.append((not meets, rank, smiles, matched, heavy))
+        if winning_heavy is not None and heavy < winning_heavy:
+            break
+        matched, missed = [], 0
+        for mol in mols:
+            matches = bool(mol.HasSubstructMatch(pattern, useChirality=True))
+            matched.append(matches)
+            missed += not matches
+            # Use the original floating-point comparison, including its tolerance.
+            # Even if all remaining members match, this candidate cannot meet it.
+            if (len(mols) - missed) / len(mols) < min_coverage - 1e-12:
+                break
+        else:
+            fraction = sum(matched) / len(mols)
+            scored.append((False, (-heavy, -fraction), smiles, matched, heavy))
+            winning_heavy = heavy
+    if not scored:
+        # No target-reaching candidate: preserve the full-coverage fallback ranking.
+        for smiles, pattern in patterns:
+            matched = _coverage(pattern, mols)
+            fraction = sum(matched) / len(mols)
+            heavy = pattern.GetNumHeavyAtoms()
+            scored.append((True, (-fraction, -heavy), smiles, matched, heavy))
     if not scored:
         return {"core_smiles": "", "core_smiles_attached": "", "core_smiles_attached_source": "",
                 "core_rule": rule, "coverage_target": min_coverage,

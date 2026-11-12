@@ -49,7 +49,7 @@ const context = vm.createContext({$, document, t:i18n.t, ChemGridMapI18n:i18n, n
 });
 $('color-mode').value = 'activity'; $('measurement-filter').value = 'all';
 $('measurement-filter').selectedOptions = [{textContent: 'All molecules'}];
-const names = ['stat', 'countLabel', 'measuredLabel', 'showQuerySelection', 'selectGroup',
+const names = ['renderMeasuredResult', 'resultSource', 'resetMeasurementForm', 'updateMeasurementForm', 'readMeasurement', 'saveMeasuredResult', 'addedFeedbackCounts', 'resultCounts', 'stat', 'countLabel', 'measuredLabel', 'showQuerySelection', 'selectGroup',
   'format', 'percentage', 'legendItem', 'renderLegend', 'applyTransform', 'showDataAudit',
   'showSourceInput', 'loadInput', 'showInput', 'selectColumns', 'showSources', 'renderNewBatchSources', 'clearSourceHighlight', 'highlightSources', 'loadCoreComparison'];
 const summaryBody = fragment('showResult', '  const report = job.report;', "  $('summary').hidden = false;");

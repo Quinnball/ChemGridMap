@@ -229,6 +229,22 @@
 | `structures` | Normalized structures for the conflicting parent. | semicolon-separated SMILES |
 | `record_count` | Records associated with one conflicting identity. | count |
 
+## `manual_entries.csv`
+
+| Column | Meaning | Unit or values |
+|---|---|---|
+| `canonical_smiles` | Canonical isomeric SMILES. | SMILES |
+| `value` | Unstandardized activity value. | text |
+| `query_id` | User query identifier or generated Q00001-style identifier; empty for measured rows. | text |
+| `input_smiles` | Original query SMILES before structure preparation. | SMILES |
+| `label` | User label, used only for display and filtering. | text |
+| `unit` | Unit of the entered exact value. | pActivity, M, mM, µM, nM, pM |
+| `measured_class` | Measured class, from an exact value or qualitative user choice. | active, medium, inactive |
+| `class_source` | Origin of the measured class. | value, user_class |
+| `batch` | User-supplied batch or publication used as an evidence unit. | text |
+| `note` | User-supplied note. | text |
+| `entered_at` | Time the molecule was manually added. | ISO 8601 with timezone |
+
 ## `metrics.csv`
 
 | Column | Meaning | Unit or values |
@@ -370,6 +386,29 @@
 | `query_group_center_similarity` | Morgan Tanimoto to the assigned reference group center; empty when unassigned. | similarity 0–1 |
 | `contains_group_core` | Whether the unmeasured molecule contains its assigned reference group's core; empty when no core/group applies. | boolean or empty |
 
+## `neighbor_evidence_feedback.csv`
+
+| Column | Meaning | Unit or values |
+|---|---|---|
+| `canonical_smiles` | Canonical isomeric SMILES. | SMILES |
+| `activity_pchembl` | Displayed median pChEMBL value. | −log10 mol/L |
+| `query_id` | User query identifier or generated Q00001-style identifier; empty for measured rows. | text |
+| `label` | User label, used only for display and filtering. | text |
+| `nearest_reference_id` | Placement target: highest Morgan Tanimoto, then smallest reference ID. | text |
+| `neighbor_evidence` | Evidence from similar tie-inclusive top-five reference neighbors; never a prediction. | none, insufficient, active, medium, inactive, mixed |
+| `similar_reference_count` | Top-five neighbors including ties meeting group_similarity. | count |
+| `evidence_reference_classes` | Classes contributing to neighbor evidence, including observed-class fallback. | semicolon-separated classes |
+| `neighbor_comparison` | Own measured class compared with consistent neighbor evidence only. | agrees, disagrees, no_comparison |
+| `measured_class` | Measured class, from an exact value or qualitative user choice. | active, medium, inactive |
+| `class_source` | Origin of the measured class. | value, user_class |
+| `batch` | User-supplied batch or publication used as an evidence unit. | text |
+| `note` | User-supplied note. | text |
+| `result_source` | Origin of the measured result. | upload, manual, recorded |
+| `measured_value` | Exact entered value; uploaded multiple-record aggregates use pActivity. | measured_unit |
+| `measured_unit` | Unit of the measured value. | pActivity, M, mM, µM, nM, pM |
+| `nearest_reference_similarity` | Morgan Tanimoto similarity to the placement reference. | 0 to 1 |
+| `recorded_at` | Last manual result save time; empty for uploaded results. | ISO 8601 with timezone |
+
 ## `new_molecules.csv`
 
 | Column | Meaning | Unit or values |
@@ -487,6 +526,16 @@
 | `user_median` | Own retained-record median, when available. | pActivity |
 | `reference_median` | Median of the structurally identical reference molecule. | pActivity |
 | `median_difference` | Own median minus structurally identical reference median. | log units |
+| `measured_class` | Measured class, from an exact value or qualitative user choice. | active, medium, inactive |
+| `class_source` | Origin of the measured class. | value, user_class |
+| `batch` | User-supplied batch or publication used as an evidence unit. | text |
+| `note` | User-supplied note. | text |
+| `result_source` | Origin of the measured result. | upload, manual, recorded |
+| `measured_value` | Exact entered value; uploaded multiple-record aggregates use pActivity. | measured_unit |
+| `measured_unit` | Unit of the measured value. | pActivity, M, mM, µM, nM, pM |
+| `nearest_reference_similarity` | Morgan Tanimoto similarity to the placement reference. | 0 to 1 |
+| `recorded_at` | Last manual result save time; empty for uploaded results. | ISO 8601 with timezone |
+| `contains_group_core_rule` | Rule used for the saved new-molecule core match; API inspection uses the current map rule. | coverage, coverage_brics, most_frequent, fmcs |
 
 ## `new_molecules_check.csv`
 
@@ -693,6 +742,26 @@ The separate new-molecule manifest records the input and reference-manifest hash
 Reference layout, metrics, diagnostics and original ZIP contain reference molecules only.
 New-molecule neighbors summarize observed reference evidence, never predictions.
 Legacy query-named schema sections below describe the retained low-level query functions.
+
+## Manual-entry and measured-result feedback outputs
+
+`manual_entries.csv` has one row per manually added molecule. Its SHA-256 and row count
+are recorded in `new_molecules_manifest.json`. `neighbor_evidence_feedback.csv` includes
+all currently measured new molecules, including uploaded results. Saving, modifying or
+clearing a manual result rewrites this table and the current collection ZIP. An explicit
+feedback download can also create it for an unchanged uploaded collection. File-only
+insertion retains its original outputs until a manual action or feedback download.
+
+Class-only results use `class_source=user_class` and leave numeric activity empty.
+`no_comparison` covers absent, insufficient or mixed neighbor evidence. These tables
+record observations and their agreement with reference evidence; no activity is predicted.
+Timestamps use ISO 8601 with a timezone; unknown uploaded recording times remain blank.
+Browser refresh retains the current session; restarting does not restore it automatically.
+
+Exact CSV column order:
+
+- `manual_entries.csv`: `query_id`, `input_smiles`, `canonical_smiles`, `value`, `unit`, `measured_class`, `class_source`, `batch`, `label`, `note`, `entered_at`.
+- `neighbor_evidence_feedback.csv`: `query_id`, `canonical_smiles`, `label`, `result_source`, `measured_value`, `measured_unit`, `activity_pchembl`, `measured_class`, `class_source`, `neighbor_evidence`, `neighbor_comparison`, `nearest_reference_id`, `nearest_reference_similarity`, `similar_reference_count`, `evidence_reference_classes`, `batch`, `note`, `recorded_at`.
 
 ## Own-data CLI options
 

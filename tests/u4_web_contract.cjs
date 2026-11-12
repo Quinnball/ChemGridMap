@@ -7,7 +7,7 @@ const assets = process.argv[2], scenario = process.argv[3];
 const html = fs.readFileSync(path.join(assets, 'index.html'), 'utf8');
 const source = fs.readFileSync(path.join(assets, 'app.js'), 'utf8');
 const dictionaries = JSON.parse(fs.readFileSync(path.join(assets, 'i18n.json'), 'utf8'));
-const controls = ['input-format', 'target', 'activity-type', 'compound-column', 'smiles-col',
+const controls = ['single-smiles','single-id','single-label','single-mode','single-value','single-unit','single-class','single-batch','single-note','measured-result','result-mode','result-value','result-unit','result-class','result-batch','result-note','new-mismatch-filter', 'input-format', 'target', 'activity-type', 'compound-column', 'smiles-col',
   'value-col', 'value-unit', 'unit-column', 'document-column', 'reference-column', 'relation-column', 'label-col',
   'new-activity-col', 'new-unit', 'new-unit-col', 'new-relation-col', 'new-document-col', 'new-label-col', 'new-class-filter', 'new-label-filter', 'source-csv', 'query-csv', 'query-smiles-col', 'query-id-col', 'representation', 'projection', 'occupancy',
   'grouping', 'group-similarity', 'cluster-col', 'cluster-source', 'core-rule', 'core-coverage-target',
@@ -167,7 +167,7 @@ async function runtime(options) {
   env.context.ChemGridMapI18n = env.api;
   await env.api.ready;
   // 新增控件的依赖函数与旧契约共享同一生产实现。
-  const coreAndSourceFunctions = ['clearSourceHighlight','renderSourceHighlight','highlightSources','renderNewBatchSources','coreRuleName','renderCoreRuleOptions','renderGroupOptions','renderCoreRuleStatus','addCoreDownloads','switchCoreRule','renderCoreComparison','loadCoreComparison'];
+  const coreAndSourceFunctions = ['setNewMoleculeTab','updateMeasurementForm','readMeasurement','resetMeasurementForm','renderSinglePreview','previewSingleMolecule','scheduleSinglePreview','addedFeedbackCounts','resultCounts','resultSource','confirmNewMoleculeReplacement','patchNewMoleculeCell','refreshNewMoleculeMutation','addSingleMolecule','renderMeasuredResult','saveMeasuredResult','bindMeasuredMolecules', 'clearSourceHighlight','renderSourceHighlight','highlightSources','renderNewBatchSources','coreRuleName','renderCoreRuleOptions','renderGroupOptions','renderCoreRuleStatus','addCoreDownloads','switchCoreRule','renderCoreComparison','loadCoreComparison'];
   vm.runInContext(coreAndSourceFunctions.map(realFunction).join('\n'), env.context);
   return env;
 }

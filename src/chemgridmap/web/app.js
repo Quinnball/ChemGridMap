@@ -330,7 +330,7 @@ function fail(error) { status(error.message, 'error'); }
 function setBusy(value) {
   var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
   busy = value;
-  document.querySelectorAll('#options input,#options select,#options button,#new-molecules-form input,#new-molecules-form select,#new-molecules-form button,#csv,#demo').forEach(el => el.disabled = value);
+  document.querySelectorAll('#options input,#options select,#options button,#new-molecules-form input,#new-molecules-form select,#new-molecules-form button,#single-molecule-form input,#single-molecule-form textarea,#single-molecule-form select,#single-molecule-form button,#measured-result-form input,#measured-result-form textarea,#measured-result-form select,#measured-result-form button,#record-result,#edit-result,#clear-result,#csv,#demo').forEach(el => el.disabled = value);
   $('quit').disabled = value;
   $('build').textContent = value ? t("d.Building map...") : t("d.Generate map →");
   updateNavigation(); updateEvidenceOptions();
@@ -449,6 +449,8 @@ function updateNewNavigation() {
   $('remove-query-input').hidden = !queryInputInfo && !newMolecules?.rows?.length;
   $('remove-query-input').disabled = busy;
   $('insert-new-molecules').disabled = busy || !queryInputInfo || !available;
+  $('single-add').disabled = busy || !available;
+  updateMeasurementForm('single'); updateMeasurementForm('result');
   const measured = !!$('new-activity-col').value;
   for (const id of ['new-unit','new-unit-col','new-relation-col','new-document-col']) $(id).disabled = busy || !measured;
   $('new-unit').disabled = busy || !measured || !!$('new-unit-col').value;
@@ -505,6 +507,7 @@ async function insertNewMolecules(event) {
   event.preventDefault();
   if (busy || !job || !queryInputInfo) return;
   try {
+    if (!confirmNewMoleculeReplacement()) return;
     const options = newMoleculeOptions(); setBusy(true);
     $('new-molecules-feedback').textContent = t('u8.inserting');
     job = await getJSON('/api/new-molecules', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(options)});
@@ -530,22 +533,258 @@ async function removeQueryInput() {
   finally { setBusy(false); }
 }
 function bindNewMolecules() {
-$('open-new-molecules').addEventListener('click', () => { renderReferenceMap(); $('new-molecules-feedback').textContent = ''; $('new-molecules-dialog').showModal(); });
+$('open-new-molecules').addEventListener('click', () => { renderReferenceMap(); $('new-molecules-feedback').textContent = ''; previewSingleMolecule.last = null; if (!$('new-one-panel').hidden && $('single-smiles').value.trim()) previewSingleMolecule(); $('new-molecules-dialog').showModal(); });
 $('new-molecules-form').addEventListener('submit', insertNewMolecules);
 $('new-activity-col').addEventListener('change',updateNewNavigation);
 $('new-unit-col').addEventListener('change',updateNewNavigation);
 $('open-new-list').addEventListener('click', () => { renderNewList(true); $('new-list-dialog').showModal(); });
 for (const id of ['new-class-filter','new-label-filter']) $(id).addEventListener('change', () => renderNewList());
 $('download-new-list').addEventListener('click',downloadNewList);
+  bindMeasuredMolecules();
 }
+// 单条加入和记录结果共用校验与字段状态；不把近邻证据当作预测。
+function setNewMoleculeTab(tab) {
+  for (const name of ['upload','one']) {
+    const active = name === tab;
+    $('new-'+name+'-tab').classList.toggle('active', active);
+    $('new-'+name+'-tab').setAttribute('aria-selected', String(active));
+    $('new-'+name+'-panel').hidden = !active;
+  }
+  if (tab === 'one') {
+    previewSingleMolecule.last = null;
+    if ($('single-smiles').value.trim()) previewSingleMolecule();
+  }
+}
+function updateMeasurementForm(prefix) {
+  const mode = $(prefix+'-mode').value;
+  $(prefix+'-numeric').hidden = mode !== 'value';
+  $(prefix+'-qualitative').hidden = mode !== 'class';
+  $(prefix+'-batch-field').hidden = mode === 'none';
+  $(prefix+'-value').required = mode === 'value';
+  $(prefix+'-value').disabled = busy || mode !== 'value';
+  $(prefix+'-unit').disabled = busy || mode !== 'value';
+  $(prefix+'-class').disabled = busy || mode !== 'class';
+  $(prefix+'-batch').disabled = busy || mode === 'none';
+}
+function readMeasurement(prefix) {
+  const mode = $(prefix+'-mode').value;
+  if (mode === 'none') return null;
+  const result = {mode, batch:$(prefix+'-batch').value.trim(), note:$(prefix+'-note').value.trim()};
+  if (mode === 'value') {
+    const text = $(prefix+'-value').value.trim(), value = Number(text);
+    if (!/^[+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text) || !Number.isFinite(value) || value <= 0) throw Error(t('u9b.invalidValue'));
+    result.value = value; result.unit = $(prefix+'-unit').value;
+    if (!['p','M','mM','uM','nM','pM'].includes(result.unit)) throw Error(t('u9b.invalidUnit'));
+  } else {
+    result.measured_class = $(prefix+'-class').value;
+    if (mode !== 'class' || !['active','medium','inactive'].includes(result.measured_class)) throw Error(t('u9b.invalidClass'));
+  }
+  return result;
+}
+function resetMeasurementForm(prefix, measured = null) {
+  $(prefix+'-mode').value = measured ? (measured.class_source === 'user_class' ? 'class' : 'value') : prefix === 'single' ? 'none' : 'value';
+  $(prefix+'-value').value = measured?.measured_value ?? measured?.activity_pchembl ?? '';
+  $(prefix+'-unit').value = measured?.measured_unit || 'p';
+  if ($(prefix+'-unit').value === 'pActivity') $(prefix+'-unit').value = 'p';
+  if (['µM','μM'].includes($(prefix+'-unit').value)) $(prefix+'-unit').value = 'uM';
+  $(prefix+'-class').value = measured?.measured_class || measured?.activity_class || 'active';
+  $(prefix+'-batch').value = measured?.batch || '';
+  $(prefix+'-note').value = measured?.note || '';
+  $(prefix+'-feedback').textContent = ''; $(prefix+'-feedback').className = 'micro';
+  updateMeasurementForm(prefix);
+}
+function renderSinglePreview(preview) {
+  const key = {ok:'previewOk',invalid:'previewInvalid',in_reference:'previewReference',duplicate_new:'previewDuplicate'}[preview?.status] || 'previewEmpty';
+  $('single-preview-status').textContent = t('u9b.'+key, {smiles:preview?.canonical_smiles || '',id:preview?.reference_id || preview?.query_id || ''});
+  $('single-preview-status').className = preview?.status === 'invalid' ? 'micro error' : 'micro';
+  $('single-preview-svg').innerHTML = preview?.svg || '';
+  const id = preview?.reference_id || preview?.query_id;
+  $('single-preview-view').hidden = !id || !['in_reference','duplicate_new'].includes(preview?.status);
+  $('single-preview-view').onclick = () => {
+    $('new-molecules-dialog').close();
+    if (view !== 'grid') setView('grid');
+    // 参照ID可与合法的新分子ID同名；参照按固定格子定位，避免按ID解析到新分子。
+    const reference = preview.status === 'in_reference' ? points.find(point => !point.is_new &&
+      (point.molecule_identity_key || point.molecule_id) === id) : null;
+    const cell = reference || (preview.status === 'in_reference' && preview.grid_row != null ? preview : null);
+    const query = cell ? `row=${cell.grid_row}&col=${cell.grid_col}` : 'id='+encodeURIComponent(id);
+    Promise.resolve(inspect(query)).then(centerOnCurrentCell);
+  };
+}
+async function previewSingleMolecule() {
+  const smiles = $('single-smiles').value.trim(), request = ++previewSingleMolecule.request;
+  if (!smiles) { previewSingleMolecule.last = null; renderSinglePreview(null); return null; }
+  $('single-preview-status').textContent = t('u9b.previewPending');
+  try {
+    const result = await getJSON('/api/new-molecules/preview', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({smiles})});
+    if (request !== previewSingleMolecule.request || smiles !== $('single-smiles').value.trim()) return null;
+    previewSingleMolecule.last = {smiles,...result}; renderSinglePreview(result); return result;
+  } catch (error) {
+    if (request === previewSingleMolecule.request) { previewSingleMolecule.last = null; $('single-preview-status').textContent = translateServer(error.message); $('single-preview-status').className = 'micro error'; }
+    return null;
+  }
+}
+function scheduleSinglePreview() {
+  clearTimeout(previewSingleMolecule.timer);
+  previewSingleMolecule.request = (previewSingleMolecule.request || 0) + 1;
+  previewSingleMolecule.last = null;
+  previewSingleMolecule.timer = setTimeout(previewSingleMolecule, 400);
+}
+function addedFeedbackCounts(report) {
+  return report.query_molecules?.feedback_counts || resultCounts(typeof newMolecules !== 'undefined' ? newMolecules?.rows || [] : []);
+}
+function resultCounts(rows = []) {
+  const counts = {recorded:0,agrees:0,disagrees:0,no_comparison:0};
+  for (const row of rows) {
+    if (row.measurement_status !== 'measured') continue;
+    counts.recorded++;
+    counts[['agrees','disagrees'].includes(row.neighbor_comparison) ? row.neighbor_comparison : 'no_comparison']++;
+  }
+  return counts;
+}
+function resultSource(row) {
+  return row.result_source || (row.measurement_status === 'measured' ? 'upload' : '');
+}
+function confirmNewMoleculeReplacement() {
+  const info = newMolecules?.replacement;
+  if (!info || !info.manual && !info.recorded) return true;
+  return window.confirm(t('u9b.replaceConfirm', info));
+}
+function patchNewMoleculeCell(svgText, point) {
+  // 复用参照 SVG 的原 DOM 节点；仅插入或替换这一个新分子格子。
+  gridSVG = svgText;
+  if (view !== 'grid') return;
+  const parsed = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+  const incoming = Array.from(parsed.querySelectorAll('[data-new-molecule]')).find(cell => Number(cell.dataset.gridRow) === point.grid_row && Number(cell.dataset.gridCol) === point.grid_col);
+  const svg = $('map-stage').querySelector('svg');
+  if (!incoming || !svg) return;
+  const fresh = document.importNode(incoming, true);
+  // 初次加入前是裁切后的参照图；把完整网格坐标平移到原参照坐标系。
+  if (!svg.querySelector('[data-reference-map]')) {
+    const transformText = parsed.querySelector('[data-reference-map]')?.getAttribute('transform') || '';
+    const offset = transformText.match(/translate\(([-\d.]+)[ ,]+([-\d.]+)\)/);
+    if (offset) {
+      const dx = Number(offset[1]), dy = Number(offset[2]);
+      fresh.setAttribute('transform', `translate(${-dx},${-dy})`);
+      const box = parsed.documentElement.viewBox.baseVal, previous = svg.viewBox.baseVal;
+      transform.x += (-dx - previous.x) * transform.s; transform.y += (-dy - previous.y) * transform.s;
+      svg.setAttribute('viewBox', `${-dx} ${-dy} ${box.width} ${box.height}`);
+      svg.setAttribute('width',box.width); svg.setAttribute('height',box.height);
+      drawingSize = {w:box.width,h:box.height};
+    }
+  }
+  const old = mapCells.find(cell => Number(cell.dataset.gridRow) === point.grid_row && Number(cell.dataset.gridCol) === point.grid_col);
+  if (old) old.replaceWith(fresh); else svg.append(fresh);
+  svg.querySelector('[data-color-legend]')?.remove();
+  mapCells = Array.from(svg.querySelectorAll('[data-grid-row]'));
+  colorMap([fresh]); highlight(); translateSVGText(fresh); applyTransform();
+}
+async function refreshNewMoleculeMutation(result) {
+  job = result.job;
+  const refreshed = await Promise.all([getJSON('/api/new-molecules'),getJSON('/api/points'),getJSON('/api/groups')]);
+  [newMolecules,points,showResult.grouping] = refreshed;
+  if (highlight.source?.result.scope === 'new') clearSourceHighlight();
+  const svgFile = (newMolecules.files || []).find(name => name.endsWith('map_with_new_molecules.svg'));
+  if (svgFile && result.point) patchNewMoleculeCell(await (await api('/api/file?name='+encodeURIComponent(svgFile))).text(),result.point);
+  // 语言刷新路径更新摘要和下载项，但不重画地图或改变缩放。
+  await showResult(true);
+  $('measurement-filter-control').hidden = false;
+  $('color-mode').querySelector('[value=neighbor_evidence]').disabled = false;
+  renderNewList(true); updateNewNavigation();
+}
+async function addSingleMolecule(event) {
+  event.preventDefault(); if (busy || !job) return;
+  try {
+    const measurement = readMeasurement('single');
+    clearTimeout(previewSingleMolecule.timer);
+    const preview = previewSingleMolecule.last?.smiles === $('single-smiles').value.trim() ? previewSingleMolecule.last : await previewSingleMolecule();
+    if (!preview || preview.status !== 'ok') return;
+    setBusy(true);
+    const payload = {smiles:$('single-smiles').value.trim(),query_id:$('single-id').value.trim(),label:$('single-label').value.trim(),note:$('single-note').value.trim(),measurement};
+    const result = await getJSON('/api/new-molecules/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if (result.status !== 'ok') { renderSinglePreview(result); return; }
+    await refreshNewMoleculeMutation(result);
+    for (const id of ['single-smiles','single-id','single-label']) $(id).value = '';
+    resetMeasurementForm('single'); previewSingleMolecule.last = null; renderSinglePreview(null);
+    const message = () => t('u9b.added',{id:result.query_id,category:t('u8.'+(result.row.neighbor_evidence || 'none'))});
+    addSingleMolecule.lastMessage = message;
+    $('single-feedback').textContent = message(); status(message);
+  } catch (error) { $('single-feedback').textContent = translateServer(error.message); $('single-feedback').className = 'micro error'; }
+  finally { setBusy(false); }
+}
+function renderMeasuredResult(detail) {
+  const row = detail.molecule;
+  const measured = row.measurement_status === 'measured';
+  const result = {...row,...detail.measured_result};
+  const editable = measured && (detail.measured_result?.editable ?? ['manual','recorded'].includes(resultSource(result)));
+  if (renderMeasuredResult.detail?.molecule.query_id !== row.query_id || measured && !editable) $('measured-result-form').hidden = true;
+  $('record-result').hidden = measured;
+  $('measured-result-actions').hidden = !editable;
+  $('measured-result-summary').replaceChildren();
+  if (measured) {
+    const summary = document.createElement('dl');
+    const value = result.measured_value == null ? result.activity_pchembl == null ? '—' : `${format(result.activity_pchembl)} pActivity` : `${format(result.measured_value)} ${{p:'pActivity',uM:'µM','μM':'µM'}[result.measured_unit] || result.measured_unit || 'pActivity'}`;
+    const fields = [[t('u9b.value'),value],[t('u9b.class'),t('d.'+(result.measured_class || result.activity_class))],
+      [t('u8.neighborEvidence'),t('u8.'+(result.neighbor_evidence || 'none'))],
+      [t('u9b.comparison'),t('u9b.'+(result.neighbor_comparison || 'no_comparison'))],
+      [t('u9b.resultSource'),t('u9b.source.'+resultSource(result))],[t('u9b.batch'),result.batch || '—'],[t('u9b.note'),result.note || '—'],[t('u9b.recordedAt'),result.recorded_at || '—']];
+    for (const [label,value] of fields) { const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=value;summary.append(dt,dd); }
+    $('measured-result-summary').append(summary);
+    if (!editable) { const note=document.createElement('p');note.textContent=t('u9b.fromUpload');note.dataset.uploadedResult='true';$('measured-result-summary').append(note); }
+    if (!['agrees','disagrees'].includes(result.neighbor_comparison)) { const note=document.createElement('p');note.textContent=t('u9b.noComparisonReason',{category:t('u8.'+(result.neighbor_evidence || 'none'))});$('measured-result-summary').append(note); }
+  }
+  const directory = (typeof newMolecules !== 'undefined' && newMolecules?.directory) || job.output_dir || '—';
+  $('measured-result-location').textContent = t('u9b.savedLocation',{directory});
+  const open = () => { resetMeasurementForm('result',measured ? result : null); $('measured-result-form').hidden = false; };
+  $('record-result').onclick = open; $('edit-result').onclick = open;
+  $('clear-result').onclick = () => saveMeasuredResult(null,true);
+  renderMeasuredResult.detail = detail;
+}
+async function saveMeasuredResult(event, clear = false) {
+  event?.preventDefault(); if (busy) return;
+  const detail = renderMeasuredResult.detail;
+  if (!detail) return;
+  try {
+    const query_id = detail.molecule.query_id || detail.molecule.molecule_id;
+    const measurement = clear ? null : readMeasurement('result');
+    setBusy(true);
+    const result = await getJSON('/api/new-molecules/result'+(clear?'/clear':''),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query_id,...(clear?{}:{measurement})})});
+    await refreshNewMoleculeMutation(result);
+    $('measured-result-form').hidden = true;
+    await inspect('id='+encodeURIComponent(query_id));
+    status(() => t(clear?'u9b.cleared':'u9b.saved',{id:query_id}));
+  } catch (error) { $('result-feedback').textContent = translateServer(error.message); $('result-feedback').className = 'micro error'; }
+  finally { setBusy(false); }
+}
+function bindMeasuredMolecules() {
+  previewSingleMolecule.request = 0;
+  for (const name of ['upload','one']) $('new-'+name+'-tab').addEventListener('click',()=>setNewMoleculeTab(name));
+  for (const prefix of ['single','result']) { $(prefix+'-mode').addEventListener('change',()=>updateMeasurementForm(prefix)); updateMeasurementForm(prefix); }
+  for (const id of ['single-molecule-form','measured-result-form']) {
+    $(id).addEventListener('input',event=>refreshValidation(event.target));
+    $(id).addEventListener('change',event=>refreshValidation(event.target));
+    $(id).addEventListener('invalid',event=>refreshValidation(event.target),true);
+  }
+  $('single-smiles').addEventListener('input',scheduleSinglePreview);
+  $('single-molecule-form').addEventListener('submit',addSingleMolecule);
+  $('measured-result-form').addEventListener('submit',saveMeasuredResult);
+  $('cancel-result').addEventListener('click',()=>{ $('measured-result-form').hidden=true; });
+  $('new-mismatch-filter').addEventListener('change',()=>renderNewList());
+  $('download-neighbor-feedback').addEventListener('click',()=>{
+    const file = newMolecules?.files?.find(name=>name.endsWith('neighbor_evidence_feedback.csv'));
+    download(file ? '/api/file?name='+encodeURIComponent(file) : '/api/new-molecules/feedback','neighbor_evidence_feedback.csv');
+  });
+}
+
 function newListColumns() {
   const columns = [['query_id','ID'],['label',t('u8.labelFilter')],['status',t('u8.status')],['neighbor_evidence',t('u8.neighborEvidence')],['nearest_reference_id',t('u8.referenceId')],['tanimoto','Tanimoto'],['structure_group',t('d.Structure group')]];
   if ((newMolecules?.rows || []).some(row => row.measurement_status === 'measured')) columns.push(['activity_pchembl',t('u8.ownMedian')],['activity_class',t('d.Activity class')],['neighbor_comparison',t('u8.comparisonColumn')]);
+  columns.push(['result_source',t('u9b.resultSource')],['note',t('u9b.note')]);
   return columns;
 }
 function visibleNewMolecules() {
   const category = $('new-class-filter').value, label = $('new-label-filter').value;
-  const rows = (newMolecules?.rows || []).filter(row => (!category || row.neighbor_evidence === category) && (!label || String(row.label ?? '') === label));
+  const rows = (newMolecules?.rows || []).filter(row => (!category || row.neighbor_evidence === category) && (!label || String(row.label ?? '') === label) && (!$('new-mismatch-filter').checked || row.neighbor_comparison === 'disagrees'));
   return rows.slice().sort((a,b) => {
     const x = a[newListSort.key] ?? '', y = b[newListSort.key] ?? '';
     const order = typeof x === 'number' && typeof y === 'number' ? x-y : String(x).localeCompare(String(y), undefined, {numeric:true});
@@ -554,6 +793,8 @@ function visibleNewMolecules() {
 }
 function newListValue(row, key) {
   const value = row[key];
+  if (key === 'result_source') return resultSource(row) ? t('u9b.source.'+resultSource(row)) : '—';
+  if (key === 'neighbor_comparison' && value === 'no_comparison') return t('u9b.no_comparison');
   if (key === 'status' || key === 'neighbor_evidence' || key === 'neighbor_comparison') return value ? t('u8.' + value) : '—';
   if (key === 'activity_class') return value ? t('d.' + value) : '—';
   return format(value);
@@ -573,6 +814,8 @@ function renderNewList(resetFilters = false) {
     const count = (newMolecules?.rows || []).filter(row => row.status === 'mapped' && row.neighbor_evidence === category).length;
     const item = document.createElement('span'); item.textContent = t('d.{label}: {value}', {label:t('u8.'+category), value:count}); item.dataset.evidenceCategory = category; $('new-list-counts').append(item);
   }
+  $('new-list-feedback-counts').textContent = t('u9b.counts',resultCounts(newMolecules?.rows || []));
+  $('download-neighbor-feedback').disabled = !(newMolecules?.rows || []).some(row => row.measurement_status === 'measured');
   const rows = visibleNewMolecules(), columns = newListColumns(), container = $('new-list-table');
   container.replaceChildren(); const element = document.createElement('table'), head = element.createTHead().insertRow(), body = element.createTBody();
   for (const [key,label] of columns) {
@@ -756,6 +999,9 @@ function showDataAudit(report) {
     const reference = document.createElement('p'); reference.dataset.newMoleculesReference = 'true';
     reference.textContent = t('u8d.auditReference', {...referenceMapDetails(), filename: (typeof newMolecules !== 'undefined' && newMolecules?.input?.filename) || queryInputInfo?.filename || '—'});
     section.append(reference);
+    const feedbackCounts = addedFeedbackCounts(report);
+    const feedback = document.createElement('p'); feedback.dataset.neighborFeedback = 'true';
+    feedback.textContent = t('u9b.auditFeedback',{counts:t('u9b.counts',feedbackCounts)}); section.append(feedback);
     for (const [key, label] of [['mapped',t('u8.mapped')],['invalid_smiles',t('u8.invalid_smiles')],['duplicate_query',t('u8.duplicate_query')],['in_reference',t('u8.in_reference')]]) {
       const count = document.createElement('p'); count.dataset.queryStatus = key;
       count.dataset.queryCount = report.query_molecules[key]; count.textContent = t('d.{label}: {value}', {label, value: report.query_molecules[key]}); section.append(count);
@@ -961,10 +1207,10 @@ function setView(name) {
   drawingSize = {w:box.width,h:box.height}; svg.setAttribute('width',box.width); svg.setAttribute('height',box.height);
   colorMap(); fit(); highlight(); translateSVGText($('map-stage'));
 }
-function colorMap() {
+function colorMap(cells = null) {
   const mode = $('color-mode').value;
   const lookup = new Map(points.map(p => [`${p.grid_row},${p.grid_col}`, p]));
-  $('map-stage').querySelectorAll('[data-grid-row]').forEach(el => {
+  (cells || $('map-stage').querySelectorAll('[data-grid-row]')).forEach(el => {
     const point = lookup.get(`${el.dataset.gridRow},${el.dataset.gridCol}`);
     if (!point) return;
     const mark = el.tagName === 'circle' ? el : el.querySelector(':scope > rect');
@@ -1002,6 +1248,18 @@ function colorMap() {
       }
     }
     if (mode !== 'neighbor_evidence') mark.removeAttribute('stroke-dasharray');
+    let mismatchMarker = el.querySelector(':scope > [data-neighbor-mismatch]');
+    if (isNew && point.neighbor_comparison === 'disagrees') {
+      if (!mismatchMarker) {
+        const x = Number(mark.getAttribute('x') || 0), y = Number(mark.getAttribute('y') || 0);
+        const size = Number(mark.getAttribute('width') || 100) * .22;
+        mismatchMarker = document.createElementNS('http://www.w3.org/2000/svg','path');
+        mismatchMarker.setAttribute('data-neighbor-mismatch','true');
+        mismatchMarker.setAttribute('d',`M${x+size/2},${y+2} L${x+size},${y+size/2} L${x+size/2},${y+size} L${x+2},${y+size/2} Z`);
+        mismatchMarker.setAttribute('fill','#6f1d6b'); mismatchMarker.setAttribute('stroke','#fff'); mismatchMarker.setAttribute('stroke-width','1');
+        el.append(mismatchMarker);
+      }
+    } else if (mismatchMarker) mismatchMarker.remove();
     let offsetMarker = el.querySelector(':scope > [data-offset-pair-marker]');
     if (!isNew && mode === 'support' && point.offset_pair_touched) {
       if (!offsetMarker) {
@@ -1043,6 +1301,7 @@ function renderLegend(mode) {
     const items = mode === 'activity' ? [[t('u8.newUnmeasured'),'#FFFFFF','#8A99A6'],[t('u8.newMeasured'),colors.active,'#173e34']] : [[t('u8.notInLayer'),'#dfe4e9','#173e34']];
     for (const [label,fill,border] of items) { const item = legendItem(fill,label + ' ' + t('u8d.seeNeighborEvidence')); item.firstElementChild.style.border = '1.5px solid '+border; $('legend').append(item); }
   }
+  if (hasQueries) { const item = legendItem('#6f1d6b',t('u9b.mismatchLegend')); item.className='neighbor-mismatch-legend'; item.dataset.neighborMismatchLegend='true'; $('legend').append(item); $('legend').hidden=false; }
   const group = structureGroups.find(g => g.structure_group === highlightedGroup);
   if (group) {
     const note = document.createElement('span'); note.className = 'group-legend';
@@ -1438,10 +1697,11 @@ function showQuerySelection(detail) {
     extra.push([t('u8.ownMedian'),format(row.activity_pchembl)],[t('d.{term} range',{term:'pActivity'}),format(row.pchembl_min)+'–'+format(row.pchembl_max)],
       [t('d.Source records'),format(row.n_records)],[t('d.Evidence units'),format(row.n_evidence_units)],[t('d.Activity class'),t('d.'+row.activity_class)]);
     if (row.wide_record_range || row.is_conflicted) extra.push([t('d.◥ Wide record range'),t('d.Yes')]);
-    if (row.neighbor_comparison) extra.push([t('u8.comparisonColumn'),t('u8.comparison',{own:t('d.'+row.activity_class),neighbor:t('d.'+row.neighbor_evidence),comparison:t('u8.'+row.neighbor_comparison)})]);
+    if (row.neighbor_comparison) extra.push([t('u8.comparisonColumn'),t('u8.comparison',{own:t('d.'+row.activity_class),neighbor:t('d.'+row.neighbor_evidence),comparison:t(row.neighbor_comparison === 'no_comparison' ? 'u9b.no_comparison' : 'u8.'+row.neighbor_comparison)})]);
   }
   for (const [label,value] of extra) { const dt=document.createElement('dt'),dd=document.createElement('dd'); dt.textContent=label;dd.textContent=value;stats.append(dt,dd); }
   $('query-summary').replaceChildren(stats);
+  renderMeasuredResult(detail);
   renderNewBatchSources(detail.new_molecule_sources || []);
   $('new-records').hidden = row.measurement_status !== 'measured';
   if (!$('new-records').hidden) table((detail.records || []).map(record => ({
@@ -1584,7 +1844,7 @@ async function inspect(query) {
       matchNote.textContent = parts.reduce((first, second) => t('d.{first} {second}', {first, second}));
     }
     $('cell-location').textContent = t("d.Grid row {row} · column {column} (zero-based)", {row: row.grid_row, column: row.grid_col});
-    $('measurement-badge').hidden = !unmeasured; $('query-selection').hidden = !unmeasured;
+    $('measurement-badge').hidden = row.measurement_status !== 'not_measured'; $('query-selection').hidden = !unmeasured;
     $('measured-selection').hidden = unmeasured;
     if (unmeasured) {
       showSources();
@@ -1859,9 +2119,11 @@ async function refreshLanguage() {
   if ($('comparison-dialog').open && compareGroup.lastResult) await compareGroup(null, compareGroup.lastResult);
   applyTransform();
   for (const id of ['map-stage','molecule-svg','neighborhood-svg','comparison-svg']) translateSVGText($(id));
+  if (previewSingleMolecule.last) renderSinglePreview(previewSingleMolecule.last);
+  if (addSingleMolecule.lastMessage && !$('single-feedback').classList.contains('error')) $('single-feedback').textContent = addSingleMolecule.lastMessage();
   if (status.last) status(status.last.message, status.last.kind);
   else $('build-progress').textContent = t('d.Preparing input records...');
-  for (const input of document.querySelectorAll('#options input,#options select')) refreshValidation(input);
+  for (const input of document.querySelectorAll('#options input,#options select,#single-molecule-form input,#single-molecule-form textarea,#single-molecule-form select,#measured-result-form input,#measured-result-form textarea,#measured-result-form select')) refreshValidation(input);
   window.ChemGridMapI18n.updateHelpLabels?.();
   if (focus?.isConnected && document.activeElement !== focus) focus.focus({preventScroll:true});
   window.scrollTo({left:scroll[0], top:scroll[1]});

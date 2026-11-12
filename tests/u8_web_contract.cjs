@@ -30,7 +30,7 @@ const scenarios={
     assert.equal($('query-csv').closest('form').id,'new-molecules-form');
     assert.equal($('query-smiles-col').hasAttribute('required'),true);
     assert.equal($('options').querySelector('#query-csv'),null);
-    assert.equal(document.querySelectorAll('[data-help]').length,60);
+    assert.equal(document.querySelectorAll('[data-help]').length,77);
     for(const language of ['en','zh']){
       api.setLanguage(language);context.updateNewNavigation();$('open-new-molecules').click();assert.equal($('new-molecules-dialog').open,true);
       assert.equal($('open-new-molecules').textContent,api.t('u8.add'));$('new-molecules-dialog').close();
@@ -58,7 +58,7 @@ const scenarios={
       api.setLanguage(language);$('new-class-filter').value='';$('new-label-filter').value='';$('open-new-list').click();assert.equal($('new-list-dialog').open,true);
       assert.equal($('new-list-table').querySelectorAll('tbody tr').length,4);
       assert.equal($('new-list-counts').children.length,6);
-      const headers=$('new-list-table').querySelectorAll('th');assert.equal(headers.length,10);headers[0].querySelector('button').click();assert.equal($('new-list-table').querySelectorAll('tbody tr')[0].dataset.queryId,context.newListSort.direction<0?'N4':'N1');
+      const headers=$('new-list-table').querySelectorAll('th');assert.equal(headers.length,12);headers[0].querySelector('button').click();assert.equal($('new-list-table').querySelectorAll('tbody tr')[0].dataset.queryId,context.newListSort.direction<0?'N4':'N1');
       $('new-label-filter').value='round 1';$('new-label-filter').dispatchEvent({type:'change'});assert.equal($('new-list-table').querySelectorAll('tbody tr').length,2);
       $('new-class-filter').value='mixed';$('new-class-filter').dispatchEvent({type:'change'});const row=$('new-list-table').querySelector('tbody tr');assert.equal(row.dataset.queryId,'N1');row.click();assert.equal(requests.at(-1).query,'id=N1');assert.equal($('new-list-dialog').open,false);
       $('new-class-filter').value='';$('new-label-filter').value='';context.renderNewList();const invalid=$('new-list-table').querySelectorAll('tbody tr').find(row=>row.dataset.queryId==='N4');invalid.click();assert.equal($('new-list-note').textContent,api.t('u8.invalidNote'));

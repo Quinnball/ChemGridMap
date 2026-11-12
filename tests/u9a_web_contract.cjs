@@ -125,7 +125,7 @@ const scenarios={
     assert.equal($('map-core-rule').options.at(-1).textContent,language==='zh'?'FMCS（建图时计算）':'FMCS (computed when building the map)');
     assert.equal($('map-core-rule').value,'fmcs');
     assert.ok($('core-rule').options.some(o=>o.value==='coverage_brics'));
-    assert.equal(document.querySelectorAll('[data-help]').length,60);
+    assert.equal(document.querySelectorAll('[data-help]').length,77);
     assert.equal($('map-core-rule-help').dataset.help,'h.map-core-rule');
     assert.equal($('group-core-comparison-help').dataset.help,'h.group-core-comparison');
     assert.ok(dictionaries[language]['h.core-rule'].includes('BRICS'));

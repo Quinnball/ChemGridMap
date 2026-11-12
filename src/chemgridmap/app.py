@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from datetime import datetime, timezone
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
@@ -19,6 +20,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import webbrowser
 import zipfile
 
+import numpy as np
 import pandas as pd
 from rdkit import Chem, rdBase
 
@@ -29,13 +31,14 @@ from .inspection import (build_sources, build_source_index, document_coverage, e
                          inspect_entry, load_audit_context, offset_pair_details,
                          match_source_lookup, validate_source_lookup)
 from .pipeline import build_grid_map
-from .queries import insert_new_molecules
+from .queries import (insert_new_molecules, prepare_query_molecules, place_new_molecules,
+                      _new_molecules_svg, NEIGHBOR_EVIDENCE_CATEGORIES)
 from .plotting import render_svg
-from .provenance import file_digests
+from .provenance import file_digests, source_tree_digest
 from .neighborhoods import neighborhood_evidence
 from .comparison import group_comparison, molecule_keys, summarize_group_core
 from .plotting import _svg_molecule_content
-from .units import validate_assumed_sigma
+from .units import validate_assumed_sigma, convert_activity_values
 
 ASSETS = Path(__file__).with_name("web")
 DEMO = Path(__file__).with_name("data") / "chembl205_ic50.csv"
@@ -132,7 +135,436 @@ def _group_drawing(summary, field):
             + (_svg_molecule_content(molecule, 180) or '') + '</svg>') if molecule else ''
 
 
-class AppSession:
+# Manual overlays share the existing session module so the source-file inventory stays fixed.
+MANUAL_COLUMNS = ["query_id", "input_smiles", "canonical_smiles", "value", "unit", "measured_class",
+                  "class_source", "batch", "label", "note", "entered_at"]
+FEEDBACK_COLUMNS = ["query_id", "canonical_smiles", "label", "result_source", "measured_value",
+                    "measured_unit", "activity_pchembl", "measured_class", "class_source",
+                    "neighbor_evidence", "neighbor_comparison", "nearest_reference_id",
+                    "nearest_reference_similarity", "similar_reference_count", "evidence_reference_classes",
+                    "batch", "note", "recorded_at"]
+CLASSES = {"active", "medium", "inactive"}
+
+
+def _rows(frame):
+    return json.loads(frame.to_json(orient="records", double_precision=15))
+
+
+def normalize_measurement(payload, *, lower, upper, optional=False):
+    """Use the upload converter, accepting one exact positive value or one class."""
+    if not payload:
+        if optional:
+            return None
+        raise ValueError("Enter an exact value and unit, or choose a measured class.")
+    mode = payload.get("mode", "value" if payload.get("value") not in (None, "") else "class")
+    value, unit, pactivity = None, "", None
+    if mode in {"value", "numeric"}:
+        value = payload.get("value")
+        numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+        if not np.isfinite(numeric) or numeric <= 0:
+            raise ValueError("The measured value must be an exact number greater than 0.")
+        unit = str(payload.get("unit", "")).strip()
+        unit = {"p": "pActivity", "uM": "µM", "μM": "µM"}.get(unit, unit)
+        canonical_unit = {"pActivity": "p", "µM": "uM", "μM": "uM"}.get(unit, unit)
+        converted, reasons = convert_activity_values(pd.Series([numeric]), value_unit=canonical_unit)
+        if reasons.iloc[0]:
+            raise ValueError("The measured value or unit is invalid.")
+        pactivity = float(converted.iloc[0])
+        measured_class = "active" if pactivity >= upper else "inactive" if pactivity <= lower else "medium"
+        value = float(numeric)
+        class_source = "value"
+    elif mode == "class":
+        measured_class = payload.get("measured_class", payload.get("class"))
+        if measured_class not in CLASSES:
+            raise ValueError("Choose active, medium or inactive for the measured class.")
+        class_source = "user_class"
+    else:
+        raise ValueError("Choose a numeric value or a measured class.")
+    return {"measured_value": value, "measured_unit": unit, "activity_pchembl": pactivity,
+            "measured_class": measured_class, "class_source": class_source,
+            "batch": str(payload.get("batch") or ""), "note": str(payload.get("note") or "")}
+
+
+def neighbor_comparison(measured_class, evidence):
+    if evidence not in CLASSES:
+        return "no_comparison"
+    return "agrees" if measured_class == evidence else "disagrees"
+
+
+class ManualMoleculesMixin:
+    """App-session operations; the session lock covers each complete mutation."""
+
+    def _reset_manual(self):
+        self.manual_entries = []
+        self.manual_entry_notes = {}
+        self.measured_results = {}
+        self.measurement_originals = {}
+
+    def _manual_ready(self):
+        if self.result is None:
+            raise ValueError("Build a reference map first.")
+        if self.job["state"] == "running":
+            raise ValueError("A map is running. Wait for it to finish.")
+        if self.job["options"]["representation"] != "morgan":
+            raise ValueError("New molecules require a reference map arranged using Morgan fingerprints.")
+
+    def _measurement(self, payload, *, optional=False):
+        options = self.job["options"]
+        return normalize_measurement(payload, lower=options["lower_threshold"],
+                                     upper=options["upper_threshold"], optional=optional)
+
+    def preview_new(self, payload):
+        with self.lock:
+            self._manual_ready()
+            smiles = str(payload.get("smiles") or "").strip()
+            _, check, _ = prepare_query_molecules(pd.DataFrame({"smiles": [smiles]}), self.result.data)
+            row = check.iloc[0]
+            status = {"mapped": "ok", "invalid_smiles": "invalid"}.get(row.status, row.status)
+            canonical = row.canonical_smiles
+            result = {"status": status, "canonical_smiles": canonical, "svg": ""}
+            if canonical:
+                result["svg"] = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">'
+                                 + (_svg_molecule_content(canonical, 240) or "") + "</svg>")
+            if status == "in_reference":
+                result["reference_id"] = row.reference_id
+                reference_index = molecule_keys(self.result.data).index(row.reference_id)
+                reference = self.result.data.iloc[reference_index]
+                result.update(grid_row=int(reference.grid_row), grid_col=int(reference.grid_col))
+            elif status == "ok" and self.new_result is not None:
+                matches = self.new_result.data[self.new_result.data.canonical_smiles.eq(canonical)]
+                if not matches.empty:
+                    result.update(status="duplicate_new", query_id=str(matches.iloc[0].query_id))
+            return result
+
+    def measurement_rows(self):
+        """Decorate API/export rows without changing any uploaded molecule fields."""
+        if self.new_result is None:
+            return pd.DataFrame()
+        rows = _rows(self.new_result.all_molecules)
+        self._ensure_core_state()
+        groups = {group["structure_group"]: group for group in self.groups()}
+        manual = {entry["query_id"]: entry for entry in self.manual_entries}
+        records = self.new_result.records
+        for row in rows:
+            identity = row["query_id"]
+            if row.get("activity_class") not in CLASSES:
+                row["measurement_status"] = "not_measured"
+            result = self.measured_results.get(identity)
+            row.update(result_source="", measured_value=None, measured_unit="", measured_class="",
+                       class_source="", batch="", note=manual.get(identity, {}).get("note", ""), recorded_at="")
+            if result:
+                row.update(result)
+            elif row.get("measurement_status") == "measured":
+                retained = (records[records.query_id.astype(str).eq(str(identity))]
+                            if not records.empty and "query_id" in records else pd.DataFrame())
+                value, unit, batch = row.get("activity_pchembl"), "pActivity", ""
+                if len(retained) == 1:
+                    value = retained.iloc[0].get("raw_activity_value", value)
+                    unit = retained.iloc[0].get("raw_activity_unit", unit)
+                if not retained.empty and "evidence_unit" in retained:
+                    batch = ";".join(dict.fromkeys(retained.evidence_unit.fillna("").astype(str)))
+                row.update(result_source="upload", measured_value=value, measured_unit=unit,
+                           measured_class=row.get("activity_class"), class_source="value", batch=batch)
+            elif identity in manual:
+                row["result_source"] = "manual"
+            if row.get("measurement_status") == "measured":
+                row["neighbor_comparison"] = neighbor_comparison(row["measured_class"], row.get("neighbor_evidence"))
+            row["nearest_reference_similarity"] = row.get("tanimoto")
+            group = groups.get(row.get("structure_group"))
+            if group and self.current_core_rule != self.job["options"]["core_rule"]:
+                pattern = (Chem.MolFromSmarts(group["core_smarts"]) if group.get("core_smarts")
+                           else Chem.MolFromSmiles(group["core_smiles"]) if group.get("core_smiles") else None)
+                row["contains_group_core"] = bool(pattern is not None and
+                    Chem.MolFromSmiles(row["canonical_smiles"]).HasSubstructMatch(pattern, useChirality=True))
+            row["contains_group_core_rule"] = self.current_core_rule
+        return pd.DataFrame(rows)
+
+    def feedback_counts(self):
+        rows = self.measurement_rows()
+        measured = rows[rows.measurement_status.eq("measured")] if not rows.empty else rows
+        return {"recorded": len(measured), **{key: int(measured.neighbor_comparison.eq(key).sum())
+                if not measured.empty else 0 for key in ("agrees", "disagrees", "no_comparison")}}
+
+    def measured_result_info(self, query_id):
+        rows = self.measurement_rows()
+        row = _rows(rows[rows.query_id.eq(query_id)])[0]
+        fields = ["result_source", "measured_value", "measured_unit", "measured_class", "activity_pchembl",
+                  "class_source", "batch", "note", "recorded_at", "neighbor_evidence", "neighbor_comparison",
+                  "measurement_status"]
+        return {**{field: row.get(field) for field in fields}, "editable": row["result_source"] != "upload",
+                "directory": str(Path(self.new_result.output_files["new_molecules_input"]).parent)}
+
+    def _apply_measurement(self, query_id, measurement):
+        """Only measured fields of this molecule change; evidence and coordinates are untouched."""
+        for table in (self.new_result.data, self.new_result.all_molecules):
+            mask = table.query_id.eq(query_id)
+            values = {"activity_class": measurement["measured_class"], "measurement_status": "measured",
+                      "activity_pchembl": measurement["activity_pchembl"],
+                      "user_median": measurement["activity_pchembl"]}
+            evidence = table.loc[mask].iloc[0].get("neighbor_evidence")
+            values["neighbor_comparison"] = neighbor_comparison(measurement["measured_class"], evidence)
+            for field, value in values.items():
+                if field not in table:
+                    table[field] = None
+                table.loc[mask, field] = value
+
+    def _replace_result_records(self, query_id, measurement):
+        """Prepare one retained exact record with the same aggregation used by uploads."""
+        records = self.new_result.records
+        if not records.empty and "query_id" in records:
+            records = records[~records.query_id.eq(query_id)].copy()
+        if measurement["class_source"] == "user_class":
+            self.new_result.records = records
+            return
+        from .evidence import prepare_generic_activity_records
+        row = self.new_result.data[self.new_result.data.query_id.eq(query_id)].iloc[0]
+        source = pd.DataFrame({"query_id": [query_id], "smiles": [row.canonical_smiles],
+                               "value": [measurement["measured_value"]], "batch": [measurement["batch"]]})
+        unit = {"pActivity": "p", "µM": "uM", "μM": "uM"}.get(measurement["measured_unit"], measurement["measured_unit"])
+        settings = self.job["options"]
+        aggregated, retained, _, _ = prepare_generic_activity_records(source, compound_column="query_id",
+            smiles_column="smiles", value_column="value", value_unit=unit,
+            document_column="batch" if measurement["batch"] else None,
+            lower=settings["lower_threshold"], upper=settings["upper_threshold"],
+            conflict_range_threshold=settings["conflict_range_threshold"], confidence=bool(measurement["batch"]),
+            offset_display="none", offset_min_shared=3, offset_threshold=1., offset_sign_agreement=.8)
+        ignored = {"molecule_id", "molecule_identity_key", "smiles", "canonical_smiles", "activity_class"}
+        annotations = {key: value for key, value in aggregated.iloc[0].items() if key not in ignored}
+        for table in (self.new_result.data, self.new_result.all_molecules):
+            for field, value in annotations.items():
+                if field not in table:
+                    table[field] = None
+                table.loc[table.query_id.eq(query_id), field] = value
+        retained["query_id"] = query_id
+        retained["source_row"] = row.source_row
+        retained["raw_activity_value"] = measurement["measured_value"]
+        retained["raw_activity_unit"] = measurement["measured_unit"]
+        retained["record_relation"] = "="
+        retained["evidence_unit"] = measurement["batch"]
+        self.new_result.records = pd.concat([records, retained], ignore_index=True)
+
+    def _restore_unmeasured(self, query_id):
+        originals = self.measurement_originals.get(query_id)
+        if originals:
+            for table, original in zip((self.new_result.data, self.new_result.all_molecules), originals):
+                mask = table.query_id.eq(query_id)
+                for field in table:
+                    value = original.get(field)
+                    if value is None and pd.api.types.is_bool_dtype(table[field]):
+                        value = False
+                    table.loc[mask, field] = value
+
+    def _remember_unmeasured(self, query_id):
+        if query_id not in self.measurement_originals:
+            self.measurement_originals[query_id] = [table.loc[table.query_id.eq(query_id)].iloc[0].to_dict()
+                                                  for table in (self.new_result.data, self.new_result.all_molecules)]
+
+    def add_new(self, payload):
+        with self.lock:
+            self._manual_ready()
+            preview = self.preview_new(payload)
+            if preview["status"] != "ok":
+                return preview
+            old = self.new_result
+            ids = set(old.all_molecules.query_id.astype(str)) if old is not None else set()
+            if old is not None and len(old.data) >= 1000:
+                raise ValueError("At most 1,000 checked new molecules are supported.")
+            identity = str(payload.get("query_id") or "").strip()
+            if not identity:
+                counter = 1
+                while f"M{counter:03d}" in ids:
+                    counter += 1
+                identity = f"M{counter:03d}"
+            if identity in ids:
+                raise ValueError("New molecule IDs must be unique; this ID already exists.")
+            measurement = self._measurement(payload.get("measurement"), optional=True)
+            source = pd.DataFrame({"query_id": [identity], "smiles": [str(payload.get("smiles")).strip()],
+                                   "label": [str(payload.get("label") or "")]})
+            # Reuse the exact file-insertion evidence, grouping and structure pipeline.
+            new = insert_new_molecules(self.result, source, id_col="query_id", label_column="label")
+            unmeasured = [table.iloc[0].to_dict() for table in (new.data, new.all_molecules)]
+            if measurement and measurement["class_source"] == "value":
+                # Keep the upload's exact aggregation fields and retained-record schema.
+                source["value"] = measurement["measured_value"]
+                source["batch"] = measurement["batch"]
+                unit = {"pActivity": "p", "µM": "uM", "μM": "uM"}.get(
+                    measurement["measured_unit"], measurement["measured_unit"])
+                new = insert_new_molecules(self.result, source, id_col="query_id", label_column="label",
+                    value_col="value", value_unit=unit,
+                    document_column="batch" if measurement["batch"] else None)
+            if old is not None:
+                occupied = pd.concat([self.result.data, old.data], ignore_index=True)
+                settings = self.result.insertion_parameters
+                new.data = place_new_molecules(occupied, new.data, grid_rows=settings["grid_rows"],
+                                               grid_cols=settings["grid_cols"])
+                for field in ("grid_row", "grid_col", "grid_x", "grid_y", "placement_distance"):
+                    new.all_molecules[field] = new.data[field].to_numpy()
+                source_row = int(old.check.source_row.max()) + 1 if len(old.check) else 0
+                for table in (new.data, new.all_molecules, new.check):
+                    table["source_row"] = source_row
+                for name in ("data", "all_molecules", "check", "neighbors"):
+                    setattr(new, name, pd.concat([getattr(old, name), getattr(new, name)], ignore_index=True))
+                new.records = pd.concat([old.records, new.records], ignore_index=True)
+                new.report, new.output_files = dict(old.report), dict(old.output_files)
+            else:
+                directory = Path(self.job["output_dir"]) / "new_molecules" / "manual"
+                base, suffix = directory, 2
+                while directory.exists():
+                    directory = base.with_name(f"manual-{suffix}")
+                    suffix += 1
+                directory.mkdir(parents=True)
+                path = directory / "new_molecules_input.csv"
+                path.write_bytes(b"query_id,smiles,label\n")
+                new.output_files = {"new_molecules_input": str(path)}
+                self.query_options = {}
+            self.new_result = new
+            stamp = datetime.now(timezone.utc).isoformat()
+            note = str(payload.get("note") or (measurement or {}).get("note") or "")
+            self.manual_entries.append({"query_id": identity, "input_smiles": source.smiles.iloc[0],
+                "canonical_smiles": preview["canonical_smiles"], "value": (measurement or {}).get("measured_value"),
+                "unit": (measurement or {}).get("measured_unit", ""),
+                "measured_class": (measurement or {}).get("measured_class", ""),
+                "class_source": (measurement or {}).get("class_source", ""),
+                "batch": (measurement or {}).get("batch", ""), "label": source.label.iloc[0],
+                "note": note, "entered_at": stamp})
+            self.manual_entry_notes[identity] = note
+            if measurement:
+                self._remember_unmeasured(identity)
+                # Restore this entry to its actual unmeasured state on removal, retaining its final cell.
+                for baseline, original in zip(unmeasured, self.measurement_originals[identity]):
+                    for field in ("source_row", "grid_row", "grid_col", "grid_x", "grid_y", "placement_distance"):
+                        baseline[field] = original.get(field)
+                self.measurement_originals[identity] = unmeasured
+                measurement.update(result_source="manual", recorded_at=stamp, note=note)
+                self.measured_results[identity] = measurement
+                self._apply_measurement(identity, measurement)
+            self._write_manual_outputs()
+            return self._manual_response(identity)
+
+    def _editable_query(self, query_id):
+        self._manual_ready()
+        if self.new_result is None or query_id not in set(self.new_result.data.query_id):
+            raise ValueError("Choose a mapped new molecule.")
+        if self.measured_result_info(query_id)["result_source"] == "upload":
+            raise ValueError("Measured results from the uploaded file are read-only.")
+
+    def record_result(self, payload):
+        with self.lock:
+            identity = str(payload.get("query_id") or "")
+            self._editable_query(identity)
+            measurement = self._measurement(payload.get("measurement"))
+            self._remember_unmeasured(identity)
+            self._restore_unmeasured(identity)
+            manual = next((entry for entry in self.manual_entries if entry["query_id"] == identity), None)
+            measurement.update(result_source=self.measured_results.get(identity, {}).get("result_source", "recorded"),
+                               recorded_at=datetime.now(timezone.utc).isoformat())
+            self.measured_results[identity] = measurement
+            self._replace_result_records(identity, measurement)
+            self._apply_measurement(identity, measurement)
+            if manual:
+                manual.update(value=measurement["measured_value"], unit=measurement["measured_unit"],
+                              **{key: measurement[key] for key in ("measured_class", "class_source", "batch", "note")})
+            self._write_manual_outputs()
+            return self._manual_response(identity)
+
+    def clear_result(self, payload):
+        with self.lock:
+            identity = str(payload.get("query_id") or "")
+            self._editable_query(identity)
+            self._restore_unmeasured(identity)
+            self.measurement_originals.pop(identity, None)
+            self.measured_results.pop(identity, None)
+            if not self.new_result.records.empty and "query_id" in self.new_result.records:
+                self.new_result.records = self.new_result.records[~self.new_result.records.query_id.eq(identity)].copy()
+            manual = next((entry for entry in self.manual_entries if entry["query_id"] == identity), None)
+            if manual:
+                manual.update(value=None, unit="", measured_class="", class_source="", batch="",
+                              note=self.manual_entry_notes.get(identity, ""))
+            self._write_manual_outputs()
+            return self._manual_response(identity)
+
+    def _manual_response(self, identity):
+        row = _rows(self.measurement_rows().loc[lambda frame: frame.query_id.eq(identity)])[0]
+        point = next(point for point in self.points() if point.get("query_id") == identity)
+        return {"status": "ok", "query_id": identity, "row": row, "point": point, "job": self.snapshot()}
+
+    def _write_manual_outputs(self):
+        """Only the overlay directory is rewritten; original input bytes are retained."""
+        result = self.new_result
+        directory = Path(result.output_files["new_molecules_input"]).parent
+        rows = self.measurement_rows()
+        feedback = rows[rows.measurement_status.eq("measured")].reindex(columns=FEEDBACK_COLUMNS)
+        exported = result.all_molecules.copy()
+        for field in rows:
+            if field not in exported:
+                exported[field] = rows[field].to_numpy()
+        exported["contains_group_core_rule"] = self.job["options"]["core_rule"]
+        tables = {"new_molecules": exported, "new_molecules_check": result.check,
+                  "new_molecules_neighbors": result.neighbors, "neighbor_evidence_feedback": feedback}
+        if self.manual_entries:
+            tables["manual_entries"] = pd.DataFrame(self.manual_entries, columns=MANUAL_COLUMNS)
+        for name, table in tables.items():
+            path = directory / f"{name}.csv"
+            table.to_csv(path, index=False, encoding="utf-8", lineterminator="\n")
+            result.output_files[name] = str(path)
+        counts = self.feedback_counts()
+        result.report.update(manual_count=len(self.manual_entries), feedback_counts=counts,
+                             feedback_file="neighbor_evidence_feedback.csv", mapped=len(result.data),
+                             input_compounds=len(result.all_molecules),
+                             neighbor_evidence_counts={key: int(result.data.neighbor_evidence.eq(key).sum())
+                                                       for key in NEIGHBOR_EVIDENCE_CATEGORIES})
+        for group in result.structure_groups:
+            count = int(result.data.structure_group.eq(group["structure_group"]).sum())
+            group.update(n_query_members=count, n_new_members=count)
+        settings = self.result.insertion_parameters
+        svg = directory / "map_with_new_molecules.svg"
+        _new_molecules_svg(self.result, result.data, svg, rows=settings["grid_rows"], cols=settings["grid_cols"],
+                           lower=settings["lower_threshold"], upper=settings["upper_threshold"], show_feedback=True)
+        result.output_files["map_with_new_molecules"] = str(svg)
+        manifest_path = directory / "new_molecules_manifest.json"
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        else:
+            reference_manifest = self.result.output_files.get("run_manifest")
+            manifest = {"input_filename": "manual", "reference_run_directory": self.job["output_dir"],
+                        "reference_manifest_sha256": hashlib.sha256(Path(reference_manifest).read_bytes()).hexdigest()
+                        if reference_manifest else None, "parameters": dict(settings)}
+        raw = Path(result.output_files["new_molecules_input"]).read_bytes()
+        manifest.update(input_sha256=hashlib.sha256(raw).hexdigest(), report=result.report,
+                        software_source_sha256=source_tree_digest()["source_sha256"],
+                        feedback={"filename": "neighbor_evidence_feedback.csv", **counts},
+                        updated_at=datetime.now(timezone.utc).isoformat())
+        if self.manual_entries:
+            path = Path(result.output_files["manual_entries"])
+            manifest["manual_entries"] = {"filename": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                                          "rows": len(self.manual_entries)}
+        manifest["output_digests"] = file_digests({key: path for key, path in result.output_files.items()
+            if key not in {"new_molecules_manifest", "new_molecules_results_zip"}})
+        manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False, allow_nan=False),
+                                 encoding="utf-8", newline="\n")
+        result.output_files["new_molecules_manifest"] = str(manifest_path)
+        archive = directory / "new_molecules_results.zip"
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+            for key, path in result.output_files.items():
+                if key != "new_molecules_results_zip":
+                    bundle.write(path, Path(path).name)
+        result.output_files["new_molecules_results_zip"] = str(archive)
+        self.files = dict(self.reference_files)
+        self.files.update({Path(path).name: Path(path) for path in result.output_files.values()})
+        self.job.update(report={**self.job["report"], "new_molecules": result.report, "query_molecules": result.report},
+                        files=list(self.files), molecules=len(self.result.data) + len(result.data))
+        self.group_detail_cache = {}
+        self.source_index_cache.pop("new", None)
+
+    def feedback_csv(self):
+        with self.lock:
+            if self.new_result is None:
+                raise ValueError("Insert new molecules first.")
+            self._write_manual_outputs()
+            return Path(self.new_result.output_files["neighbor_evidence_feedback"]).read_bytes()
+
+
+class AppSession(ManualMoleculesMixin):
     """One local workspace; a single worker avoids concurrent chemistry/render jobs."""
 
     def __init__(self, output_root):
@@ -147,6 +579,7 @@ class AppSession:
         self.query_filename = ""
         self.query_options = None
         self.new_result = None
+        self._reset_manual()
         self.pending_query = None
         self.reference_files = {}
         self.reference_report = {}
@@ -177,6 +610,7 @@ class AppSession:
             self.filename = Path(filename.replace("\\", "/")).name
             self.query_frame, self.query_raw, self.query_filename = None, b"", ""
             self.query_options, self.new_result = None, None
+            self._reset_manual()
             self.pending_query = None
             self.reference_files, self.reference_report = {}, {}
             self.source_frame, self.source_filename, self.possible_sources = None, "", None
@@ -210,6 +644,7 @@ class AppSession:
                 raise ValueError("A map is running. Wait for it to finish before replacing the input.")
             self.query_frame, self.query_raw, self.query_filename = None, b"", ""
             self.query_options, self.new_result = None, None
+            self._reset_manual()
             self.pending_query = None
             if self.result is not None:
                 self.files = dict(self.reference_files)
@@ -222,9 +657,13 @@ class AppSession:
         """Current overlay survives browser refresh; original run files stay separate."""
         if self.new_result is None:
             return None
-        return {"rows": json_rows(self.new_result.all_molecules),
-                "report": self.new_result.report, "options": self.query_options,
-                "input": self.query_input_info(pending=False),
+        directory = str(Path(self.new_result.output_files["new_molecules_input"]).parent)
+        return {"rows": json_rows(self.measurement_rows()),
+                "report": {**self.new_result.report, "feedback_counts": self.feedback_counts(),
+                           "manual_count": len(self.manual_entries)}, "options": self.query_options,
+                "input": self.query_input_info(pending=False), "directory": directory,
+                "replacement": {"total": len(self.new_result.data), "manual": len(self.manual_entries),
+                                "recorded": len(self.measured_results), "directory": directory},
                 "files": [Path(path).name for path in self.new_result.output_files.values()]}
 
     def points(self):
@@ -421,6 +860,7 @@ class AppSession:
                 reference_target_id=self.reference_map_info()["target_id"],
                 **chosen)
             self.new_result, self.query_options = inserted, chosen
+            self._reset_manual()
             self.query_frame, self.query_raw, self.query_filename = frame, raw, filename
             self.pending_query = None
             self.files = dict(self.reference_files)
@@ -479,6 +919,7 @@ class AppSession:
     def _discard_map(self):
         self.result, self.curation, self.files = None, None, {}
         self.new_result = None
+        self._reset_manual()
         self.reference_files, self.reference_report = {}, {}
         self.generic_records = None
         self.activity_confidence = None
@@ -537,6 +978,7 @@ class AppSession:
             self.pending_query = None
             self.result, self.curation, self.files = None, None, {}
             self.new_result = None
+            self._reset_manual()
             self.reference_files, self.reference_report = {}, {}
             self.generic_records = None
             self.activity_confidence = None
@@ -836,7 +1278,7 @@ class AppSession:
                 snapshot["reference_map"] = self.reference_map_info()
             return snapshot
 
-    def _new_source_records(self):
+    def _uploaded_new_source_records(self):
         """Use retained measurements, or uploaded batches for unmeasured molecules."""
         options = self.query_options or {}
         column = options.get("document_column")
@@ -857,6 +1299,24 @@ class AppSession:
                 identities[row.source_row] = "query:" + str(row.first_query_id)
         records["molecule_identity_key"] = records.index.map(identities)
         return records.dropna(subset=["molecule_identity_key"]), column
+
+    def _new_source_records(self):
+        records, column = self._uploaded_new_source_records()
+        if not records.empty and self.measured_results:
+            # Current manual evidence is added once below, using the upload's source column.
+            identities = {"query:" + identity for identity in self.measured_results}
+            records = records[~records.molecule_identity_key.isin(identities)].copy()
+        manual = []
+        if self.new_result is not None:
+            for identity, result in self.measured_results.items():
+                if result.get("batch"):
+                    row = self.new_result.data[self.new_result.data.query_id.eq(identity)].iloc[0]
+                    manual.append({"molecule_identity_key": "query:" + identity,
+                                   "canonical_smiles": row.canonical_smiles,
+                                   (column or "_manual_evidence_unit"): result["batch"]})
+        if manual:
+            return pd.concat([records, pd.DataFrame(manual)], ignore_index=True), column or "_manual_evidence_unit"
+        return records, column
 
     def _source_index(self, scope="reference"):
         if self.result is None:
@@ -1041,6 +1501,7 @@ class AppSession:
                                 pattern, useChirality=True))
                     detail["molecule"]["contains_group_core_rule"] = self.current_core_rule
                     detail["group_core"] = group
+                    detail["measured_result"] = self.measured_result_info(str(query.query_id))
                     if query_match is not None:
                         detail["query_match"] = query_match
                     return detail, records
@@ -1321,6 +1782,8 @@ class LocalHandler(BaseHTTPRequestHandler):
             elif path == "/api/new-molecules":
                 self.send(session.new_molecules_info() or {"rows": [], "report": {}, "options": {},
                                                           "input": session.query_input_info(), "files": []})
+            elif path == "/api/new-molecules/feedback":
+                self.send(session.feedback_csv(), "text/csv", filename="neighbor_evidence_feedback.csv")
             elif path == "/api/groups":
                 if session.result is None:
                     raise ValueError("Build a map first.")
@@ -1377,6 +1840,14 @@ class LocalHandler(BaseHTTPRequestHandler):
                 self.send(session.load_query(content, unquote(self.headers.get("X-Filename", "queries.csv"))))
             elif path in ("/api/query-input/clear", "/api/new-molecules/clear"):
                 self.send(session.clear_query())
+            elif path == "/api/new-molecules/preview":
+                self.send(session.preview_new(json.loads(content)))
+            elif path == "/api/new-molecules/add":
+                self.send(session.add_new(json.loads(content)))
+            elif path == "/api/new-molecules/result":
+                self.send(session.record_result(json.loads(content)))
+            elif path == "/api/new-molecules/result/clear":
+                self.send(session.clear_result(json.loads(content)))
             elif path in ("/api/new-molecules", "/api/new-molecules/insert"):
                 self.send(session.insert_new(json.loads(content)))
             elif path == "/api/source-input":
