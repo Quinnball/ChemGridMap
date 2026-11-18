@@ -46,6 +46,9 @@ Changes made in response to the simulated review of the v0.6 manuscript:
   are not affected).
 - CLI: the `--unit-column` help is plain ASCII, so `chemgridmap --help` works
   in Windows consoles that cannot print the Greek letter mu.
+- Previous results: a run reopened after its folder was moved now refers to
+  its output files in the new location on Windows as well; saved path strings
+  had been recognized only with "/" separators.
 - Paper: post hoc analyses for the v0.7 manuscript (`paper/rev07/`) and the
   v0.7 figure sources (Figures 1, 4, 6 and 7, and the Additional file 1
   hERG-pair figure; `make paper-figure1-v07 paper-figures-v07
