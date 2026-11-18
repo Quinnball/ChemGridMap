@@ -159,10 +159,10 @@ def _run_child(arguments, tmp_path):
     """Run a child interpreter with output in files, so that orphaned workers
     holding inherited pipes cannot block the test past its timeout."""
     out, err = tmp_path / "child.out", tmp_path / "child.err"
-    with open(out, "w") as stdout, open(err, "w") as stderr:
+    with open(out, "w", encoding="utf-8") as stdout, open(err, "w", encoding="utf-8") as stderr:
         returncode = subprocess.run([sys.executable, *arguments], stdout=stdout, stderr=stderr,
-                                    text=True, timeout=60).returncode
-    return returncode, out.read_text(), err.read_text()
+                                    timeout=60).returncode
+    return returncode, out.read_text(encoding="utf-8"), err.read_text(encoding="utf-8")
 
 
 def test_normal_process_exit_reaps_workers(tmp_path):
