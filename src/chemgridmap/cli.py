@@ -116,7 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Activity unit (default p); p means an existing -log10 molar value.",
     )
     units.add_argument(
-        "--unit-column", help="Per-record concentration unit column (M, mM, uM, µM, μM, nM, pM).",
+        "--unit-column", help="Per-record concentration unit column (M, mM, uM, nM, pM; micro signs are accepted for uM).",
     )
     parser.add_argument(
         "--assumed-sigma", type=_assumed_sigma,

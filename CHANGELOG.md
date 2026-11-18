@@ -40,6 +40,12 @@ Changes made in response to the simulated review of the v0.6 manuscript:
   supported Python version (Python 3.10 and 3.11 had accepted it because the
   value equalled the default).
 - CI: a job with the lowest declared dependency versions on Python 3.10.
+- macOS: RDKit 2026.9.2 is excluded, because its macOS wheels raise
+  "bad any cast" in `Chem.MurckoDecompose`, which every scaffold and core
+  calculation uses (RDKit 2026.9.1 and the Linux and Windows wheels of 2026.9.2
+  are not affected).
+- CLI: the `--unit-column` help is plain ASCII, so `chemgridmap --help` works
+  in Windows consoles that cannot print the Greek letter mu.
 - Paper: post hoc analyses for the v0.7 manuscript (`paper/rev07/`) and the
   v0.7 figure sources (Figures 1, 4, 6 and 7, and the Additional file 1
   hERG-pair figure; `make paper-figure1-v07 paper-figures-v07
@@ -52,7 +58,7 @@ Earlier changes since 0.5.0:
   scaffold and ring-fragment candidates. Show the generic Murcko scaffold and the
   members sharing it on the group card and as a supplementary last row of the core
   comparison table and CSV. Existing rules, defaults and exports are unchanged.
-- Add the analysis scripts of the sealed E28 evaluation: the time-split test of
+- Add the analysis scripts of the E28 evaluation (plan hashed before the run): the time-split test of
   neighbor evidence (`paper/u10_neighbor_validation.py`, `paper/u10_e28_report.py`),
   the core-rule comparison on the sampled targets (`paper/u10_core_rules.py`,
   `paper/u10_e28c_summary.py`) and the builder of the Additional file 1 addendum
