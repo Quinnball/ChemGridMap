@@ -638,13 +638,24 @@ def _session_path(root, relative):
     return resolved
 
 
+def _path_string_inside(value, root):
+    """Whether a string names a path inside ``root``, with either separator style."""
+    path = Path(value)
+    if not path.is_absolute():
+        return False
+    try:
+        return path.resolve().is_relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
+
+
 def _session_paths(value, root, *, restore=False):
     """Relocate only explicit paths, leaving DataFrame values and arrays untouched."""
     if restore and isinstance(value, dict) and set(value) == {"__session_path__", "kind"}:
         path = _session_path(root, value["__session_path__"])
         return path if value["kind"] == "path" else str(path)
     if not restore and isinstance(value, (str, Path)):
-        if isinstance(value, Path) or str(value).startswith(str(root) + "/") or str(value) == str(root):
+        if isinstance(value, Path) or _path_string_inside(value, root):
             relative = Path(value).resolve().relative_to(root.resolve()).as_posix()
             return {"__session_path__": relative, "kind": "path" if isinstance(value, Path) else "str"}
     if is_dataclass(value) and not isinstance(value, type):
