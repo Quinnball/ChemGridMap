@@ -133,7 +133,39 @@ def test_pool_reuse_and_shutdown_leave_no_worker_processes(monkeypatch):
     comparison.shutdown_core_workers()
 
 
-def test_normal_process_exit_reaps_workers():
+def _process_exists(pid):
+    """Return whether ``pid`` is a running process, without signalling it."""
+    if sys.platform == "win32":
+        # os.kill(pid, 0) would call TerminateProcess on Windows.
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            return code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _run_child(arguments, tmp_path):
+    """Run a child interpreter with output in files, so that orphaned workers
+    holding inherited pipes cannot block the test past its timeout."""
+    out, err = tmp_path / "child.out", tmp_path / "child.err"
+    with open(out, "w") as stdout, open(err, "w") as stderr:
+        returncode = subprocess.run([sys.executable, *arguments], stdout=stdout, stderr=stderr,
+                                    text=True, timeout=60).returncode
+    return returncode, out.read_text(), err.read_text()
+
+
+def test_normal_process_exit_reaps_workers(tmp_path):
     script = """
 import json, os
 from chemgridmap.comparison import _get_core_executor
@@ -141,17 +173,25 @@ executor = _get_core_executor(2)
 assert executor.submit(os.getpid).result() != os.getpid()
 print(json.dumps(list(executor._processes)), flush=True)
 """
-    child = subprocess.run([sys.executable, "-c", script], text=True, capture_output=True, timeout=30)
-    assert child.returncode == 0, child.stderr
-    worker_pids = json.loads(child.stdout)
+    returncode, stdout, stderr = _run_child(["-c", script], tmp_path)
+    assert returncode == 0, stderr
+    worker_pids = json.loads(stdout)
     assert len(worker_pids) == 2
-    for pid in worker_pids:
-        with pytest.raises(ProcessLookupError):
-            os.kill(pid, 0)
+    assert not any(_process_exists(pid) for pid in worker_pids)
 
 
-def test_app_sigterm_reaps_workers_without_binding_a_port(tmp_path):
-    script = """
+# Ctrl+C reaches the app as KeyboardInterrupt on every platform. SIGTERM is a
+# POSIX stop request; on Windows os.kill(..., SIGTERM) is TerminateProcess,
+# which no handler can intercept, so that case exists only on POSIX.
+APP_STOPS = {"ctrl_c": "raise KeyboardInterrupt",
+             "sigterm": "os.kill(os.getpid(), signal.SIGTERM)"}
+if sys.platform == "win32":
+    del APP_STOPS["sigterm"]
+
+
+@pytest.mark.parametrize("stop", sorted(APP_STOPS))
+def test_app_stop_reaps_workers_without_binding_a_port(tmp_path, stop):
+    script = f"""
 import json, os, signal, sys
 from chemgridmap import app, comparison
 worker_pids = []
@@ -162,21 +202,20 @@ class Server:
         executor.submit(os.getpid).result()
         worker_pids.extend(executor._processes)
     def serve_forever(self):
-        os.kill(os.getpid(), signal.SIGTERM)
+        {APP_STOPS[stop]}
     def server_close(self):
         pass
 app.LocalServer = Server
 assert app.main(['--no-browser', '--output-dir', sys.argv[1]]) == 0
 print(json.dumps(worker_pids), flush=True)
 """
-    child = subprocess.run([sys.executable, "-c", script, str(tmp_path)],
-                           text=True, capture_output=True, timeout=30)
-    assert child.returncode == 0, child.stderr
-    worker_pids = json.loads(child.stdout.splitlines()[-1])
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    returncode, stdout, stderr = _run_child(["-c", script, str(output_dir)], tmp_path)
+    assert returncode == 0, stderr
+    worker_pids = json.loads(stdout.splitlines()[-1])
     assert len(worker_pids) == 2
-    for pid in worker_pids:
-        with pytest.raises(ProcessLookupError):
-            os.kill(pid, 0)
+    assert not any(_process_exists(pid) for pid in worker_pids)
 
 
 def test_empty_groups_report_complete_without_starting_workers():
