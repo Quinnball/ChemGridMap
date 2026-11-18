@@ -13,6 +13,9 @@ from tempfile import gettempdir
 sys.dont_write_bytecode = True
 
 import numpy as np
+
+# numpy < 2.0 names the function trapz.
+_trapezoid = getattr(np, "trapezoid", None) or np.trapz
 from scipy import ndimage, stats
 
 from e5b_models import MU_GRID, SMOOTHING_SD, student_t_scale
@@ -443,15 +446,15 @@ def _integrated_posterior(posterior: np.ndarray) -> np.ndarray:
     upper_index = int(np.argmin(np.abs(MU_GRID - CLASS_BOUNDARIES[1])))
     parts = np.array(
         [
-            np.trapezoid(
+            _trapezoid(
                 posterior[: lower_index + 1],
                 MU_GRID[: lower_index + 1],
             ),
-            np.trapezoid(
+            _trapezoid(
                 posterior[lower_index : upper_index + 1],
                 MU_GRID[lower_index : upper_index + 1],
             ),
-            np.trapezoid(posterior[upper_index:], MU_GRID[upper_index:]),
+            _trapezoid(posterior[upper_index:], MU_GRID[upper_index:]),
         ],
         dtype=float,
     )

@@ -12,6 +12,9 @@ from tempfile import gettempdir
 sys.dont_write_bytecode = True
 
 import numpy as np
+
+# numpy < 2.0 names the function trapz.
+_trapezoid = getattr(np, "trapezoid", None) or np.trapz
 from scipy import ndimage, stats
 
 MU_GRID = np.arange(1.0, 13.0 + 0.01, 0.02, dtype=float)
@@ -273,15 +276,15 @@ def _integrated_support(posterior: np.ndarray) -> np.ndarray:
     upper_index = int(np.argmin(np.abs(MU_GRID - 7.0)))
     parts = np.array(
         [
-            np.trapezoid(
+            _trapezoid(
                 posterior[: lower_index + 1],
                 MU_GRID[: lower_index + 1],
             ),
-            np.trapezoid(
+            _trapezoid(
                 posterior[lower_index : upper_index + 1],
                 MU_GRID[lower_index : upper_index + 1],
             ),
-            np.trapezoid(
+            _trapezoid(
                 posterior[upper_index:],
                 MU_GRID[upper_index:],
             ),

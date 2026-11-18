@@ -77,7 +77,7 @@ Each stage has one Make target:
 | Abstract: held-out disagreement, support and agreement | `strengthening/output/E1A/`, `E2/` | `make paper-e1a paper-e2` |
 | Abstract: later-document and time-split statements | `strengthening/output/E2/`, `E7/`, `E9/`, `E12b/` | `make paper-e2b paper-e7 paper-e9 paper-e12b` |
 | Introduction and scale examples | `paper/output/reliability_v1/` | See the `reliability_v1` commands below |
-| Implementation: workflow overview | Hand-composed Figure 1 source | Not reproducible; see below |
+| Implementation: workflow overview | Hand-composed Figure 1 source (v0.7: `figures/source/Figure_1_workflow.svg`) | Not reproducible for v0.6; v0.7: `make paper-figure1-v07` |
 | Implementation: evidence model | `strengthening/output/E1A/` | `make paper-e1a` |
 | Implementation: layouts | `strengthening/output/E1B/`, `E6/` | `make paper-e1b paper-e6` |
 | Implementation: cores | `strengthening/output/E1B/`, `T1/`, `E12c/` | `make paper-e1b paper-t1 paper-e12c` |
@@ -141,6 +141,25 @@ The `paper/output/reliability_v1/` tree is generated independently of
 .venv/bin/python -B paper/run_reliability_analysis.py \
   --steps scale --workers 1
 ```
+
+## Manuscript v0.7 (release 0.6.0)
+
+The v0.7 revision rebuilt Figures 1, 4, 6 and 7 and moved the former Fig. 4b (the hERG document
+pair) to Additional file 1. Figure 2 was not rebuilt: in one environment, 0.6.0 writes the same
+bytes as 0.5.0 for every Figure 2 map, table and figure file of the CA II example (seed 42); only
+the run manifest (version, source hash, input path and timings) differs.
+
+| Item | Inputs | Command |
+| --- | --- | --- |
+| Fig. 1 workflow | `figures/source/Figure_1_workflow.svg` | `make paper-figure1-v07` |
+| Fig. 4a-c and Additional file 1 hERG-pair figure | `figures/data_final/4*.csv` | `make paper-figures-v07` |
+| Fig. 6a-d (0.6.0 interface) | `figures/data_fig6/` from `make paper-figure6-capture` | `make paper-figures-v07` |
+| Fig. 7a-c (thrombin new-compound view) | Two thrombin CSV files (`FIG7_INPUTS`), a Chromium binary (`CHROME`) | `make paper-figure7-v07` |
+| S19, S20 and the other post hoc analyses | See `paper/rev07/README.md` | See `paper/rev07/README.md` |
+| Color-vision separations (S43) | Rendered map colors | `.venv/bin/python paper/cvd_separations.py` |
+
+The container builds used Liberation Sans, which has Arial's metrics; on macOS the scripts use
+Arial when it is installed.
 
 ## Archived runs
 

@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="170mm" height="77.2mm" viewBox="0 0 1740 790" font-family="Arial, Helvetica, sans-serif">
+  <title>Fig. 1 Workflow of ChemGridMap 0.6</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4A5563"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1740" height="790" fill="#FFFFFF"/>
+
+  <!-- 1 Input -->
+  <rect x="20" y="20" width="280" height="560" rx="10" fill="#F4F6F8" stroke="#9AA5B1" stroke-width="2"/>
+  <path d="M20,76 V30 a10,10 0 0 1 10,-10 H290 a10,10 0 0 1 10,10 V76 z" fill="#33475B"/>
+  <text x="160" y="57" font-size="26" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Input</text>
+  <text font-size="24" fill="#1F2933">
+    <tspan x="36" y="122">ChEMBL activity</tspan>
+    <tspan x="36" dy="29">export, generic</tspan>
+    <tspan x="36" dy="29">record table or</tspan>
+    <tspan x="36" dy="29">molecule table</tspan>
+    <tspan x="36" dy="43">Activity, assay and</tspan>
+    <tspan x="36" dy="29">document IDs kept</tspan>
+    <tspan x="36" dy="29">with each record</tspan>
+    <tspan x="36" dy="43">Generic records:</tspan>
+    <tspan x="36" dy="29">a document, batch</tspan>
+    <tspan x="36" dy="29">or date column</tspan>
+    <tspan x="36" dy="29">names the evidence</tspan>
+    <tspan x="36" dy="29">unit</tspan>
+  </text>
+
+  <!-- 2 Curation -->
+  <rect x="340" y="20" width="280" height="560" rx="10" fill="#F4F6F8" stroke="#9AA5B1" stroke-width="2"/>
+  <path d="M340,76 V30 a10,10 0 0 1 10,-10 H610 a10,10 0 0 1 10,10 V76 z" fill="#33475B"/>
+  <text x="480" y="57" font-size="26" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Curation</text>
+  <text font-size="24" fill="#1F2933">
+    <tspan x="356" y="122">ChEMBL: exact,</tspan>
+    <tspan x="356" dy="29">finite pChEMBL in</tspan>
+    <tspan x="356" dy="29">nM; validity and</tspan>
+    <tspan x="356" dy="29">duplicate flags</tspan>
+    <tspan x="356" dy="29">applied</tspan>
+    <tspan x="356" dy="43">Generic: “=” records;</tspan>
+    <tspan x="356" dy="29">units → pActivity</tspan>
+    <tspan x="356" dy="43">Entry = parent</tspan>
+    <tspan x="356" dy="29">compound; the</tspan>
+    <tspan x="356" dy="29">record median</tspan>
+    <tspan x="356" dy="29">sets its class</tspan>
+    <tspan x="356" dy="43">Evidence unit =</tspan>
+    <tspan x="356" dy="29">one document,</tspan>
+    <tspan x="356" dy="29">batch or date</tspan>
+  </text>
+
+  <!-- 3a Evidence branch: computed from the records only -->
+  <rect x="660" y="20" width="680" height="265" rx="10" fill="#F4F6F8" stroke="#9AA5B1" stroke-width="2"/>
+  <path d="M660,76 V30 a10,10 0 0 1 10,-10 H1330 a10,10 0 0 1 10,10 V76 z" fill="#33475B"/>
+  <text x="1000" y="57" font-size="26" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Evidence (records only)</text>
+  <line x1="1000" y1="96" x2="1000" y2="268" stroke="#C9D1D9" stroke-width="2"/>
+  <text font-size="24" fill="#1F2933">
+    <tspan x="676" y="112">σ<tspan font-size="22" dy="5">doc</tspan><tspan dy="-5"> per target from</tspan></tspan>
+    <tspan x="676" dy="29">multi-unit entries,</tspan>
+    <tspan x="676" dy="29">or an assumed σ</tspan>
+    <tspan x="676" dy="36" font-weight="bold" fill="#B5462F">Class support</tspan>
+    <tspan x="676" dy="29">and reproducibility</tspan>
+    <tspan x="676" dy="29">(need evidence units)</tspan>
+  </text>
+  <text font-size="22" fill="#1F2933">
+    <tspan x="1016" y="110">Document pairs sharing ≥ 3</tspan>
+    <tspan x="1016" dy="26">entries; median difference</tspan>
+    <tspan x="1016" dy="26">≥ 1 log unit, and ≥ 80% of</tspan>
+    <tspan x="1016" dy="26">differences of its sign</tspan>
+    <tspan x="1016" dy="34" font-weight="bold" font-size="24" fill="#B5462F">Offset pairs</tspan>
+    <tspan x="1016" dy="27">touched entries marked</tspan>
+    <tspan x="1016" dy="26">for inspection</tspan>
+  </text>
+
+  <!-- 3b Layout branch: computed from the fingerprints only -->
+  <rect x="660" y="315" width="680" height="265" rx="10" fill="#F4F6F8" stroke="#9AA5B1" stroke-width="2"/>
+  <path d="M660,371 V325 a10,10 0 0 1 10,-10 H1330 a10,10 0 0 1 10,10 V371 z" fill="#33475B"/>
+  <text x="1000" y="352" font-size="26" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Layout and groups (fingerprints only)</text>
+  <line x1="1000" y1="391" x2="1000" y2="563" stroke="#C9D1D9" stroke-width="2"/>
+  <text font-size="24" fill="#1F2933">
+    <tspan x="676" y="407">Morgan fingerprints;</tspan>
+    <tspan x="676" dy="29">UMAP, PCA or t-SNE,</tspan>
+    <tspan x="676" dy="29">lattice assignment,</tspan>
+    <tspan x="676" dy="29">neighbor refinement</tspan>
+    <tspan x="676" dy="36" font-weight="bold" fill="#B5462F">Neighbor recall</tspan>
+    <tspan x="676" dy="29">for each cell, k = 10</tspan>
+  </text>
+  <text font-size="24" fill="#1F2933">
+    <tspan x="1016" y="407">Butina groups</tspan>
+    <tspan x="1016" dy="29">(Tanimoto ≥ 0.60 to</tspan>
+    <tspan x="1016" dy="29">the group center);</tspan>
+    <tspan x="1016" dy="29">coverage-target core</tspan>
+    <tspan x="1016" dy="36" font-weight="bold" fill="#B5462F">Core coverage</tspan>
+    <tspan x="1016" dy="29">for each group</tspan>
+  </text>
+
+  <!-- 4 Outputs -->
+  <rect x="1380" y="20" width="340" height="560" rx="10" fill="#F4F6F8" stroke="#9AA5B1" stroke-width="2"/>
+  <path d="M1380,76 V30 a10,10 0 0 1 10,-10 H1710 a10,10 0 0 1 10,10 V76 z" fill="#33475B"/>
+  <text x="1550" y="57" font-size="26" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Outputs</text>
+  <text font-size="24" fill="#1F2933">
+    <tspan x="1396" y="122">Maps of every layer</tspan>
+    <tspan x="1396" dy="29">at identical cell</tspan>
+    <tspan x="1396" dy="29">positions</tspan>
+    <tspan x="1396" dy="43">Tables and a manifest</tspan>
+    <tspan x="1396" dy="29">with versions and</tspan>
+    <tspan x="1396" dy="29">SHA-256 hashes</tspan>
+    <tspan x="1396" dy="43">Browser inspector:</tspan>
+    <tspan x="1396" dy="29">each cell linked to</tspan>
+    <tspan x="1396" dy="29">its records and</tspan>
+    <tspan x="1396" dy="29">documents</tspan>
+  </text>
+
+  <!-- arrows: the two branches are independent -->
+  <line x1="302" y1="300" x2="336" y2="300" stroke="#4A5563" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="622" y1="152" x2="656" y2="152" stroke="#4A5563" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="622" y1="447" x2="656" y2="447" stroke="#4A5563" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="1342" y1="152" x2="1376" y2="152" stroke="#4A5563" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="1342" y1="447" x2="1376" y2="447" stroke="#4A5563" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- 5 New compounds (0.6): inserted into a finished reference map -->
+  <rect x="340" y="620" width="1380" height="150" rx="10" fill="#F4F6F8" stroke="#9AA5B1" stroke-width="2"/>
+  <path d="M340,770 V630 a10,10 0 0 1 10,-10 H590 V770 z" fill="#33475B"/>
+  <text font-size="26" font-weight="bold" fill="#FFFFFF" text-anchor="middle">
+    <tspan x="465" y="680">New compounds</tspan>
+    <tspan x="465" dy="34" font-weight="normal" font-size="22">(optional, after</tspan>
+    <tspan x="465" dy="27" font-weight="normal" font-size="22">the reference map)</tspan>
+  </text>
+  <line x1="975" y1="636" x2="975" y2="754" stroke="#C9D1D9" stroke-width="2"/>
+  <line x1="1365" y1="636" x2="1365" y2="754" stroke="#C9D1D9" stroke-width="2"/>
+  <text font-size="22" fill="#1F2933">
+    <tspan x="606" y="666">Placed in the empty cell nearest</tspan>
+    <tspan x="606" dy="29">the most similar reference</tspan>
+    <tspan x="606" dy="29">compound; reference cells do not</tspan>
+    <tspan x="606" dy="29">move; <tspan font-weight="bold" fill="#B5462F">placement recall</tspan></tspan>
+  </text>
+  <text font-size="22" fill="#1F2933">
+    <tspan x="991" y="666"><tspan font-weight="bold" fill="#B5462F">Neighbor evidence</tspan>: classes of</tspan>
+    <tspan x="991" dy="29">supported reference compounds</tspan>
+    <tspan x="991" dy="29">among the five most similar</tspan>
+    <tspan x="991" dy="29">(Tanimoto ≥ 0.6); not a prediction</tspan>
+  </text>
+  <text font-size="22" fill="#1F2933">
+    <tspan x="1381" y="666">Optional measured values</tspan>
+    <tspan x="1381" dy="29">compared with the neighbor</tspan>
+    <tspan x="1381" dy="29">evidence (same or different</tspan>
+    <tspan x="1381" dy="29">class)</tspan>
+  </text>
+  <line x1="1000" y1="582" x2="1000" y2="616" stroke="#4A5563" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="1550" y1="618" x2="1550" y2="584" stroke="#4A5563" stroke-width="3" marker-end="url(#arrow)"/>
+</svg>

@@ -8,7 +8,7 @@ const path = require('node:path');
 const {spawn} = require('node:child_process');
 
 const CGM = path.resolve(__dirname, '../../..');
-const python = path.join(CGM, '.venv/bin/python');
+const python = process.env.PYTHON || path.join(CGM, '.venv/bin/python');
 const defaultOutput = path.resolve(__dirname, '../data_fig6');
 const appOutput = '/tmp/chemgridmap-f2-demo';
 
@@ -115,7 +115,7 @@ async function run() {
     });
     page.on('pageerror', error => report.page_errors.push(error.message));
     await page.goto(url);
-    await page.locator('#version').filter({hasText: /v0\.5\.0/}).waitFor();
+    await page.locator('#version').filter({hasText: new RegExp('v' + (process.env.CGM_VERSION || '0.6.0').replace(/\./g, '\\.'))}).waitFor();
     await page.locator('#demo').click();
     await page.locator('#page-configure').waitFor({state: 'visible'});
     await page.locator('#projection').selectOption('umap');
@@ -172,7 +172,7 @@ async function run() {
     const evidence = await page.locator('#evidence-summary').innerText();
     assert.match(evidence, /Evidence units\s+4 \(4 documents\)/);
     assert.match(evidence, /Source records\s+\d+/);
-    assert.match(evidence, /Class support\s+(> 99%|\d+%) active · supported/);
+    assert.match(evidence, /Class support[^\n]*\s+(> 99%|\d+%) active · supported/);
     assert.match(evidence, /Support status\s+supported/);
     assert.match(evidence, /σ_doc\s+0\.796/);
     assert.match(evidence, /Neighbor recall \(tie-inclusive\)\s+\d+\/\d+/);

@@ -1,8 +1,12 @@
-"""Rebuild Figure 4: what colours imply for other documents."""
+"""Figure 4 (manuscript v0.7): what colours imply for other documents.
+
+The hERG patent pair (former panel b) moved to Additional file 1; the status series use
+black, grey and hatching, hues that the map does not use (review items S2, S4, S20)."""
 
 from __future__ import annotations
 
 import numpy as np
+from matplotlib import patheffects
 from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
@@ -12,8 +16,14 @@ import common as c
 
 
 W, H = 170.0, 130.0
-MAGENTA = "#CC79A7"
+SUPPORTED = "#1a1a1a"
+UNCERTAIN = "#9a9a9a"
+TOUCHED_EDGE = "#4d4d4d"
 BAR_ALPHA = 0.72
+CLASS_LABELS = {"inactive": "Inactive (≤ 6)", "medium": "Medium (6–7)", "active": "Active (≥ 7)"}
+# Mantel–Haenszel supported-minus-uncertain differences standardised by class (time split 2015;
+# rev7/analysis/s20_mh.json): estimate, dataset-bootstrap 95% interval, datasets, strata.
+MH_2015 = {"IC50": (0.187, 0.088, 0.276, 19, 34), "Ki": (0.172, 0.093, 0.245, 19, 39)}
 
 
 def _target_label(target: str, symbol: str, *, dagger: bool) -> str:
@@ -76,7 +86,7 @@ def _calibration_panel(
             markerfacecolor=color,
             markeredgecolor=color,
             markeredgewidth=0.5,
-            label=display_class.capitalize(),
+            label=CLASS_LABELS[display_class],
             zorder=3,
         )
         ax.vlines(
@@ -198,8 +208,8 @@ def _row_panel(
         rank = float(row["dataset_rank"])
         ax.axhline(rank, color=c.LIGHT_GRAY, lw=0.4, zorder=0)
         for status, dy, color in (
-            ("supported", -0.22, c.BLUE),
-            ("uncertain", 0.22, c.ORANGE),
+            ("supported", -0.22, SUPPORTED),
+            ("uncertain", 0.22, UNCERTAIN),
         ):
             y = rank + dy
             low = float(row[f"{status}_ci_low"])
@@ -211,7 +221,7 @@ def _row_panel(
                 y,
                 marker="o",
                 markersize=3.0,
-                markerfacecolor=color,
+                markerfacecolor=color if status == "supported" else "white",
                 markeredgecolor=color,
                 markeredgewidth=0.5,
                 linestyle="none",
@@ -252,15 +262,14 @@ def build() -> Figure:
     c.init()
     fig = c.mm_figure(W, H)
     c.panel_letter(fig, "a", 1, 129, (W, H))
-    c.panel_letter(fig, "b", 106, 129, (W, H))
-    c.panel_letter(fig, "c", 1, 73.5, (W, H))
-    c.panel_letter(fig, "d", 101, 68, (W, H))
+    c.panel_letter(fig, "b", 1, 73.5, (W, H))
+    c.panel_letter(fig, "c", 101, 68, (W, H))
 
     calibration = c.load_csv("4a_calibration_by_class.csv")
     _calibration_panel(
         fig,
         calibration[calibration["endpoint"].eq("IC50")],
-        (12, 80, 42, 42),
+        (30, 80, 42, 42),
         "IC50",
         show_y=True,
         show_y_label=True,
@@ -269,14 +278,14 @@ def build() -> Figure:
     _calibration_panel(
         fig,
         calibration[calibration["endpoint"].eq("Ki")],
-        (58, 80, 42, 42),
+        (84, 80, 42, 42),
         "Ki",
         show_y=False,
         show_y_label=False,
         show_legend=False,
     )
     c.mark_panel_title(fig.text(
-        56 / W,
+        78 / W,
         73.8 / H,
         "Predicted probability",
         ha="center",
@@ -285,57 +294,16 @@ def build() -> Figure:
         color=c.INK,
     ))
 
-    # 4b: hERG patent pair
-    pair = c.load_csv("4b_hERG_patent_pair.csv")
-    ax = c.add_axes_mm(fig, (124, 80, 42, 42), (W, H))
-    ax.set_xlim(4, 10)
-    ax.set_ylim(4, 10)
-    ax.set_xticks([4, 6, 8, 10])
-    ax.set_yticks([4, 6, 8, 10])
-    ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("pChEMBL, US-10131663-B2")
-    ax.set_ylabel("pChEMBL, US-10590130-B2")
-    ax.plot([4, 10], [4, 10], color=c.GRAY, lw=0.6, ls=(0, (3, 2)), zorder=0)
-    median_offset = float(pair["offset_b_minus_a"].median())
-    assert round(median_offset, 2) == 3.47
-    ax.plot([4, 6.53], [7.47, 10], color="black", lw=0.6, zorder=1)
-    ax.plot(
-        pair["us_10131663_b2"],
-        pair["us_10590130_b2"],
-        linestyle="none",
-        marker="o",
-        markersize=3.4,
-        markerfacecolor="none",
-        markeredgecolor="black",
-        markeredgewidth=0.7,
-        zorder=2,
-    )
-    c.register_axis_points(ax, pair["us_10131663_b2"], pair["us_10590130_b2"])
-    for _, row in pair.iterrows():
-        c.record_value(4, "4b", "US-10590130-B2 vs US-10131663-B2", row["compound_id"], "us_10131663_b2", row["us_10131663_b2"], "4b_hERG_patent_pair.csv")
-        c.record_value(4, "4b", "US-10590130-B2 vs US-10131663-B2", row["compound_id"], "us_10590130_b2", row["us_10590130_b2"], "4b_hERG_patent_pair.csv")
-        c.record_value(4, "4b", "Patent offset", row["compound_id"], "offset_b_minus_a", row["offset_b_minus_a"], "4b_hERG_patent_pair.csv")
-
-    spearman = float(pair[["us_10131663_b2", "us_10590130_b2"]].corr(method="spearman").iloc[0, 1])
-    c.record_value(4, "4b", "Spearman rho", "summary", "spearman_rho", spearman, "4b_hERG_patent_pair.csv")
-    ax.text(9.9, 8.6, "y = x", ha="right", va="top", fontsize=6.5, color=c.GRAY)
-    ax.text(6.75, 9.7, "+3.47", ha="left", va="center", fontsize=6.5, color="black")
-    ax.text(
-        9.9,
-        4.25,
-        f"n = {len(pair)}\nSpearman ρ = {spearman:.2f}",
-        ha="right",
-        va="bottom",
-        fontsize=6.5,
-        color=c.INK,
-    )
-
     # 4c: 2015 time split
     # Gene symbols plus ChEMBL IDs need a wider left label area.
-    _row_panel(fig, "4c_IC50.csv", (27.0, 15, 20, 46))
-    ax_ki = _row_panel(fig, "4c_Ki.csv", (72.5, 15, 22, 46))
+    _row_panel(fig, "4c_IC50.csv", (27.0, 15, 20, 42.5))
+    ax_ki = _row_panel(fig, "4c_Ki.csv", (72.5, 15, 22, 42.5))
     ax_ki.set_xlabel("")
     c.mark_panel_title(fig.text(2 / W, 61.8 / H, "IC50 (18 datasets)", ha="left", va="bottom", fontsize=6.5, color=c.INK))
+    for endpoint, x_text in (("IC50", 2.0), ("Ki", 48.0)):
+        est, low, high, n_sets, n_strata = MH_2015[endpoint]
+        c.mark_panel_title(fig.text(x_text / W, 58.6 / H, f"MH difference {est:.2f} ({low:.2f}–{high:.2f})",
+                                    ha="left", va="bottom", fontsize=5.5, color=c.INK))
     c.mark_panel_title(fig.text(48 / W, 61.8 / H, "Ki (15 datasets)", ha="left", va="bottom", fontsize=6.5, color=c.INK))
     c.mark_panel_title(fig.text(
         56.5 / W,
@@ -349,9 +317,9 @@ def build() -> Figure:
 
     # 4d: three rule-P states grouped by past-document count.
     status_style = (
-        ("P_supported", -0.32, c.BLUE),
-        ("uncertain_low_support", 0.0, c.ORANGE),
-        ("touched_all", 0.32, MAGENTA),
+        ("P_supported", -0.32, SUPPORTED),
+        ("uncertain_low_support", 0.0, UNCERTAIN),
+        ("touched_all", 0.32, "white"),
     )
     for endpoint, x0, show_y in (("IC50", 108.0, True), ("Ki", 139.0, False)):
         frame = c.load_csv(f"4d_{endpoint}.csv")
@@ -377,22 +345,26 @@ def build() -> Figure:
                 height = float(row["agreement_rate"])
                 low = float(row["agreement_ci_low"])
                 high = float(row["agreement_ci_high"])
+                touched = state == "touched_all"
                 axd.bar(
                     x_bar,
                     height,
                     width=0.25,
                     color=color,
-                    edgecolor="none",
-                    alpha=BAR_ALPHA,
+                    edgecolor=TOUCHED_EDGE if touched else "none",
+                    hatch="//////" if touched else None,
+                    linewidth=0.5 if touched else 0,
+                    alpha=1.0 if touched else BAR_ALPHA,
                     zorder=1,
                 )
                 axd.patches[-1]._qa_fig4d_state = state  # type: ignore[attr-defined]
                 axd.patches[-1]._qa_fig4d_color = color  # type: ignore[attr-defined]
+                interval_color = TOUCHED_EDGE if touched else color
                 interval = axd.vlines(
                     x_bar,
                     low,
                     high,
-                    color=color,
+                    color=interval_color,
                     lw=0.8,
                     zorder=4,
                 )
@@ -400,7 +372,7 @@ def build() -> Figure:
                     [low, high],
                     x_bar - 0.035,
                     x_bar + 0.035,
-                    color=color,
+                    color=interval_color,
                     lw=0.8,
                     zorder=4,
                 )
@@ -413,6 +385,7 @@ def build() -> Figure:
                     color="black",
                     lw=1.1,
                     solid_capstyle="butt",
+                    path_effects=[patheffects.Stroke(linewidth=2.4, foreground="white"), patheffects.Normal()],
                     zorder=3,
                 )
                 c.register_axis_points(axd, [x_bar, x_bar], [low, high])
@@ -516,8 +489,9 @@ def build() -> Figure:
 
     fig.legend(
         handles=[
-            Line2D([0], [0], marker="o", linestyle="none", markersize=3.0, color=c.BLUE),
-            Line2D([0], [0], marker="o", linestyle="none", markersize=3.0, color=c.ORANGE),
+            Line2D([0], [0], marker="o", linestyle="none", markersize=3.0, color=SUPPORTED),
+            Line2D([0], [0], marker="o", linestyle="none", markersize=3.0, markerfacecolor="white",
+                   markeredgecolor=UNCERTAIN, color=UNCERTAIN),
         ],
         labels=["Supported", "Uncertain"],
         loc="center left",
@@ -531,10 +505,11 @@ def build() -> Figure:
         borderaxespad=0,
     )
     legend_patches = [
-        c.legend_patch(c.BLUE, alpha=BAR_ALPHA),
-        c.legend_patch(c.ORANGE, alpha=BAR_ALPHA),
-        c.legend_patch(MAGENTA, alpha=BAR_ALPHA),
+        c.legend_patch(SUPPORTED, alpha=BAR_ALPHA),
+        c.legend_patch(UNCERTAIN, alpha=BAR_ALPHA),
+        c.legend_patch("white", edge=TOUCHED_EDGE, linewidth=0.5, alpha=1.0),
     ]
+    legend_patches[2].set_hatch("//////")
     legend = fig.legend(
         handles=[
             *legend_patches,

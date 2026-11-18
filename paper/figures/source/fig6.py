@@ -28,6 +28,8 @@ NEIGHBOR_FILE = SCREENSHOT_DIR / "6c_neighbors.png"
 RECORDS_TABLE_FILE = SCREENSHOT_DIR / "6d_records_table.png"
 CAPTURE_REPORT = SCREENSHOT_DIR / "capture_report.json"
 Arial_BOLD = Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf")
+if not Arial_BOLD.is_file():  # Liberation Sans Bold has the same metrics (Linux builds).
+    Arial_BOLD = Path("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf")
 WIDTH_MM = 170.0
 HEIGHT_MM = 220.0
 
@@ -179,7 +181,7 @@ def _rect_gap(a, b) -> float:
 def _draw_map_legend(fig, report: dict[str, object]) -> None:
     entries = (
         ("Inactive (≤6)", "inactive", 6.5, 27.0),
-        ("Medium (6, 7)", "medium", 38.0, 59.0),
+        ("Medium (6–7)", "medium", 38.0, 59.0),
         ("Active (≥7)", "active", 70.0, 84.0),
     )
     for label, key, label_x, swatch_x in entries:
@@ -533,6 +535,12 @@ def build() -> tuple[object, dict[str, object]]:
     inspector_height_mm = (
         inspector_width_mm * inspector_image.height / inspector_image.width
     )
+    inspector_y = 40.0
+    # The 0.6.0 inspector is taller (class reproducibility, evaluation rates, bound records);
+    # keep it on the page by narrowing it rather than letting it run past the top edge.
+    if inspector_y + inspector_height_mm > HEIGHT_MM - 4.0:
+        inspector_height_mm = HEIGHT_MM - 4.0 - inspector_y
+        inspector_width_mm = inspector_height_mm * inspector_image.width / inspector_image.height
     neighbor_size_mm = 60.0
     neighbor_labels = _draw_neighbor_labels(
         neighbor_image,
@@ -545,7 +553,6 @@ def build() -> tuple[object, dict[str, object]]:
     records_height_mm = (
         records_width_mm * records_image.height / records_image.width
     )
-    inspector_y = 50.9
     layout = {
         "a": {
             "file": MAP_FILE.name,
