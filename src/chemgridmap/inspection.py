@@ -412,6 +412,43 @@ def offset_pair_details(evidence, document_column, confidence, touched):
     return matched_offsets, offset_warnings
 
 
+def excluded_bound_records(excluded, identity_key, *, limit=20):
+    """Records of one entry that curation set aside because their relation was not exact.
+
+    ChEMBL reports many inactive results as bounds such as ``> 10000 nM``. They are not
+    used in the median or in class support, but they are shown with the entry so that a
+    user can see whether other documents report the compound as weaker (or stronger)
+    than a bound. Values in nM are also given as the corresponding bound on pActivity.
+    """
+    if excluded is None or len(excluded) == 0 or "exclusion_reason" not in excluded:
+        return {"count": 0, "records": []}
+    columns = detect_chembl_columns(excluded)
+    relation = columns.get("standard_relation")
+    if relation is None:
+        return {"count": 0, "records": []}
+    keys = pd.Series(False, index=excluded.index)
+    for field in ("parent_molecule_id", "molecule_id"):
+        if columns.get(field):
+            keys |= excluded[columns[field]].fillna("").astype(str).str.strip().str.upper().eq(
+                str(identity_key).strip().upper())
+    rows = excluded[keys & excluded.exclusion_reason.astype(str).str.contains("non_exact_standard_relation")]
+    value_column = next((c for c in excluded.columns
+                         if str(c).strip().lower().replace(" ", "_") == "standard_value"), None)
+    out = []
+    for _, record in rows.head(limit).iterrows():
+        rel = str(record[relation]).strip().strip("'\"")
+        value = pd.to_numeric(record.get(value_column), errors="coerce") if value_column else np.nan
+        units = str(record.get(columns["standard_units"], "")) if columns.get("standard_units") else ""
+        p_bound = None
+        if np.isfinite(value) and value > 0 and units.strip() == "nM":
+            p_bound = float(-np.log10(value * 1e-9))
+        p_relation = {">": "<", ">=": "≤", "<": ">", "<=": "≥", "~": "~"}.get(rel, rel)
+        out.append({"relation": rel, "value": None if not np.isfinite(value) else float(value), "units": units,
+                    "p_relation": p_relation, "p_bound": p_bound,
+                    "document": None if not columns.get("document_id") else str(record[columns["document_id"]])})
+    return {"count": int(len(rows)), "records": out}
+
+
 def inspect_entry(coordinates, records, *, molecule_id=None, cell=None, parameters=None,
                   activity_confidence=None, k=None):
     """Select one entry by exact ID or zero-based (row, column), then verify its records.

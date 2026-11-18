@@ -258,6 +258,19 @@ let highlightedGroup = '', groupRequestNumber = 0, mapCells = [];
 const colors = {active: '#2a9d8f', medium: '#e6a23c', inactive: '#c44e52', unlabelled: '#b8c2cc'};
 // Uncertain classes keep their hue at reduced saturation; reliability uses one sequential blue scale.
 const fadedColors = {active: '#b8e0db', medium: '#f6dfb8', inactive: '#ebc0c1', unlabelled: '#dfe4e9'};
+// Agreement of held-out documents with displayed classes in the 52 ChEMBL evaluation datasets
+// (manuscript Table 4, entry folds). Shown next to class support so that a saturated inactive
+// cell is not read as equivalent to a saturated active one.
+function evaluationAgreement() {
+  return {
+    IC50: {supported: {inactive: 0.620, medium: 0.527, active: 0.876}, uncertain: {inactive: 0.499, medium: 0.390, active: 0.706}},
+    Ki: {supported: {inactive: 0.793, medium: 0.927, active: 0.924}, uncertain: {inactive: 0.501, medium: 0.499, active: 0.622}}
+  };
+}
+// Agreement of later compounds with consistent neighbor evidence in the E28 time split (44 datasets).
+function neighborEvidenceAgreement() {
+  return {IC50: {active: 0.76, inactive: 0.61, none: 0.82}, Ki: {active: 0.77, inactive: 0.49, none: 0.78}};
+}
 const reliabilityBins = [[0, '#cde1f5'], [.2, '#a0bdda'], [.4, '#7599bf'], [.6, '#4a77a4'], [.8, '#1d5689']];
 function reliabilityColor(value) {
   if (value == null || Number.isNaN(value)) return colors.unlabelled;
@@ -1315,6 +1328,17 @@ function colorMap(cells = null) {
       mark.style.setProperty('--evidence-dash',style[1] || 'none');
       mark.setAttribute('stroke',style[0]);
       mark.setAttribute('stroke-dasharray',style[1]);
+      // A dark rim keeps a frame visible on a fill of the same hue (consistent evidence that
+      // matches the measured class): the cell's own stroke becomes a wider dark line and the
+      // colored frame is drawn on top of it.
+      let frame = el.querySelector(':scope > [data-evidence-frame]');
+      if (['active','medium','inactive'].includes(point.neighbor_evidence)) {
+        mark.style.setProperty('--evidence-color','#1f2933'); mark.style.setProperty('--evidence-width',String(style[2] + 2));
+        mark.setAttribute('stroke','#1f2933');
+        if (!frame) { frame = document.createElementNS('http://www.w3.org/2000/svg','rect'); frame.setAttribute('data-evidence-frame','true'); el.append(frame); }
+        for (const attribute of ['x','y','width','height','rx','ry']) { const value = mark.getAttribute(attribute); if (value != null) frame.setAttribute(attribute, value); }
+        frame.setAttribute('fill','none'); frame.setAttribute('stroke',style[0]); frame.style.setProperty('--evidence-frame-width',String(style[2]));
+      } else if (frame) frame.remove();
     } else if (unmeasured && mode === 'activity') {
       mark.setAttribute('stroke', '#8A99A6'); mark.setAttribute('stroke-width', '1');
     } else {
@@ -1322,7 +1346,7 @@ function colorMap(cells = null) {
         if (value) mark.setAttribute(attribute, value); else mark.removeAttribute(attribute);
       }
     }
-    if (mode !== 'neighbor_evidence') mark.removeAttribute('stroke-dasharray');
+    if (mode !== 'neighbor_evidence') { mark.removeAttribute('stroke-dasharray'); el.querySelector(':scope > [data-evidence-frame]')?.remove(); }
     let mismatchMarker = el.querySelector(':scope > [data-neighbor-mismatch]');
     if (isNew && point.neighbor_comparison === 'disagrees') {
       if (!mismatchMarker) {
@@ -1402,6 +1426,12 @@ function renderMismatchOverlay() {
   }
   if (overlay.children.length) svg.append(overlay);
 }
+function neighborEvidenceNote() {
+  var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
+  const r = neighborEvidenceAgreement();
+  return t('r7.neNote', {aI: percentage(r.IC50.active), aK: percentage(r.Ki.active), iI: percentage(r.IC50.inactive), iK: percentage(r.Ki.inactive),
+    nI: percentage(r.IC50.none), nK: percentage(r.Ki.none)});
+}
 function legendItem(color, text) {
   const item = document.createElement('span'), swatch = document.createElement('i');
   swatch.style.background = color; item.append(swatch, document.createTextNode(text)); return item;
@@ -1437,7 +1467,10 @@ function renderColorLegend(mode) {
     for (const [key,color,border,width] of [['active','#2a9d8f','solid',3],['medium','#e6a23c','solid',3],['inactive','#c44e52','solid',3],['mixed','#7a5195','dashed',3],['insufficient','#8a99a6','dotted',3],['none','#b8c2cc','solid',1.5]]) {
       const item = legendItem('#fff',t('u8.'+key)); item.dataset.evidenceCategory = key; item.firstElementChild.style.border = `${width}px ${border} ${color}`; $('legend').append(item);
     }
-    const note = document.createElement('span'); note.textContent = t('u8.referenceFaded'); $('legend').append(note); return;
+    const note = document.createElement('span'); note.textContent = t('u8.referenceFaded'); $('legend').append(note);
+    const fillNote = document.createElement('span'); fillNote.textContent = t('r7.fillLegend'); $('legend').append(fillNote);
+    const caution = document.createElement('span'); caution.className = 'legend-rates'; caution.dataset.neighborRates = 'true';
+    caution.textContent = neighborEvidenceNote(); $('legend').append(caution); return;
   }
   const lower = job.options.lower_threshold, upper = job.options.upper_threshold;
   if (job.options.input_format === 'molecule' && !job.options.compound_column && mode !== 'reliability') {
@@ -1460,6 +1493,12 @@ function renderColorLegend(mode) {
     const offsetDisplay = job.options.offset_display || 'uncertain';
     const suffix = offsetDisplay === 'uncertain' ? t("d., or an offset document pair") : '';
     $('legend').append(document.createTextNode(t("d.Pale: uncertain (class support below {level}{suffix}).", {level: job.options.support_level ?? .8, suffix})));
+    const rates = document.createElement('span'); rates.className = 'legend-rates'; rates.dataset.classRates = 'true';
+    const e = evaluationAgreement();
+    rates.textContent = t('r7.legendRates', {aI: percentage(e.IC50.supported.active), aK: percentage(e.Ki.supported.active),
+      iI: percentage(e.IC50.supported.inactive), iK: percentage(e.Ki.supported.inactive),
+      mI: percentage(e.IC50.supported.medium), mK: percentage(e.Ki.supported.medium)});
+    $('legend').append(rates);
     if (points.some(point => point.offset_pair_touched)) {
       const offset = document.createElement('span');
       offset.textContent = t("d.◣ offset document pair{suffix}", {suffix: offsetDisplay === 'uncertain' ? '' : t('d. (display unchanged)')});
@@ -1499,6 +1538,9 @@ function highlight() {
   const newSelection = currentCell && points.find(p => (p.is_new || p.measurement_status === 'not_measured') && p.grid_row === currentCell.row && p.grid_col === currentCell.col);
   const relationFor = el => newSelection || $('show-neighbor-links').checked ? neighborRelations.get(`${el.dataset.gridRow},${el.dataset.gridCol}`) : null;
   const measurementFilter = $('measurement-filter').value;
+  // Non-colour cue (review S43): fade every cell whose display class is not the chosen one.
+  const classFilter = $('class-filter').value || 'all';
+  const classes = new Map(points.map(p => [`${p.grid_row},${p.grid_col}`, p.measurement_status === 'not_measured' ? 'not_measured' : p.activity_class]));
   const layers = [[], [], [], []];
   const outlines = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   outlines.dataset.mapOutlines = 'true'; outlines.setAttribute('pointer-events', 'none');
@@ -1506,7 +1548,8 @@ function highlight() {
     const sourceMember = !!highlight.source?.cells.has(`${el.dataset.gridRow},${el.dataset.gridCol}`);
     const member = !!highlightedGroup && groups.get(`${el.dataset.gridRow},${el.dataset.gridCol}`) === highlightedGroup;
     const unmeasured = measurements.get(`${el.dataset.gridRow},${el.dataset.gridCol}`) === 'new';
-    const measurementFaded = measurementFilter !== 'all' && measurements.get(`${el.dataset.gridRow},${el.dataset.gridCol}`) !== measurementFilter;
+    const measurementFaded = measurementFilter !== 'all' && measurements.get(`${el.dataset.gridRow},${el.dataset.gridCol}`) !== measurementFilter
+      || classFilter !== 'all' && classes.get(`${el.dataset.gridRow},${el.dataset.gridCol}`) !== classFilter;
     el.classList.toggle('group-highlight', member);
     el.classList.toggle('source-highlight', sourceMember);
     el.classList.toggle('measurement-faded', measurementFaded);
@@ -1616,11 +1659,11 @@ function renderNewBatchSources(sources) {
   });
 }
 function coreRuleName(rule) {
-  return t({coverage:'s.089',most_frequent:'s.090',coverage_brics:'u9.coverageBrics',fmcs:'s.091'}[rule]);
+  return t({coverage:'s.089',most_frequent:'s.090',coverage_brics:'u9.coverageBrics',coverage_recap:'u10.coverageRecap',fmcs:'s.091'}[rule]);
 }
 function renderCoreRuleOptions() {
   const select = $('map-core-rule'); select.replaceChildren();
-  const rules = ['most_frequent','coverage','coverage_brics'];
+  const rules = ['most_frequent','coverage','coverage_brics','coverage_recap'];
   if (job.options.core_rule === 'fmcs') rules.push('fmcs');
   for (const rule of rules) {
     const option = document.createElement('option'); option.value = rule;
@@ -1711,6 +1754,17 @@ function renderCoreComparison(result) {
     row.insertCell().textContent = core.core_rule === 'most_frequent' ? '—' : t(core.core_target_met ? 'd.Yes' : 'd.No');
     row.insertCell().textContent = t('u9.elapsedSeconds',{n:format(core.seconds)}) + (core.fmcs_timed_out ? ' · ' + t('u9.fmcsTimeout') : '');
   }
+  if (result.generic) {
+    const generic = result.generic, row = body.insertRow(); row.dataset.coreRule = 'generic_murcko_supplementary';
+    row.className = 'generic-scaffold-row'; row.title = t('u10.genericNote');
+    const name = row.insertCell(); name.textContent = t('u10.genericRow');
+    const drawing = row.insertCell(); drawing.className = 'core-comparison-image';
+    if (generic.generic_svg) drawing.innerHTML = generic.generic_svg; else drawing.textContent = t('d.No ring scaffold');
+    row.insertCell().textContent = format(generic.generic_scaffold_heavy_atoms);
+    row.insertCell().textContent = `${generic.generic_scaffold_count}/${generic.size} (${Math.round(100 * generic.generic_scaffold_fraction)}%)`;
+    row.insertCell().textContent = '—';
+    row.insertCell().textContent = '—';
+  }
   container.append(table);
   $('core-comparison-status').textContent = t('u9.fmcsBudget');
   $('download-core-comparison').hidden = !result.file;
@@ -1731,7 +1785,9 @@ async function loadCoreComparison() {
 }
 function coreRule(group) {
   var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
-  return group.core_rule === 'coverage_brics'
+  return group.core_rule === 'coverage_recap'
+    ? t('u10.recapDescription', {coverage: Math.round(100 * group.core_coverage_target), status: group.core_target_met ? t('d.target met') : t('d.target not met; highest-coverage core shown')})
+    : group.core_rule === 'coverage_brics'
     ? t('u9.bricsDescription', {coverage: Math.round(100 * group.core_coverage_target), status: group.core_target_met ? t('d.target met') : t('d.target not met; highest-coverage core shown')})
     : group.core_rule === 'coverage'
     ? t("d.largest scaffold or ring fragment matching at least {coverage}% of members ({status}).", {coverage: Math.round(100 * group.core_coverage_target), status: group.core_target_met ? t('d.target met') : t('d.target not met; highest-coverage core shown')})
@@ -1746,12 +1802,28 @@ function countLabel(count, noun) {
 }
 async function selectGroup(groupId, cached = null) {
   var t = globalThis.ChemGridMapI18n?.t || ((key, values = {}) => key.slice(2).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`));
+  const renderGenericScaffold = generic => {
+    const line = typeof document !== 'undefined' && document.getElementById ? document.getElementById('group-core-generic') : null;
+    if (!line || !line.replaceChildren) return;
+    line.hidden = !generic || !generic.generic_scaffold;
+    line.replaceChildren();
+    if (line.hidden) return;
+    const text = document.createElement('span');
+    text.textContent = t('u10.genericCard', {covered: generic.generic_scaffold_count, size: generic.size, distinct: generic.distinct_generic_scaffolds});
+    text.title = t('u10.genericNote');
+    line.append(text);
+    if (generic.generic_svg) {
+      const image = document.createElement('div'); image.className = 'group-generic-image';
+      image.setAttribute('role','img'); image.setAttribute('aria-label', t('u10.genericRow'));
+      image.innerHTML = generic.generic_svg; line.append(image);
+    }
+  };
   const request = cached ? groupRequestNumber : ++groupRequestNumber;
   const group = structureGroups.find(g => g.structure_group === groupId);
   if (group) clearSourceHighlight();
   if (groupId !== highlightedGroup) { $('group-core-comparison').open = false; loadCoreComparison.lastResult = null; }
   highlightedGroup = group ? groupId : ''; $('group-select').value = highlightedGroup;
-  $('group-core-card').hidden = !group; $('group-core-svg').replaceChildren();
+  $('group-core-card').hidden = !group; $('group-core-svg').replaceChildren(); renderGenericScaffold(null);
   highlight(); renderLegend($('color-mode').value); updateNavigation();
   if (!group) return;
   const queryMembers = points.filter(point => (point.is_new || point.measurement_status === 'not_measured') && point.structure_group === groupId).length;
@@ -1767,6 +1839,7 @@ async function selectGroup(groupId, cached = null) {
     if (request !== groupRequestNumber) return;
     selectGroup.lastResult = result;
     if (result.core_svg) $('group-core-svg').innerHTML = result.core_svg;
+    renderGenericScaffold(result.generic);
   } catch (error) { if (request === groupRequestNumber) { $('group-core-svg').textContent = t("d.Core unavailable"); fail(error); } }
 }
 function format(value, signed = false, precision = null) {
@@ -1805,7 +1878,8 @@ function showQuerySelection(detail) {
     const dt = document.createElement('dt'), dd = document.createElement('dd');
     dt.textContent = label; dd.textContent = value; stats.append(dt, dd);
   }
-  $('new-placement').textContent = row.placement_distance == null ? '' : t('u8.placement',{id:measuredLabel(row.nearest_reference_id || row.nearest_measured_id),distance:Number(row.placement_distance).toFixed(1)});
+  $('new-placement').textContent = row.placement_distance == null ? '' : t('u8.placement',{id:measuredLabel(row.nearest_reference_id || row.nearest_measured_id),distance:Number(row.placement_distance).toFixed(1)}) +
+    (row.placement_recall == null ? '' : ' ' + t('r7.placementRecall',{shared:row.placement_recall_shared,count:row.placement_recall_fingerprint_count}));
   $('new-map-markers').hidden = false;
   $('new-support-note').hidden = row.reference_support_assessed !== false;
   $('new-support-note').textContent = t('u8.supportNotAssessed');
@@ -1828,7 +1902,9 @@ function showQuerySelection(detail) {
     if (row.neighbor_comparison) extra.push([t('u8.comparisonColumn'),t('u8.comparison',{own:t('d.'+row.activity_class),neighbor:t('d.'+row.neighbor_evidence),comparison:t(row.neighbor_comparison === 'no_comparison' ? 'u9b.no_comparison' : 'u8.'+row.neighbor_comparison)})]);
   }
   for (const [label,value] of extra) { const dt=document.createElement('dt'),dd=document.createElement('dd'); dt.textContent=label;dd.textContent=value;stats.append(dt,dd); }
-  $('query-summary').replaceChildren(stats);
+  const notPrediction = document.createElement('p'); notPrediction.className = 'note'; notPrediction.dataset.neighborRates = 'true';
+  notPrediction.textContent = neighborEvidenceNote();
+  $('query-summary').replaceChildren(stats, notPrediction);
   renderMeasuredResult(detail);
   renderNewBatchSources(detail.new_molecule_sources || []);
   $('new-records').hidden = row.measurement_status !== 'measured';
@@ -1843,7 +1919,8 @@ function showQuerySelection(detail) {
     Rank:neighbor.rank, ID:measuredLabel(neighbor.measured_id), Tanimoto:format(neighbor.tanimoto),
     'Display class':neighbor.activity_class, pActivity:format(neighbor.activity_pchembl),
     [t("d.Class support")]:percentage(neighbor.class_confidence), 'Class status':neighbor.class_status,
-    [t("d.Evidence units")]:neighbor.n_evidence_units
+    [t("d.Evidence units")]:neighbor.n_evidence_units,
+    [t('r7.noteColumn')]: Number(neighbor.tanimoto) >= 1 - 1e-9 ? t('r7.sameFingerprint') : ''
   }));
   table(rows, $('query-neighbor-table'));
   $('query-neighbor-table').querySelectorAll('tbody tr').forEach((tr, i) => {
@@ -2003,7 +2080,18 @@ async function inspect(query) {
     if (row.class_confidence != null) {
       fields.push([t("d.Evidence units"), assumedSigma ? (summary.evidence_unit_source === 'one unit per compound' ? t("d.one per compound") : summary.evidence_unit_source) : t("d.{units} ({documents} documents)", {units: row.n_evidence_units, documents: row.n_documents})],
       [t("d.Document-balanced {term}", {term: activityTerm}), row.document_balanced_pchembl],
-      [t("d.Class support"), `${percentage(row.class_confidence)} ${t('d.' + row.activity_class)} · ${t('d.' + row.class_status)}`]);
+      [t('r7.supportLabel'), `${percentage(row.class_confidence)} ${t('d.' + row.activity_class)} · ${t('d.' + row.class_status)}`]);
+      if (row.class_reproducibility != null) fields.push([t('r7.reproLabel'), `${percentage(row.class_reproducibility)} ${t('d.' + row.activity_class)}`]);
+      const status = row.class_status === 'supported' ? 'supported' : 'uncertain';
+      const rates = evaluationAgreement(), rateFor = endpoint => rates[endpoint]?.[status]?.[row.activity_class];
+      const endpoint = ['IC50','Ki'].includes(job.options.activity_type) ? job.options.activity_type : null;
+      if (rateFor('IC50') != null) {
+        const values = {status: t('d.' + status), cls: t('d.' + row.activity_class)};
+        let text = endpoint ? t('r7.evalText', {...values, rate: percentage(rateFor(endpoint)), endpoint}) :
+          t('r7.evalTextBoth', {...values, ic50: percentage(rateFor('IC50')), ki: percentage(rateFor('Ki'))});
+        if (status === 'supported' && row.activity_class === 'medium' && endpoint !== 'IC50') text += t('r7.evalAtr');
+        fields.push([t('r7.evalLabel'), text]);
+      }
       if (summary.status_reason != null) {
         const threshold = summary.confidence_threshold == null ? (job.options.support_level ?? 0.8) : summary.confidence_threshold;
         const supportText = summary.status_reason === 'supported' ? t('d.supported') :
@@ -2011,6 +2099,12 @@ async function inspect(query) {
           summary.status_reason === 'offset_pair' ? t("d.offset document pair") : summary.status_reason;
         fields.push([t("d.Support status"), supportText]);
       }
+    }
+    if (summary.excluded_bounds) {
+      const bounds = summary.excluded_bounds;
+      const listed = bounds.records.slice(0, 6).map(record => record.p_bound == null ? `${record.relation} ${format(record.value)} ${record.units}` :
+        `${record.relation} ${format(record.value)} ${record.units} (p${record.p_relation} ${record.p_bound.toFixed(2)})`).join('; ');
+      fields.push([t('r7.boundsLabel'), bounds.count ? t('r7.boundsText', {count: bounds.count, list: listed + (bounds.count > 6 ? ' …' : '')}) : t('r7.boundsNone')]);
     }
     if (assumedSigma) fields.push([t("d.σ (assumed)"), format(summary.assumed_sigma ?? summary.sigma_doc)]);
     else if (summary.sigma_doc != null) fields.push(
@@ -2101,6 +2195,7 @@ $('map-core-rule').addEventListener('change', switchCoreRule);
 $('group-core-comparison').addEventListener('toggle', loadCoreComparison);
 $('clear-source-highlight').addEventListener('click', clearSourceHighlight);
 $('measurement-filter').addEventListener('change', () => { highlight(); renderLegend($('color-mode').value); });
+$('class-filter').addEventListener('change', () => highlight());
 $('color-mode').addEventListener('change', () => { colorMap(); highlight(); });
 $('show-neighbor-links').addEventListener('change', highlight);
 $('demo').addEventListener('click', () => loadInput(true));

@@ -13,7 +13,7 @@ async function setup(){
  getJSON:async(url,options)=>{requests.push({url,options});return {status:'ok',canonical_smiles:'CCF',svg:'<svg/>',query_id:'M001',row:measured,point:measured,job};}
  });
  env.window.confirm=()=>true;
- const names=['bindNewMolecules','downloadNewList','table','measuredLabel','showQuerySelection','refreshValidation','updateNewNavigation','newMoleculeOptions','insertNewMolecules','newListColumns','visibleNewMolecules','newListValue','renderNewList','format','countLabel','percentage','referenceMapDetails','renderReferenceMap','showDataAudit','newMoleculeWarning','legendItem','renderColorLegend','renderLegend','colorMap','reliabilityColor','status','fail'];
+ const names=['bindNewMolecules','downloadNewList','table','measuredLabel','showQuerySelection','neighborEvidenceNote','neighborEvidenceAgreement','evaluationAgreement','refreshValidation','updateNewNavigation','newMoleculeOptions','insertNewMolecules','newListColumns','visibleNewMolecules','newListValue','renderNewList','format','countLabel','percentage','referenceMapDetails','renderReferenceMap','showDataAudit','newMoleculeWarning','legendItem','renderColorLegend','renderLegend','colorMap','reliabilityColor','status','fail'];
  vm.runInContext(names.map(realFunction).join('\n'),env.context);
  env.context.bindNewMolecules();
  return {...env,$,requests,downloads,job};
@@ -43,7 +43,7 @@ const scenarios={
  },
  async controls(){
   const {context,$,api,document}=await setup();
-  assert.equal(document.querySelectorAll('[data-help]').length,80);
+  assert.equal(document.querySelectorAll('[data-help]').length,81);
   for(const language of ['en','zh']){
    api.setLanguage(language);
    for(const tab of ['upload','one']){$('new-'+tab+'-tab').click();assert.equal($('new-'+tab+'-panel').hidden,false);assert.equal($('new-'+tab+'-tab').getAttribute('aria-selected'),'true');assert.equal($('new-'+(tab==='one'?'upload':'one')+'-panel').hidden,true);}
@@ -51,7 +51,7 @@ const scenarios={
    for(const prefix of ['single','result'])for(const kind of ['mode','value','unit','class','batch','note']){
     const help=document.querySelector(`[data-help-control=${prefix+'-'+kind}]`);assert.ok(help);help.click();assert.equal($('parameter-tooltip').textContent,api.t(help.dataset.help));help.click();
    }
-   const help=document.querySelector('[data-help-control=measured-result]');assert.match(api.t(help.dataset.help),language==='zh'?/不是预测.*活性悬崖.*不会改变参照图.*重启软件/:/not a prediction.*activity cliffs.*does not change.*restarting/);
+   const help=document.querySelector('[data-help-control=measured-result]');assert.match(api.t(help.dataset.help),language==='zh'?/不是预测.*活性悬崖.*不会改变参照图.*重启软件/:/not a prediction.*activity cliff.*does not change.*restarting/);
   }
  },
  async preview_cache(){

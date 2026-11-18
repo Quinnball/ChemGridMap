@@ -1,6 +1,62 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 — 2026-11-18
+
+Changes made in response to the simulated review of the v0.6 manuscript:
+
+- Inspector: show class reproducibility (the quantity validated against later
+  documents) next to class support, each labelled by the displayed class, and
+  the agreement reached by entries of the same class and status in the
+  evaluation (manuscript Table 4). The support-layer legend repeats those rates.
+- Inspector: list the bound records (`>`, `<`, `≥`, `≤`) that curation excluded
+  for the selected entry, with the corresponding pActivity bound
+  (`excluded_bound_records`).
+- Neighbor evidence: descriptive labels ("Consistent evidence", "Mixed
+  evidence", "Insufficient evidence"); a visible statement with the measured
+  agreement rates of the time-split evaluation in the legend and the query
+  panel; "Same class" / "Different class (possible activity cliff, assay
+  difference or data issue)" in place of agrees / disagrees; a note column that
+  marks neighbors with the same fingerprint (Tanimoto 1).
+- Neighbor-evidence layer: consistent categories get a dark outer ring and a
+  coloured inner frame, so that a frame stays visible on a fill of the same
+  hue; reference molecules are shown in grey rather than pale class tints; the
+  legend states that the fill is the new molecule's own measured class.
+- Inserted molecules: `placement_recall`, `placement_recall_shared` and
+  `placement_recall_fingerprint_count` in `new_molecules.csv` and the inspector.
+- Map: **Emphasize class** fades molecules of the other classes, a cue that does
+  not depend on hue. `paper/cvd_separations.py` reports every pairwise colour
+  separation under simulated protanopia, deuteranopia and tritanopia.
+- Documentation: `class_confidence` is documented as class support and
+  distinguished from `class_reproducibility`; guidance for batches and dates as
+  evidence units; supported browsers and maintenance.
+- Dependencies: the declared minimum versions are now the lowest set that the
+  test suite passes with on Python 3.10 (RDKit 2025.3.1, NumPy 1.26, pandas
+  2.1, SciPy 1.11.1, scikit-learn 1.3, Matplotlib 3.8, umap-learn 0.5.5). The
+  earlier bounds were declared but not tested: older RDKit releases reject the
+  distance matrix that structural grouping passes to Butina clustering, and
+  umap-learn 0.5.3 and 0.5.4 import `pkg_resources`, which current setuptools no
+  longer provides.
+- CLI: `--value-unit p --unit-column ...` is rejected as a conflict on every
+  supported Python version (Python 3.10 and 3.11 had accepted it because the
+  value equalled the default).
+- CI: a job with the lowest declared dependency versions on Python 3.10.
+- Paper: post hoc analyses for the v0.7 manuscript (`paper/rev07/`) and the
+  v0.7 figure sources (Figures 1, 4, 6 and 7, and the Additional file 1
+  hERG-pair figure; `make paper-figure1-v07 paper-figures-v07
+  paper-figure7-v07`).
+
+Earlier changes since 0.5.0:
+
+- Add the optional `coverage_recap` core rule: ring-containing RECAP fragments
+  (dummy atoms removed; members above 80 heavy atoms not decomposed) join the
+  scaffold and ring-fragment candidates. Show the generic Murcko scaffold and the
+  members sharing it on the group card and as a supplementary last row of the core
+  comparison table and CSV. Existing rules, defaults and exports are unchanged.
+- Add the analysis scripts of the sealed E28 evaluation: the time-split test of
+  neighbor evidence (`paper/u10_neighbor_validation.py`, `paper/u10_e28_report.py`),
+  the core-rule comparison on the sampled targets (`paper/u10_core_rules.py`,
+  `paper/u10_e28c_summary.py`) and the builder of the Additional file 1 addendum
+  (`paper/u10_e28_si.py`).
 
 - Compute independent non-FMCS group cores with shared ordered loky workers in
   browser builds and rule switches; add per-second progress, `CHEMGRIDMAP_JOBS`

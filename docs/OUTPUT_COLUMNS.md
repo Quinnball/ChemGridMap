@@ -5,7 +5,7 @@
 | Column | Meaning | Unit or values |
 |---|---|---|
 | `structure_group` | Structure-group identifier. | text |
-| `core_rule` | Core-selection rule. | coverage, coverage_brics, most_frequent or fmcs |
+| `core_rule` | Core-selection rule. | coverage, coverage_brics, coverage_recap, most_frequent or fmcs; the comparison CSV adds a generic_murcko_supplementary row |
 | `core_smiles` | Selected group core SMILES. Charge-separated groups can leave representation artifacts after removal of the negative oxygen: sulfoxides may appear as `[SH+]` and N-oxides as `[nH+]`. These core strings are not neutral structures. Sulfones retain `S(=O)(=O)`, so sulfoxides and sulfones yield different cores. | SMILES |
 | `core_coverage_target` | Requested core-coverage target. | fraction 0–1 |
 | `size` | Number of original reference members in the group. | count |
@@ -18,13 +18,15 @@
 | `seconds` | Elapsed core calculation time for this group. | seconds |
 | `brics_candidates` | BRICS candidates absent from the original scaffold/ring-fragment pool; only for coverage_brics. | count |
 | `brics_single_pass_members` | Members with more than 10 BRICS bonds, decomposed with singlePass=True; only for coverage_brics. | count |
+| `recap_candidates` | RECAP candidates absent from the original scaffold/ring-fragment pool; only for coverage_recap. | count |
+| `recap_skipped_members` | Members with more than 80 heavy atoms that were not RECAP-decomposed (they still count in coverage); only for coverage_recap. | count |
 
 ## `core_rules/group_<group-hash>_core_comparison.csv`
 
 | Column | Meaning | Unit or values |
 |---|---|---|
 | `structure_group` | Structure-group identifier. | text |
-| `core_rule` | Core-selection rule. | coverage, coverage_brics, most_frequent or fmcs |
+| `core_rule` | Core-selection rule. | coverage, coverage_brics, coverage_recap, most_frequent or fmcs; the comparison CSV adds a generic_murcko_supplementary row |
 | `core_smiles` | Selected group core SMILES. Charge-separated groups can leave representation artifacts after removal of the negative oxygen: sulfoxides may appear as `[SH+]` and N-oxides as `[nH+]`. These core strings are not neutral structures. Sulfones retain `S(=O)(=O)`, so sulfoxides and sulfones yield different cores. | SMILES |
 | `core_coverage_target` | Requested core-coverage target. | fraction 0–1 |
 | `size` | Number of original reference members in the group. | count |
@@ -37,6 +39,8 @@
 | `seconds` | Elapsed core calculation time for this group. | seconds |
 | `brics_candidates` | BRICS candidates absent from the original scaffold/ring-fragment pool; only for coverage_brics. | count |
 | `brics_single_pass_members` | Members with more than 10 BRICS bonds, decomposed with singlePass=True; only for coverage_brics. | count |
+| `recap_candidates` | RECAP candidates absent from the original scaffold/ring-fragment pool; only for coverage_recap. | count |
+| `recap_skipped_members` | Members with more than 80 heavy atoms that were not RECAP-decomposed (they still count in coverage); only for coverage_recap. | count |
 | `fmcs_timed_out` | FMCS reached its fixed 10-second comparison budget; the returned result may be incomplete. | boolean |
 
 ## `document_offsets.csv`
@@ -182,8 +186,8 @@
 | `consensus_scale` | Posterior scale of the entry consensus. | log units |
 | `p_consensus_{class}` | Posterior probability that the consensus is in each activity class. | fraction 0–1 |
 | `p_new_document_{class}` | Predictive probability for a new document in each class. | fraction 0–1 |
-| `class_confidence` | Posterior consensus probability for the displayed class. | fraction 0–1 |
-| `class_reproducibility` | Predictive probability for the displayed class in a new document. | fraction 0–1 |
+| `class_confidence` | Class support: posterior probability that the consensus (document-balanced mean) lies in the displayed class. The column keeps its 0.5 name for compatibility; it is not the chance that a new document agrees (see class_reproducibility). | fraction 0–1 |
+| `class_reproducibility` | Class reproducibility: predictive probability that one new document reports the displayed class; the quantity checked against later documents in the evaluation. | fraction 0–1 |
 | `discordant_document_pairs` | Flagged document pairs containing both sides of the entry. | count |
 | `discordant_documents` | Documents in flagged pairs that share this entry. | text |
 | `offset_pair_touched` | Whether this entry occurs in any document of a flagged offset pair. | boolean |
@@ -348,8 +352,8 @@
 | `consensus_scale` | Posterior scale of the entry consensus. | log units |
 | `p_consensus_{class}` | Posterior probability that the consensus is in each activity class. | fraction 0–1 |
 | `p_new_document_{class}` | Predictive probability for a new document in each class. | fraction 0–1 |
-| `class_confidence` | Posterior consensus probability for the displayed class. | fraction 0–1 |
-| `class_reproducibility` | Predictive probability for the displayed class in a new document. | fraction 0–1 |
+| `class_confidence` | Class support: posterior probability that the consensus (document-balanced mean) lies in the displayed class. The column keeps its 0.5 name for compatibility; it is not the chance that a new document agrees (see class_reproducibility). | fraction 0–1 |
+| `class_reproducibility` | Class reproducibility: predictive probability that one new document reports the displayed class; the quantity checked against later documents in the evaluation. | fraction 0–1 |
 | `discordant_document_pairs` | Flagged document pairs containing both sides of the entry. | count |
 | `discordant_documents` | Documents in flagged pairs that share this entry. | text |
 | `offset_pair_touched` | Whether this entry occurs in any document of a flagged offset pair. | boolean |
@@ -463,8 +467,8 @@
 | `consensus_scale` | Posterior scale of the entry consensus. | log units |
 | `p_consensus_{class}` | Posterior probability that the consensus is in each activity class. | fraction 0–1 |
 | `p_new_document_{class}` | Predictive probability for a new document in each class. | fraction 0–1 |
-| `class_confidence` | Posterior consensus probability for the displayed class. | fraction 0–1 |
-| `class_reproducibility` | Predictive probability for the displayed class in a new document. | fraction 0–1 |
+| `class_confidence` | Class support: posterior probability that the consensus (document-balanced mean) lies in the displayed class. The column keeps its 0.5 name for compatibility; it is not the chance that a new document agrees (see class_reproducibility). | fraction 0–1 |
+| `class_reproducibility` | Class reproducibility: predictive probability that one new document reports the displayed class; the quantity checked against later documents in the evaluation. | fraction 0–1 |
 | `discordant_document_pairs` | Flagged document pairs containing both sides of the entry. | count |
 | `discordant_documents` | Documents in flagged pairs that share this entry. | text |
 | `offset_pair_touched` | Whether this entry occurs in any document of a flagged offset pair. | boolean |
@@ -515,6 +519,9 @@
 | `is_new` | Identifies the current new-molecule overlay. | boolean |
 | `nearest_reference_id` | Placement target: highest Morgan Tanimoto, then smallest reference ID. | text |
 | `placement_distance` | Euclidean distance from the target reference cell. | grid cells |
+| `placement_recall` | Share of the k = 10 most similar reference molecules (ties retained) that are among the 10 reference cells nearest to the placed cell. | fraction 0–1 |
+| `placement_recall_shared` | Number of those similar reference molecules that are also grid neighbours of the placed cell. | count |
+| `placement_recall_fingerprint_count` | Number of similar reference molecules counted, including ties at the tenth similarity. | count |
 | `neighbor_evidence` | Evidence from similar tie-inclusive top-five reference neighbors; never a prediction. | none, insufficient, active, medium, inactive, mixed |
 | `similar_reference_count` | Top-five neighbors including ties meeting group_similarity. | count |
 | `supported_reference_count` | Supported similar neighbors; zero when reference support was not assessed. | count |
@@ -562,7 +569,7 @@
 | `activity_pchembl` | Displayed median pChEMBL value. | −log10 mol/L |
 | `activity_class` | Activity class from the displayed pChEMBL and thresholds. | inactive, medium, active; not_measured for unmeasured map rows |
 | `n_evidence_units` | Document-balanced units after optional identical-value merging. | count |
-| `class_confidence` | Posterior consensus probability for the displayed class. | fraction 0–1 |
+| `class_confidence` | Class support: posterior probability that the consensus (document-balanced mean) lies in the displayed class. The column keeps its 0.5 name for compatibility; it is not the chance that a new document agrees (see class_reproducibility). | fraction 0–1 |
 | `class_status` | Displayed support status. | supported or uncertain |
 | `query_id` | User query identifier or generated Q00001-style identifier; empty for measured rows. | text |
 | `rank` | Similarity rank among measured neighbors, including every tie at the fifth neighbor. | integer starting at 1 |
@@ -588,7 +595,7 @@
 | `activity_pchembl` | Displayed median pChEMBL value. | −log10 mol/L |
 | `activity_class` | Activity class from the displayed pChEMBL and thresholds. | inactive, medium, active; not_measured for unmeasured map rows |
 | `n_evidence_units` | Document-balanced units after optional identical-value merging. | count |
-| `class_confidence` | Posterior consensus probability for the displayed class. | fraction 0–1 |
+| `class_confidence` | Class support: posterior probability that the consensus (document-balanced mean) lies in the displayed class. The column keeps its 0.5 name for compatibility; it is not the chance that a new document agrees (see class_reproducibility). | fraction 0–1 |
 | `class_status` | Displayed support status. | supported or uncertain |
 | `query_id` | User query identifier or generated Q00001-style identifier; empty for measured rows. | text |
 | `rank` | Similarity rank among measured neighbors, including every tie at the fifth neighbor. | integer starting at 1 |
@@ -717,7 +724,10 @@ The JSON records the rule, build coverage target, RDKit version, each group's `s
 the original run manifest SHA-256, and total elapsed seconds. Structure hashes use the grouping
 protocol's sorted canonical-structure serialization. Existing run files, manifest and ZIP are unchanged.
 The comparison CSV uses the first 12 hexadecimal digits of the group identifier SHA-256 for `<group-hash>`.
-BRICS columns are present for BRICS rule exports and in the four-rule comparison table.
+BRICS and RECAP columns are present for their rule exports and in the five-rule comparison table.
+The comparison table ends with a `generic_murcko_supplementary` row: the most frequent generic Murcko
+scaffold (all atoms carbon, all bonds single) and the members sharing it exactly. It is supplementary
+information, not a selectable core rule, and its target columns are empty.
 Comparison ZIPs for non-build rules also live under `core_rules/` and include the rule in their names.
 
 ## Optional own-data outputs and metadata

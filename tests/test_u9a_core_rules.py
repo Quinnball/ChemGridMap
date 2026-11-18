@@ -74,7 +74,7 @@ def test_brics_core_enlarges_shared_amide_series_and_retains_coverage():
     assert Chem.MolFromSmiles(new['core_smiles_attached']) is not None
 
 
-@pytest.mark.parametrize('rule', ['coverage', 'coverage_brics', 'most_frequent'])
+@pytest.mark.parametrize('rule', ['coverage', 'coverage_brics', 'coverage_recap', 'most_frequent'])
 def test_build_and_switch_use_identical_group_summaries(tmp_path, rule):
     session = make_session(tmp_path)
     switched = session.set_core_rule(rule)['groups']
@@ -123,11 +123,12 @@ def test_group_comparison_and_aligned_zip_are_rule_specific_and_cached(tmp_path,
     assert alternative['archive'].startswith('core_rules/')
     assert alternative['archive'] != original['archive']
     comparison = session.group_cores(group_id)
-    assert {row['core_rule'] for row in comparison['cores']} == {'coverage', 'coverage_brics', 'most_frequent', 'fmcs'}
+    assert {row['core_rule'] for row in comparison['cores']} == {'coverage', 'coverage_brics', 'coverage_recap', 'most_frequent', 'fmcs'}
     assert comparison['fmcs_timeout'] == 10
     assert all('seconds' in row and 'core_svg' in row for row in comparison['cores'])
     table = pd.read_csv(session.files[comparison['file']])
-    assert len(table) == 4 and 'fmcs_timed_out' in table
+    assert len(table) == 6 and 'fmcs_timed_out' in table
+    assert table.core_rule.iloc[-1] == 'generic_murcko_supplementary'
     after = hashes(Path(session.job['output_dir']))
     assert {name: after[name] for name in before} == before
     assert all(name.startswith('core_rules/') for name in set(after)-set(before))
@@ -224,7 +225,8 @@ def test_core_http_contract_errors_and_comparison(tmp_path):
     assert groups['rule'] == 'coverage_brics' and groups['build_rule'] == 'coverage'
     comparison = api(session, '/api/group-cores?group=' + group_id)
     assert comparison['status'] == 200
-    assert len(comparison['data']['cores']) == 4
+    assert len(comparison['data']['cores']) == 5
+    assert comparison['data']['generic']['size'] == len(SMILES)
     assert comparison['data']['fmcs_timeout'] == 10
     assert api(session, '/api/group-cores?group=unknown')['status'] == 400
     from urllib.parse import quote

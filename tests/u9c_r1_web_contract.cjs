@@ -168,7 +168,7 @@ const scenarios = {
       assert.equal(context.previousRunReference({reference_map:{description:'description'}}),'description');
       assert.equal(context.previousRunReference({}),'—');
     }
-    assert.equal(document.querySelectorAll('[data-help]').length,80);
+    assert.equal(document.querySelectorAll('[data-help]').length,81);
   },
   async layout() {
     const css=fs.readFileSync(path.join(assets,'app.css'),'utf8');

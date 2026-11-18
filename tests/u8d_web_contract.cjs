@@ -14,13 +14,13 @@ const warningFixtures = [
   {code:'target_mismatch',targets:['CHEMBL204','CHEMBL240'],reference:'CHEMBL205'}
 ];
 const expected = {
-  zh:{counts:'近邻一致·活性 70、近邻证据不足 4、无相近的参照分子 215',
+  zh:{counts:'一致证据·活性 70、证据不足 4、无相近的参照分子 215',
     inserted:counts=>`已插入 289 个新分子，参照分子的位置未改变。近邻证据：${counts}。已切换到“近邻证据”图层，外框颜色表示近邻证据。`,
     reference:description=>`参照图：${description} · 参照分子 900 个`,
     audit:(description,file)=>`参照图：${description}；新分子文件：${file}`,
     legend:'（近邻证据见“近邻证据”图层）',
     warnings:['大多数新分子与参照分子差别很大：10 个中有 9 个没有相近的参照分子，与最相似参照分子的 Tanimoto 中位数为 0.25。请确认新分子与参照图是同一个靶点。','新分子文件中的靶点（CHEMBL204、CHEMBL240）与参照图的靶点（CHEMBL205）不同。']},
-  en:{counts:'Consistent neighbors: active 70, Too little neighbor evidence 4, No similar reference molecule 215',
+  en:{counts:'Consistent evidence: active 70, Insufficient evidence 4, No similar reference molecule 215',
     inserted:counts=>`Inserted 289 new molecules; reference molecules have not moved. Neighbor evidence: ${counts}. Switched to the Neighbor evidence layer; outline colors show the neighbor evidence.`,
     reference:description=>`Reference map: ${description} · 900 reference molecules`,
     audit:(description,file)=>`Reference map: ${description}; new-molecule file: ${file}`,
@@ -50,7 +50,7 @@ async function setup(){
       throw Error(`Unexpected URL ${url}`);
     }
   });
-  const names=['updateNewNavigation','referenceMapDetails','renderReferenceMap','newMoleculeWarning','newMoleculeInsertedMessage','selectColumns','showQueryInput','newMoleculeOptions','insertNewMolecules','removeQueryInput','bindNewMolecules','newListColumns','visibleNewMolecules','newListValue','renderNewList','downloadNewList','format','stat','countLabel','percentage','table','measuredLabel','showDataAudit','showResult','status','fail','legendItem','renderColorLegend','renderLegend','colorMap','reliabilityColor','refreshLanguage'];
+  const names=['updateNewNavigation','referenceMapDetails','renderReferenceMap','newMoleculeWarning','newMoleculeInsertedMessage','selectColumns','showQueryInput','newMoleculeOptions','insertNewMolecules','removeQueryInput','bindNewMolecules','newListColumns','visibleNewMolecules','newListValue','renderNewList','downloadNewList','format','stat','countLabel','percentage','table','measuredLabel','showDataAudit','showResult','status','fail','legendItem','renderColorLegend','renderLegend','neighborEvidenceNote','neighborEvidenceAgreement','evaluationAgreement','colorMap','reliabilityColor','refreshLanguage'];
   vm.runInContext(names.map(realFunction).join('\n'),env.context);
   env.api.setLanguage(language);env.context.showQueryInput(input);env.context.bindNewMolecules();
   return {...env,$};
@@ -95,7 +95,7 @@ const scenarios={
     const {context,$}=await setup();await insert(context);
     assert.equal($('status').textContent,expected[language].inserted(expected[language].counts));
     const all={none:6,insufficient:5,mixed:4,inactive:3,medium:2,active:1};context.job.report.query_molecules.neighbor_evidence_counts=all;await insert(context);
-    const ordered=language==='zh'?'近邻一致·活性 1、近邻一致·中等活性 2、近邻一致·非活性 3、近邻不一致 4、近邻证据不足 5、无相近的参照分子 6':'Consistent neighbors: active 1, Consistent neighbors: medium 2, Consistent neighbors: inactive 3, Conflicting neighbors 4, Too little neighbor evidence 5, No similar reference molecule 6';
+    const ordered=language==='zh'?'一致证据·活性 1、一致证据·中等活性 2、一致证据·非活性 3、证据混杂 4、证据不足 5、无相近的参照分子 6':'Consistent evidence: active 1, Consistent evidence: medium 2, Consistent evidence: inactive 3, Mixed evidence 4, Insufficient evidence 5, No similar reference molecule 6';
     assert.equal($('status').textContent,expected[language].inserted(ordered));assert.equal($('status').className,'');
   },
   async legends(){
@@ -108,7 +108,7 @@ const scenarios={
     }
     context.renderLegend('neighbor_evidence');assert.equal($('legend').children.filter(item=>item.dataset.evidenceCategory).length,6);
     assert.ok(!$('legend').textContent.includes(expected[language].legend));
-    assert.equal(document.querySelectorAll('[data-help]').length,80);
+    assert.equal(document.querySelectorAll('[data-help]').length,81);
   },
   async reference(){
     const {context,$}=await setup();

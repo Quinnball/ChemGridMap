@@ -15,7 +15,8 @@ const added = {molecule_id:'N1',query_id:'N1',grid_row:1,grid_col:0,is_new:true,
 const newOther = {...added,molecule_id:'N2',query_id:'N2',grid_row:1,grid_col:1};
 function comparison() {
   return {group:'G001',rule:'coverage',file:'core_rules/group_123456789abc_core_comparison.csv',fmcs_timeout:10,
-    cores:['most_frequent','coverage','coverage_brics','fmcs'].map((rule,i)=>({...group,core_rule:rule,core_svg:'<svg data-rule="'+rule+'"></svg>',core_heavy_atoms:6+i,seconds:i*.1,fmcs_timed_out:rule==='fmcs'}))};
+    cores:['most_frequent','coverage','coverage_brics','coverage_recap','fmcs'].map((rule,i)=>({...group,core_rule:rule,core_svg:'<svg data-rule="'+rule+'"></svg>',core_heavy_atoms:6+i,seconds:i*.1,fmcs_timed_out:rule==='fmcs'})),
+    generic:{generic_scaffold:'C1CCCCC1',generic_scaffold_count:3,size:3,generic_scaffold_fraction:1,generic_scaffold_heavy_atoms:6,distinct_generic_scaffolds:1,generic_svg:'<svg data-rule="generic"></svg>'}};
 }
 async function setup(){
   const env = await runtime();
@@ -35,7 +36,7 @@ async function setup(){
       throw Error('Unexpected URL: '+url);
     }
   });
-  const names=['format','percentage','countLabel','showSources','selectGroup','coreRule','updateNavigation','showQuerySelection','measuredLabel','table'];
+  const names=['format','percentage','countLabel','showSources','selectGroup','coreRule','updateNavigation','showQuerySelection','neighborEvidenceNote','neighborEvidenceAgreement','evaluationAgreement','measuredLabel','table'];
   vm.runInContext(names.map(realFunction).join('\n'),env.context);
   env.api.setLanguage(language);env.context.showResult.grouping={groups:[group],protocol:{method:'Butina'}};
   env.context.renderCoreRuleOptions();
@@ -118,17 +119,17 @@ const scenarios={
   },
   async rules(){
     const {context,$,document}=await setup();
-    assert.deepEqual($('map-core-rule').options.map(o=>o.value),['most_frequent','coverage','coverage_brics']);
+    assert.deepEqual($('map-core-rule').options.map(o=>o.value),['most_frequent','coverage','coverage_brics','coverage_recap']);
     assert.equal($('map-core-rule').value,'coverage');assert.ok($('map-core-rule').closest('[data-group-only]'));
     context.job.options.core_rule='fmcs';context.job.current_core_rule='fmcs';context.renderCoreRuleOptions();
-    assert.deepEqual($('map-core-rule').options.map(o=>o.value),['most_frequent','coverage','coverage_brics','fmcs']);
+    assert.deepEqual($('map-core-rule').options.map(o=>o.value),['most_frequent','coverage','coverage_brics','coverage_recap','fmcs']);
     assert.equal($('map-core-rule').options.at(-1).textContent,language==='zh'?'FMCS（建图时计算）':'FMCS (computed when building the map)');
     assert.equal($('map-core-rule').value,'fmcs');
     assert.ok($('core-rule').options.some(o=>o.value==='coverage_brics'));
-    assert.equal(document.querySelectorAll('[data-help]').length,80);
+    assert.equal(document.querySelectorAll('[data-help]').length,81);
     assert.equal($('map-core-rule-help').dataset.help,'h.map-core-rule');
     assert.equal($('group-core-comparison-help').dataset.help,'h.group-core-comparison');
-    assert.ok(dictionaries[language]['h.core-rule'].includes('BRICS'));
+    assert.ok(dictionaries[language]['h.core-rule'].includes('BRICS'));assert.ok(dictionaries[language]['h.core-rule'].includes('RECAP'));
     assert.ok(dictionaries[language]['h.group-core-comparison'].includes('10'));
     assert.ok(context.coreRule({...group,core_rule:'coverage_brics'}).includes('BRICS'));
   },
@@ -154,10 +155,12 @@ const scenarios={
   async comparison(){
     const {context,$,downloads}=await setup();context.highlightedGroup='G001';$('group-core-comparison').open=true;
     await context.loadCoreComparison();const rows=$('core-comparison-table').querySelectorAll('tbody tr');
-    assert.equal(rows.length,4);assert.deepEqual(rows.map(row=>row.dataset.coreRule),['most_frequent','coverage','coverage_brics','fmcs']);
+    assert.equal(rows.length,6);assert.deepEqual(rows.map(row=>row.dataset.coreRule),['most_frequent','coverage','coverage_brics','coverage_recap','fmcs','generic_murcko_supplementary']);
+    assert.equal(rows[5].children[3].textContent,'3/3 (100%)');assert.equal(rows[5].children[4].textContent,'—');
+    assert.ok(rows[5].children[0].textContent.includes(language==='zh'?'通用骨架':'Generic scaffold'));
     assert.equal(rows[1].dataset.currentRule,'true');assert.equal(rows[0].children[4].textContent,'—');
     assert.equal(rows[2].children[3].textContent,'3/3 (100%)');assert.ok(rows.every(row=>row.children[1].innerHTML.includes('<svg')));
-    assert.ok(rows[3].textContent.includes(language==='zh'?'超时，结果可能不完整':'Timed out; the result may be incomplete'));
+    assert.ok(rows[4].textContent.includes(language==='zh'?'超时，结果可能不完整':'Timed out; the result may be incomplete'));
     assert.equal($('core-comparison-status').textContent,language==='zh'?'FMCS 搜索预算：每组 10 秒。':'FMCS search budget: 10 s per group.');
     assert.equal($('download-core-comparison').hidden,false);$('download-core-comparison').click();assert.equal(downloads[0][1],comparison().file);
     context.job.current_core_rule='coverage_brics';context.renderCoreComparison(context.loadCoreComparison.lastResult);

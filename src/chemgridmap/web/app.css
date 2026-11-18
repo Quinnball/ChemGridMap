@@ -78,7 +78,7 @@ details { margin-top: 18px; }summary { font-size: 12px; font-weight: bold; paddi
 #map-stage .new-molecule-outline>rect { stroke: #173e34; stroke-width: calc(1.5 * var(--zoom-inverse, 1)); stroke-opacity: 1; }
 #map-stage [data-new-reference-link] { stroke: #173e34; stroke-width: calc(1.5 * var(--zoom-inverse, 1)); stroke-dasharray: calc(4 * var(--zoom-inverse, 1)) calc(3 * var(--zoom-inverse, 1)); fill: none; }
 #map-stage .new-evidence-outline>rect { stroke: var(--evidence-color); stroke-width: calc(var(--evidence-width, 3) * var(--zoom-inverse, 1)); stroke-dasharray: var(--evidence-dash, none); stroke-opacity: 1; }
-#map-stage .reference-evidence-faded { opacity: .25; }
+#map-stage .reference-evidence-faded { opacity: .35; filter: grayscale(1); }
 #map-stage .group-highlight>rect, #map-stage circle.group-highlight { stroke: #172536 !important; stroke-width: calc(2.5 * var(--zoom-inverse, 1)) !important; stroke-opacity: 1 !important; }
 #map-stage .group-faded { opacity: .2; }
 #map-stage .source-highlight { opacity: 1; }
@@ -226,3 +226,10 @@ html[lang="zh-CN"] #query-csv:disabled + .localized-file-picker, html[lang="zh-C
 .previous-run-content > * { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 #previous-run-select:disabled { opacity: .6; }
 #previous-results-status.error { color: #962f37; }
+.group-core-generic { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.group-core-generic[hidden] { display: none; }
+.group-generic-image { width: 56px; height: 56px; flex: 0 0 56px; background: white; border: 1px solid var(--line); }
+.group-generic-image svg { width: 100%; height: 100%; }
+#core-comparison-table tr.generic-scaffold-row td { color: var(--muted, #555); font-style: italic; border-top: 1px dashed var(--line); }
+#map-stage [data-evidence-frame] { stroke-width: calc(var(--evidence-frame-width, 3) * var(--zoom-inverse, 1)); pointer-events: none; }
+.legend .legend-rates { flex-basis: 100%; color: #33404d; }

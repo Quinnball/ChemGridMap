@@ -55,7 +55,7 @@ def test_group_endpoint_matches_groups_and_comparison_without_writing_files(grou
     before = output_files(group_app)
     registered = dict(group_app.files)
     status, detail = get(group_app, '/api/group?group=' + group_id)
-    assert status == 200 and set(detail) == {'summary', 'core_svg'}
+    assert status == 200 and set(detail) == {'summary', 'core_svg', 'generic'}
     assert detail['summary'] == summary
     assert detail['core_svg'].startswith('<svg ')
     assert 'viewBox="0 0 180 180"' in detail['core_svg']
@@ -74,7 +74,8 @@ def test_group_endpoint_without_ring_scaffold(group_app):
     before = output_files(group_app)
     status, detail = get(group_app, '/api/group?group=' + summary['structure_group'])
     assert status == 200
-    assert detail == {'summary': summary, 'core_svg': ''}
+    assert {key: detail[key] for key in ('summary', 'core_svg')} == {'summary': summary, 'core_svg': ''}
+    assert detail['generic']['generic_scaffold'] == '' and detail['generic']['generic_svg'] == ''
     assert summary['size'] == 2 and summary['core_coverage_count'] == 0
     assert summary['core_exact_scaffold_count'] == 0
     assert output_files(group_app) == before

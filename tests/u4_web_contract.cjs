@@ -15,7 +15,7 @@ const controls = ['open-previous-results','previous-run-select','open-selected-r
   'use-assumed-sigma', 'assumed-sigma', 'evidence-model', 'support-level', 'offset-display',
   'offset-min-shared', 'offset-min-difference', 'offset-sign-agreement', 'identity-conflicts',
   'lower', 'upper', 'conflict-range', 'seed', 'identity', 'structure-policy', 'detail', 'raster',
-  'color-mode', 'measurement-filter', 'group-select', 'map-core-rule', 'group-core-comparison', 'show-neighbor-links'];
+  'color-mode', 'measurement-filter', 'class-filter', 'group-select', 'map-core-rule', 'group-core-comparison', 'show-neighbor-links'];
 
 function decoded(text) {
   return text.replace(/&(?:amp|lt|gt|quot|apos|#39|nbsp);/g, value =>
@@ -321,7 +321,7 @@ const scenarios = {
       fail(error) { throw error; },
     });
     const names = ['stat', 'format', 'ordinal', 'percentage', 'countLabel', 'legendItem', 'renderColorLegend',
-      'renderLegend', 'coreRule', 'selectGroup', 'table', 'selectColumns', 'referenceMapDetails', 'renderReferenceMap', 'newMoleculeWarning', 'newMoleculeInsertedMessage', 'showDataAudit', 'showResult', 'measuredLabel', 'showQuerySelection', 'showSources', 'inspect',
+      'renderLegend', 'coreRule', 'selectGroup', 'table', 'selectColumns', 'referenceMapDetails', 'renderReferenceMap', 'newMoleculeWarning', 'newMoleculeInsertedMessage', 'showDataAudit', 'showResult', 'measuredLabel', 'showQuerySelection', 'neighborEvidenceNote', 'neighborEvidenceAgreement', 'evaluationAgreement', 'showSources', 'inspect',
       'updateInputType', 'updateEvidenceOptions', 'applyTransform', 'translateSVGText', 'refreshValidation', 'status', 'refreshLanguage'];
     vm.runInContext(names.map(realFunction).join('\n'), context);
     context.showResult.grouping = {groups: [group], protocol: {method: 'Butina'}};

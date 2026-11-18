@@ -79,7 +79,7 @@ def test_cli_evidence_policy_offsets_layers_and_archive(
     manifest = json.loads(
         (tmp_path / "check_run_manifest.json").read_text(encoding="utf-8")
     )
-    assert manifest["software_version"] == "0.5.0"
+    assert manifest["software_version"] == "0.6.0"
     assert len(manifest["software_source_sha256"]) == 64
     assert manifest["software_source_file_count"] > 0
     assert manifest["git_commit"] is None or len(manifest["git_commit"]) == 40

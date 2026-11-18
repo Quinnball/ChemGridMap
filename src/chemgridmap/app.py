@@ -33,7 +33,7 @@ from rdkit import Chem, rdBase
 from . import __version__
 from .chembl import curate_chembl_activity_data, detect_chembl_columns, save_chembl_curation
 from .evidence import annotate_activity_confidence, prepare_generic_activity_records
-from .inspection import (build_sources, build_source_index, document_coverage, enrich_source_records,
+from .inspection import (build_sources, build_source_index, document_coverage, enrich_source_records, excluded_bound_records,
                          inspect_entry, load_audit_context, offset_pair_details,
                          match_source_lookup, validate_source_lookup)
 from .pipeline import build_grid_map
@@ -44,6 +44,7 @@ from .provenance import file_digests, source_tree_digest
 from .neighborhoods import neighborhood_evidence
 from .comparison import (group_comparison, molecule_keys, summarize_group_core, summarize_group_cores,
                          browser_core_jobs, shutdown_core_workers, group_core_members)
+from .cores import generic_scaffold_summary
 from .plotting import _svg_molecule_content
 from .units import validate_assumed_sigma, convert_activity_values
 
@@ -1036,6 +1037,17 @@ class AppSession(SavedSessionMixin, ManualMoleculesMixin):
             "representative_role")}
         return {**identity, **core, "minimum_center_similarity": summary["minimum_center_similarity"]}, metrics
 
+    @staticmethod
+    def _generic_scaffold(result, summary):
+        """Supplementary generic Murcko scaffold of a fixed group, with a drawing."""
+        members = AppSession._core_members(result, summary)
+        generic = generic_scaffold_summary([Chem.MolFromSmiles(s) for s in members.canonical_smiles])
+        smiles = generic["generic_scaffold"]
+        generic["generic_svg"] = (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">'
+            + (_svg_molecule_content(smiles, 180) or '') + '</svg>') if smiles else ''
+        return generic
+
     def _register_core_file(self, path):
         name = path.relative_to(Path(self.job["output_dir"])).as_posix()
         self.files[name] = path
@@ -1052,7 +1064,8 @@ class AppSession(SavedSessionMixin, ManualMoleculesMixin):
         for group, timing in zip(groups, metrics):
             row = {key: group.get(key) for key in fields}
             row.update(candidates=timing["candidates"], seconds=timing["seconds"])
-            for key in ("brics_candidates", "brics_single_pass_members"):
+            for key in ("brics_candidates", "brics_single_pass_members",
+                        "recap_candidates", "recap_skipped_members"):
                 if key in group:
                     row[key] = group[key]
             rows.append(row)
@@ -1071,7 +1084,7 @@ class AppSession(SavedSessionMixin, ManualMoleculesMixin):
         with self.lock:
             self._ensure_core_state()
             built_rule = self.job["options"]["core_rule"]
-            allowed = {"most_frequent", "coverage", "coverage_brics"}
+            allowed = {"most_frequent", "coverage", "coverage_brics", "coverage_recap"}
             if built_rule == "fmcs":
                 allowed.add("fmcs")
             if not isinstance(rule, str) or rule not in allowed:
@@ -1138,7 +1151,10 @@ class AppSession(SavedSessionMixin, ManualMoleculesMixin):
                     "files": list(self.files), "cached": cached}
 
     def group_cores(self, group_id):
-        """Compare four core rules for one fixed group; FMCS has a ten-second budget."""
+        """Compare five core rules for one fixed group; FMCS has a ten-second budget.
+
+        The generic Murcko scaffold is added as supplementary information, not as a rule.
+        """
         with self.core_compute_lock:
             with self.lock:
                 self._ensure_core_state()
@@ -1151,12 +1167,20 @@ class AppSession(SavedSessionMixin, ManualMoleculesMixin):
                 result = self.result
                 target = self.job["options"]["core_min_coverage"]
             rows, cores = [], []
-            for rule in ("most_frequent", "coverage", "coverage_brics", "fmcs"):
+            for rule in ("most_frequent", "coverage", "coverage_brics", "coverage_recap", "fmcs"):
                 group, metrics = self._calculate_group_core(result, summary, rule, target, timeout=10)
                 row = self._core_table_rows([group], [metrics])[0]
                 row["fmcs_timed_out"] = group["fmcs_timed_out"]
                 rows.append(row)
                 cores.append({**group, **metrics, "core_svg": _group_drawing(group, "core_smiles")})
+            generic = self._generic_scaffold(result, summary)
+            rows.append({"structure_group": summary["structure_group"], "size": generic["size"],
+                         "core_rule": "generic_murcko_supplementary",
+                         "core_smiles": generic["generic_scaffold"], "core_smiles_attached": "",
+                         "core_heavy_atoms": generic["generic_scaffold_heavy_atoms"],
+                         "core_coverage_count": generic["generic_scaffold_count"],
+                         "core_coverage_fraction": generic["generic_scaffold_fraction"],
+                         "core_coverage_target": None, "core_target_met": None})
             with self.lock:
                 if self.result is not result:
                     raise ValueError("The map changed during core calculation. Try again.")
@@ -1165,8 +1189,8 @@ class AppSession(SavedSessionMixin, ManualMoleculesMixin):
                 name = "group_" + hashlib.sha256(group_id.encode()).hexdigest()[:12] + "_core_comparison.csv"
                 path = directory / name
                 pd.DataFrame(rows).to_csv(path, index=False, encoding="utf-8", lineterminator="\n")
-                payload = {"group": group_id, "cores": cores, "file": self._register_core_file(path),
-                           "fmcs_timeout": 10}
+                payload = {"group": group_id, "cores": cores, "generic": generic,
+                           "file": self._register_core_file(path), "fmcs_timeout": 10}
                 self.group_core_cache[group_id] = payload
                 self.save_session()
                 return {**payload, "rule": self.current_core_rule}
@@ -1547,7 +1571,8 @@ class AppSession(SavedSessionMixin, ManualMoleculesMixin):
             summary = next((g for g in self.groups() if g['structure_group'] == group_id), None)
             if summary is None:
                 raise ValueError("Unknown structure group.")
-            payload = {'summary': summary, 'core_svg': _group_drawing(summary, 'core_smiles')}
+            payload = {'summary': summary, 'core_svg': _group_drawing(summary, 'core_smiles'),
+                       'generic': self._generic_scaffold(self.result, summary)}
             self.group_detail_cache[group_id] = payload
             return payload
 
@@ -1882,6 +1907,8 @@ class AppSession(SavedSessionMixin, ManualMoleculesMixin):
                     k=int(self.result.metrics.iloc[0].get("k", 10)))
                 summary['run_binding_verified'] = run_bound
                 summary['warnings'].extend(binding_warnings)
+                summary['excluded_bounds'] = excluded_bound_records(
+                    curation.excluded_records, summary['molecule_identity_key'])
             else:
                 chosen = _select_molecule(data, row, col, molecule_id)
                 records = pd.DataFrame()
@@ -2022,7 +2049,7 @@ def validate_options(options):
                "structure_policy": {"auto", "parent", "as-recorded"},
                "molecule_identity": {"auto", "parent-id", "canonical-smiles"},
                "grid_refinement": {"none", "neighbors"},
-               "core_rule": {"most_frequent", "coverage", "coverage_brics", "fmcs"},
+               "core_rule": {"most_frequent", "coverage", "coverage_brics", "coverage_recap", "fmcs"},
                "evidence_model": {"gaussian", "exclude-flagged"},
                "offset_display": {"uncertain", "none"},
                "identity_conflicts": {"error", "exclude"}}

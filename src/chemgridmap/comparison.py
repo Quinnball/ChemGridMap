@@ -177,7 +177,7 @@ def summarize_group_core(selected, member_ids, *, core_rule="coverage", core_min
     members by canonical SMILES and identifier, as in the grouping protocol.
     Optional telemetry is kept outside legacy summaries to preserve run files.
     """
-    if core_rule not in {"most_frequent", "coverage", "coverage_brics", "fmcs"}:
+    if core_rule not in {"most_frequent", "coverage", "coverage_brics", "coverage_recap", "fmcs"}:
         raise ValueError("Unknown core rule.")
     started = time.perf_counter()
     scaffolds = [MurckoScaffold.MurckoScaffoldSmiles(mol=m, includeChirality=True) for m in selected]
@@ -187,8 +187,10 @@ def summarize_group_core(selected, member_ids, *, core_rule="coverage", core_min
     frequent_pattern = Chem.MolFromSmiles(most_frequent) if most_frequent else None
     frequent_matched = [bool(frequent_pattern and m.HasSubstructMatch(frequent_pattern, useChirality=True))
                         for m in selected]
-    if core_rule == "coverage_brics" or (core_rule == "coverage" and most_frequent):
-        choice = select_core(selected, min_coverage=core_min_coverage, include_brics=core_rule == "coverage_brics")
+    if core_rule in {"coverage_brics", "coverage_recap"} or (core_rule == "coverage" and most_frequent):
+        choice = select_core(selected, min_coverage=core_min_coverage,
+                             include_brics=core_rule == "coverage_brics",
+                             include_recap=core_rule == "coverage_recap")
         core, matched = choice["core_smiles"], choice["matched"]
     elif core_rule == "fmcs":
         choice = mcs_core(selected, min_coverage=core_min_coverage, timeout=int(fmcs_timeout))
@@ -213,9 +215,9 @@ def summarize_group_core(selected, member_ids, *, core_rule="coverage", core_min
             else Chem.MolFromSmiles(core).GetNumHeavyAtoms() if core else 0
         ),
         "core_smarts": choice.get("core_smarts") if choice else None,
-        "core_coverage_target": core_min_coverage if core_rule in {"coverage", "coverage_brics", "fmcs"} else None,
+        "core_coverage_target": core_min_coverage if core_rule in {"coverage", "coverage_brics", "coverage_recap", "fmcs"} else None,
         "core_target_met": (
-            bool(choice["target_met"]) if core_rule in {"coverage", "coverage_brics"} and choice
+            bool(choice["target_met"]) if core_rule in {"coverage", "coverage_brics", "coverage_recap"} and choice
             else bool(choice["coverage_fraction"] >= core_min_coverage) if core_rule == "fmcs" and choice
             else None
         ),
@@ -232,6 +234,10 @@ def summarize_group_core(selected, member_ids, *, core_rule="coverage", core_min
         summary.update(candidates=metrics["candidates"],
                        brics_candidates=choice.get("brics_candidates", 0) if choice else 0,
                        brics_single_pass_members=choice.get("brics_single_pass_members", 0) if choice else 0)
+    if core_rule == "coverage_recap":
+        summary.update(candidates=metrics["candidates"],
+                       recap_candidates=choice.get("recap_candidates", 0) if choice else 0,
+                       recap_skipped_members=choice.get("recap_skipped_members", 0) if choice else 0)
     return (summary, metrics) if return_metrics else summary
 
 
@@ -257,7 +263,7 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
         Morgan fingerprint radius.
     n_bits : int, default 2048
         Morgan fingerprint length.
-    core_rule : {"coverage", "coverage_brics", "most_frequent", "fmcs"}, default "most_frequent"
+    core_rule : {"coverage", "coverage_brics", "coverage_recap", "most_frequent", "fmcs"}, default "most_frequent"
         Group-core selection rule.
     core_min_coverage : float, default 0.8
         Coverage target for coverage and FMCS cores.
@@ -279,8 +285,8 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
     """
     if not 0 < similarity <= 1:
         raise ValueError("Group similarity must be in (0, 1].")
-    if core_rule not in {"most_frequent", "coverage", "coverage_brics", "fmcs"}:
-        raise ValueError("core_rule must be 'most_frequent', 'coverage', 'coverage_brics' or 'fmcs'.")
+    if core_rule not in {"most_frequent", "coverage", "coverage_brics", "coverage_recap", "fmcs"}:
+        raise ValueError("core_rule must be 'most_frequent', 'coverage', 'coverage_brics', 'coverage_recap' or 'fmcs'.")
     if int(fmcs_timeout) < 1:
         raise ValueError("fmcs_timeout must be a positive integer.")
     if not 0 < core_min_coverage <= 1:
@@ -346,11 +352,15 @@ def structural_groups(data, *, similarity=0.6, cluster_col=None, cluster_source=
                               "(ring-containing, dummy atoms removed) matching at least "
                               f"{core_min_coverage:.0%} of members; otherwise the highest-coverage candidate"
                               if core_rule == "coverage_brics" else
+                              "largest member scaffold, scaffold-network ring fragment or RECAP fragment "
+                              "(ring-containing, dummy atoms removed) matching at least "
+                              f"{core_min_coverage:.0%} of members; otherwise the highest-coverage candidate"
+                              if core_rule == "coverage_recap" else
                               "largest member scaffold or scaffold-network ring fragment matching at least "
                               f"{core_min_coverage:.0%} of members; otherwise the highest-coverage candidate"
                               if core_rule == "coverage" else
                               "most frequent nonempty exact scaffold; ties: heavy atoms descending, then SMILES"),
-                "core_min_coverage": core_min_coverage if core_rule in {"coverage", "coverage_brics", "fmcs"} else None,
+                "core_min_coverage": core_min_coverage if core_rule in {"coverage", "coverage_brics", "coverage_recap", "fmcs"} else None,
                 "fmcs_timeout": int(fmcs_timeout) if core_rule == "fmcs" else None,
                 "coverage_rule": "explicit substructure matches with chirality; not inferred from cluster membership",
                 "interpretation": "Groups are representation- and threshold-dependent, not chemical ground truth. Scaffold summaries do not explain every fingerprint bit. Colors may repeat; use group IDs.",

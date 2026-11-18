@@ -152,8 +152,9 @@ def test_excluded_export_keeps_all_original_columns_rows_and_values(reference, t
 @pytest.mark.parametrize("detail", ["overview", "full"])
 def test_inserted_svg_html_parse_and_render_preserve_reference_and_new_cells(reference, tmp_path, detail):
     # 实际 HTML 解析检出 ns0:g；随后渲染该 HTML 解析结果，检查每个格子的像素范围。
-    from lxml import etree, html as html_parser
-    import pymupdf
+    etree = pytest.importorskip("lxml.etree")
+    html_parser = pytest.importorskip("lxml.html")
+    pymupdf = pytest.importorskip("pymupdf")
     from chemgridmap.plotting import render_grid_map
 
     reference.output_files["svg"] = render_grid_map(reference.data, tmp_path / "reference_for_html",

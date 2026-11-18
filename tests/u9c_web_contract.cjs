@@ -66,7 +66,7 @@ const scenarios={
   const css=fs.readFileSync(path.join(process.argv[2],'app.css'),'utf8');assert.match(css,/data-mismatch-overlay\] path[^}]+pointer-events: visiblePainted/);
  },
  async controls(){
-  const {context,$,api,document}=await setup();assert.equal(document.querySelectorAll('[data-help]').length,80);
+  const {context,$,api,document}=await setup();assert.equal(document.querySelectorAll('[data-help]').length,81);
   for(const language of ['en','zh']){
    api.setLanguage(language);
    for(const id of ['open-previous-results','previous-run-select','open-selected-run']){

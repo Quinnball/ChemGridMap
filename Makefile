@@ -9,7 +9,7 @@ VENV_PYTHON := .venv/bin/python
 	paper-e10 paper-e11 paper-e12a paper-e12b paper-posthoc paper-t1 \
 	paper-e15 paper-e16 paper-e22 paper-all \
 	paper-fig2-data paper-figures-data paper-figures paper-figures-archived \
-	paper-figure6-capture \
+	paper-figure6-capture paper-figure1-v07 paper-figures-v07 paper-figure7-v07 \
 	paper-reproduce-tests
 setup:
 	$(PYTHON) -c "import sys; assert sys.version_info >= (3, 10), 'Use Python 3.10 or newer, not the legacy chemicalmap environment'"
@@ -169,3 +169,13 @@ paper-reproduce-tests: check
 	$(VENV_PYTHON) -m pytest paper/strengthening/source paper/figures/source
 
 paper-all: paper paper-e4 paper-e12c paper-posthoc paper-e16 paper-e22 paper-t1 paper-figure6-capture paper-figures paper-structure
+
+paper-figure1-v07:
+	node paper/figures/source/export_fig1.cjs paper/figures/source paper/figures/output_v07
+
+paper-figures-v07: check
+	$(VENV_PYTHON) paper/figures/source/build_v07.py
+
+paper-figure7-v07: check
+	PYTHON=$(CURDIR)/$(VENV_PYTHON) node paper/figures/source/fig7_capture.mjs
+	$(VENV_PYTHON) paper/figures/source/fig7_compose.py

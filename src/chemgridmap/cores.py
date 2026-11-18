@@ -13,7 +13,7 @@ import time
 from typing import Dict, Sequence
 
 from rdkit import Chem, rdBase
-from rdkit.Chem import BRICS, rdFMCS
+from rdkit.Chem import BRICS, Recap, rdFMCS
 from rdkit.Chem.Scaffolds import MurckoScaffold, rdScaffoldNetwork
 
 
@@ -75,6 +75,79 @@ def brics_candidate_cores(mols: Sequence[Chem.Mol]) -> tuple[list, int]:
                 if clean.GetRingInfo().NumRings():
                     found.add(Chem.MolToSmiles(clean, isomericSmiles=True))
     return sorted(found), single_pass_members
+
+
+def _ring_fragment_without_dummies(fragment: Chem.Mol) -> str:
+    """Canonical SMILES of a fragment after removing dummy atoms, or "" if acyclic or invalid."""
+    clean = Chem.RWMol(fragment)
+    for index in reversed([atom.GetIdx() for atom in clean.GetAtoms() if atom.GetAtomicNum() == 0]):
+        clean.RemoveAtom(index)
+    clean = clean.GetMol()
+    try:
+        Chem.SanitizeMol(clean)
+    except Exception:
+        return ""
+    if not clean.GetRingInfo().NumRings():
+        return ""
+    return Chem.MolToSmiles(clean, isomericSmiles=True)
+
+
+RECAP_MAX_HEAVY_ATOMS = 80
+
+
+def recap_candidate_cores(mols: Sequence[Chem.Mol]) -> tuple[list, int]:
+    """Return ring-containing RECAP fragments without dummy atoms and the skipped-member count.
+
+    Every node of each member's RECAP hierarchy is used (leaves and intermediate
+    fragments), mirroring ``keepNonLeafNodes=True`` for BRICS. The full hierarchy
+    can grow combinatorially, so members with more than ``RECAP_MAX_HEAVY_ATOMS``
+    heavy atoms are not decomposed; they still count in coverage.
+    """
+    found, skipped = set(), 0
+    with rdBase.BlockLogs():
+        for mol in mols:
+            if mol.GetNumHeavyAtoms() > RECAP_MAX_HEAVY_ATOMS:
+                skipped += 1
+                continue
+            for node in Recap.RecapDecompose(mol).GetAllChildren().values():
+                if node.mol is None:
+                    continue
+                smiles = _ring_fragment_without_dummies(node.mol)
+                if smiles:
+                    found.add(smiles)
+    return sorted(found), skipped
+
+
+def generic_scaffold_summary(mols: Sequence[Chem.Mol]) -> Dict:
+    """Most frequent generic Murcko scaffold (all atoms carbon, all bonds single).
+
+    Reported as supplementary information only: a generic scaffold shows a shared
+    ring-and-linker shape but cannot be aligned to members as a typed core.
+    Ties: member count descending, heavy atoms descending, then SMILES.
+    """
+    generic = []
+    with rdBase.BlockLogs():
+        for mol in mols:
+            try:
+                scaffold = MurckoScaffold.GetScaffoldForMol(mol)
+                if not scaffold.GetNumAtoms():
+                    generic.append("")
+                    continue
+                generic.append(Chem.MolToSmiles(MurckoScaffold.MakeScaffoldGeneric(scaffold)))
+            except Exception:
+                generic.append("")
+    counts: Dict[str, int] = {}
+    for smiles in generic:
+        if smiles:
+            counts[smiles] = counts.get(smiles, 0) + 1
+    if not counts:
+        return {"generic_scaffold": "", "generic_scaffold_count": 0, "generic_scaffold_fraction": 0.0,
+                "generic_scaffold_heavy_atoms": 0, "distinct_generic_scaffolds": 0, "size": len(mols)}
+    best = min(counts, key=lambda s: (-counts[s], -Chem.MolFromSmiles(s).GetNumHeavyAtoms(), s))
+    return {"generic_scaffold": best, "generic_scaffold_count": counts[best],
+            "generic_scaffold_fraction": counts[best] / len(mols),
+            "generic_scaffold_heavy_atoms": Chem.MolFromSmiles(best).GetNumHeavyAtoms(),
+            "distinct_generic_scaffolds": len(counts), "size": len(mols)}
 
 
 def _attached_candidate(pattern: Chem.Mol, member: Chem.Mol, match: tuple, *,
@@ -158,7 +231,7 @@ def _core_smiles_with_attachments(pattern: Chem.Mol, mols: Sequence[Chem.Mol]) -
 
 
 def select_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8,
-                include_brics: bool = False) -> Dict:
+                include_brics: bool = False, include_recap: bool = False) -> Dict:
     """Largest candidate core matching at least ``min_coverage`` of the members.
 
     Candidates meeting the target are ranked by heavy atoms, then coverage;
@@ -167,6 +240,8 @@ def select_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8,
     """
     if not 0 < min_coverage <= 1:
         raise ValueError("min_coverage must lie in (0, 1].")
+    if include_brics and include_recap:
+        raise ValueError("Choose BRICS or RECAP fragments, not both.")
     started = time.perf_counter()
     candidates = candidate_cores(mols)
     extra = {}
@@ -177,6 +252,12 @@ def select_core(mols: Sequence[Chem.Mol], *, min_coverage: float = 0.8,
                  "brics_single_pass_members": guarded}
         candidates = sorted(set(candidates).union(fragments))
         rule = "coverage_brics"
+    if include_recap:
+        fragments, guarded = recap_candidate_cores(mols)
+        extra = {"recap_candidates": len(set(fragments) - set(candidates)),
+                 "recap_skipped_members": guarded}
+        candidates = sorted(set(candidates).union(fragments))
+        rule = "coverage_recap"
     patterns = [(smiles, Chem.MolFromSmiles(smiles)) for smiles in candidates]
     patterns.sort(key=lambda item: (-item[1].GetNumHeavyAtoms(), item[0]))
     scored = []

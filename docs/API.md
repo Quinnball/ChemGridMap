@@ -192,7 +192,7 @@ cluster_col, cluster_source : str, optional
     External group labels and their provenance.
 grid_refinement : {"neighbors", "none"}, default "neighbors"
     Neighbour-guided refinement mode.
-core_rule : {"coverage", "coverage_brics", "most_frequent", "fmcs"}, default "coverage"
+core_rule : {"coverage", "coverage_brics", "coverage_recap", "most_frequent", "fmcs"}, default "coverage"
     Group-core selection rule.
 core_min_coverage : float, default 0.8
     Coverage target for coverage and FMCS cores.
@@ -594,7 +594,7 @@ Tie-inclusive k-nearest-neighbour sets, excluding self.
 ## `select_core`
 
 ```python
-select_core(mols: 'Sequence[Chem.Mol]', *, min_coverage: 'float' = 0.8, include_brics: 'bool' = False) -> 'Dict'
+select_core(mols: 'Sequence[Chem.Mol]', *, min_coverage: 'float' = 0.8, include_brics: 'bool' = False, include_recap: 'bool' = False) -> 'Dict'
 ```
 
 Largest candidate core matching at least ``min_coverage`` of the members.
@@ -628,7 +628,7 @@ radius : int, default 2
     Morgan fingerprint radius.
 n_bits : int, default 2048
     Morgan fingerprint length.
-core_rule : {"coverage", "coverage_brics", "most_frequent", "fmcs"}, default "most_frequent"
+core_rule : {"coverage", "coverage_brics", "coverage_recap", "most_frequent", "fmcs"}, default "most_frequent"
     Group-core selection rule.
 core_min_coverage : float, default 0.8
     Coverage target for coverage and FMCS cores.
@@ -656,10 +656,35 @@ chemgridmap.cores.brics_candidate_cores(mols: 'Sequence[Chem.Mol]') -> 'tuple[li
 
 Return ring-containing BRICS fragments without dummy atoms and the guard count.
 
+## `chemgridmap.cores.recap_candidate_cores`
+
+```python
+chemgridmap.cores.recap_candidate_cores(mols: 'Sequence[Chem.Mol]') -> 'tuple[list, int]'
+```
+
+Return ring-containing RECAP fragments without dummy atoms and the skipped-member count.
+
+Every node of each member's RECAP hierarchy is used (leaves and intermediate
+fragments), mirroring ``keepNonLeafNodes=True`` for BRICS. The full hierarchy
+can grow combinatorially, so members with more than ``RECAP_MAX_HEAVY_ATOMS``
+heavy atoms are not decomposed; they still count in coverage.
+
+## `chemgridmap.cores.generic_scaffold_summary`
+
+```python
+chemgridmap.cores.generic_scaffold_summary(mols: 'Sequence[Chem.Mol]') -> 'Dict'
+```
+
+Most frequent generic Murcko scaffold (all atoms carbon, all bonds single).
+
+Reported as supplementary information only: a generic scaffold shows a shared
+ring-and-linker shape but cannot be aligned to members as a typed core.
+Ties: member count descending, heavy atoms descending, then SMILES.
+
 ## `chemgridmap.cores.select_core`
 
 ```python
-chemgridmap.cores.select_core(mols: 'Sequence[Chem.Mol]', *, min_coverage: 'float' = 0.8, include_brics: 'bool' = False) -> 'Dict'
+chemgridmap.cores.select_core(mols: 'Sequence[Chem.Mol]', *, min_coverage: 'float' = 0.8, include_brics: 'bool' = False, include_recap: 'bool' = False) -> 'Dict'
 ```
 
 Largest candidate core matching at least ``min_coverage`` of the members.
@@ -713,7 +738,9 @@ Recompute only fixed-group cores; never mutate an original map or its files.
 chemgridmap.app.AppSession.group_cores(self, group_id)
 ```
 
-Compare four core rules for one fixed group; FMCS has a ten-second budget.
+Compare five core rules for one fixed group; FMCS has a ten-second budget.
+
+The generic Murcko scaffold is added as supplementary information, not as a rule.
 
 ## Local browser endpoints
 
@@ -723,10 +750,11 @@ and the union of mapped members (`grid_row`, `grid_col`, molecule ID and identit
 Add `scope=new` to limit the index to the current inserted molecules and their batches.
 `GET /api/inspect` adds `map_molecule_count` to retained sources and a `source_union_molecule_count`;
 inserted molecules expose `new_molecule_sources`. Possible source-lookup matches are excluded.
-`POST /api/core-rule` accepts `{"rule": "coverage_brics"}` (or `coverage`, `most_frequent`).
+`POST /api/core-rule` accepts `{"rule": "coverage_brics"}` (or `coverage_recap`, `coverage`, `most_frequent`).
 It returns the current rule, build rule, group summaries, downloadable files and cache status.
 FMCS can be restored only when it was the build rule; global switching never starts new FMCS jobs.
-`GET /api/group-cores?group=ID` returns four core summaries with SVGs, timing and the comparison CSV;
+`GET /api/group-cores?group=ID` returns five core summaries with SVGs, timing and the comparison CSV,
+plus `generic` (supplementary generic Murcko scaffold, member count and SVG); `GET /api/group` also returns `generic`;
 FMCS receives a fixed 10-second budget. Existing group membership and map coordinates are unchanged.
 
 ## Manual new molecules and measured results
@@ -788,8 +816,8 @@ output contract until a manual action or explicit feedback download is requested
 
 ## Saved sessions and core progress
 
-Browser computation uses separate loky processes for `most_frequent`, `coverage`
-and `coverage_brics` when there are at least 64 groups; smaller runs stay serial.
+Browser computation uses separate loky processes for `most_frequent`, `coverage`,
+`coverage_brics` and `coverage_recap` when there are at least 64 groups; smaller runs stay serial.
 Defaults use
 `min(8, os.cpu_count() - 1)`, at least 1; `CHEMGRIDMAP_JOBS` overrides the browser
 worker count only. `build_grid_map(..., jobs=1)` and CLI `--jobs 1` remain serial

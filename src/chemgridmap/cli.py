@@ -112,8 +112,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     units = parser.add_mutually_exclusive_group()
     units.add_argument(
-        "--value-unit", choices=["p", "M", "mM", "uM", "nM", "pM"], default="p",
-        help="Activity unit; p means an existing -log10 molar value.",
+        "--value-unit", choices=["p", "M", "mM", "uM", "nM", "pM"], default=None,
+        help="Activity unit (default p); p means an existing -log10 molar value.",
     )
     units.add_argument(
         "--unit-column", help="Per-record concentration unit column (M, mM, uM, µM, μM, nM, pM).",
@@ -304,8 +304,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Refine the minimum-displacement grid so representation neighbours sit closer "
              "('none' reproduces 0.4.0 layouts).")
     parser.add_argument(
-        "--core-rule", choices=["coverage", "coverage_brics", "most_frequent", "fmcs"], default="coverage",
-        help="Group core: largest scaffold or ring fragment (optionally including BRICS fragments) "
+        "--core-rule", choices=["coverage", "coverage_brics", "coverage_recap", "most_frequent", "fmcs"], default="coverage",
+        help="Group core: largest scaffold or ring fragment (optionally including BRICS or RECAP fragments) "
              "covering --core-min-coverage of members, "
              "the most frequent scaffold (0.4.0 rule), or FMCS.")
     parser.add_argument(
@@ -371,6 +371,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return inspect_main(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
+    # The default is applied after parsing: with default="p", Python 3.10 and 3.11 do not report
+    # "--value-unit p --unit-column ..." as a conflict, because the value equals the default.
+    if args.value_unit is None:
+        args.value_unit = "p"
     if args.example:
         if args.input is not None:
             parser.error("--example cannot be combined with an input file.")

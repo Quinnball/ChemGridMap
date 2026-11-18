@@ -85,8 +85,8 @@ COLUMNS: Dict[str, dict] = {
     "consensus_scale": _entry(MAP_FILES, "Posterior scale of the entry consensus.", "log units"),
     "p_consensus_{class}": _entry(MAP_FILES, "Posterior probability that the consensus is in each activity class.", "fraction 0–1"),
     "p_new_document_{class}": _entry(MAP_FILES, "Predictive probability for a new document in each class.", "fraction 0–1"),
-    "class_confidence": _entry(MAP_FILES, "Posterior consensus probability for the displayed class.", "fraction 0–1"),
-    "class_reproducibility": _entry(MAP_FILES, "Predictive probability for the displayed class in a new document.", "fraction 0–1"),
+    "class_confidence": _entry(MAP_FILES, "Class support: posterior probability that the consensus (document-balanced mean) lies in the displayed class. The column keeps its 0.5 name for compatibility; it is not the chance that a new document agrees (see class_reproducibility).", "fraction 0–1"),
+    "class_reproducibility": _entry(MAP_FILES, "Class reproducibility: predictive probability that one new document reports the displayed class; the quantity checked against later documents in the evaluation.", "fraction 0–1"),
     "discordant_document_pairs": _entry(MAP_FILES, "Flagged document pairs containing both sides of the entry.", "count"),
     "discordant_documents": _entry(MAP_FILES, "Documents in flagged pairs that share this entry."),
     "offset_pair_touched": _entry(MAP_FILES, "Whether this entry occurs in any document of a flagged offset pair.", "boolean"),
@@ -321,6 +321,9 @@ COLUMNS.update({
     "is_new": _entry(("new_molecules.csv",), "Identifies the current new-molecule overlay.", "boolean"),
     "nearest_reference_id": _entry(("new_molecules.csv",), "Placement target: highest Morgan Tanimoto, then smallest reference ID."),
     "placement_distance": _entry(("new_molecules.csv",), "Euclidean distance from the target reference cell.", "grid cells"),
+    "placement_recall": _entry(("new_molecules.csv",), "Share of the k = 10 most similar reference molecules (ties retained) that are among the 10 reference cells nearest to the placed cell.", "fraction 0–1"),
+    "placement_recall_shared": _entry(("new_molecules.csv",), "Number of those similar reference molecules that are also grid neighbours of the placed cell.", "count"),
+    "placement_recall_fingerprint_count": _entry(("new_molecules.csv",), "Number of similar reference molecules counted, including ties at the tenth similarity.", "count"),
     "neighbor_evidence": _entry(("new_molecules.csv",), "Evidence from similar tie-inclusive top-five reference neighbors; never a prediction.", "none, insufficient, active, medium, inactive, mixed"),
     "similar_reference_count": _entry(("new_molecules.csv",), "Top-five neighbors including ties meeting group_similarity.", "count"),
     "supported_reference_count": _entry(("new_molecules.csv",), "Supported similar neighbors; zero when reference support was not assessed.", "count"),
@@ -341,7 +344,7 @@ CORE_RULE_FILES = ("core_rules/<stem>_cores_<rule>.csv",
 for _column in ("structure_group", "core_rule", "core_smiles", "core_coverage_target"):
     COLUMNS[_column]["files"] += CORE_RULE_FILES
 COLUMNS["core_rule"]["by_file_units"] = {
-    _file: "coverage, coverage_brics, most_frequent or fmcs" for _file in CORE_RULE_FILES}
+    _file: "coverage, coverage_brics, coverage_recap, most_frequent or fmcs; the comparison CSV adds a generic_murcko_supplementary row" for _file in CORE_RULE_FILES}
 COLUMNS.update({
     "size": _entry(CORE_RULE_FILES, "Number of original reference members in the group.", "count"),
     "core_smiles_attached": _entry(CORE_RULE_FILES, "Core depiction with attachment points generated from a matching member.", "SMILES"),
@@ -353,6 +356,8 @@ COLUMNS.update({
     "seconds": _entry(CORE_RULE_FILES, "Elapsed core calculation time for this group.", "seconds"),
     "brics_candidates": _entry(CORE_RULE_FILES, "BRICS candidates absent from the original scaffold/ring-fragment pool; only for coverage_brics.", "count"),
     "brics_single_pass_members": _entry(CORE_RULE_FILES, "Members with more than 10 BRICS bonds, decomposed with singlePass=True; only for coverage_brics.", "count"),
+    "recap_candidates": _entry(CORE_RULE_FILES, "RECAP candidates absent from the original scaffold/ring-fragment pool; only for coverage_recap.", "count"),
+    "recap_skipped_members": _entry(CORE_RULE_FILES, "Members with more than 80 heavy atoms that were not RECAP-decomposed (they still count in coverage); only for coverage_recap.", "count"),
     "fmcs_timed_out": _entry((CORE_RULE_FILES[1],), "FMCS reached its fixed 10-second comparison budget; the returned result may be incomplete.", "boolean"),
 })
 
@@ -449,7 +454,10 @@ def output_columns_markdown(frames=None) -> str:
         "the original run manifest SHA-256, and total elapsed seconds. Structure hashes use the grouping",
         "protocol's sorted canonical-structure serialization. Existing run files, manifest and ZIP are unchanged.",
         "The comparison CSV uses the first 12 hexadecimal digits of the group identifier SHA-256 for `<group-hash>`.",
-        "BRICS columns are present for BRICS rule exports and in the four-rule comparison table.",
+        "BRICS and RECAP columns are present for their rule exports and in the five-rule comparison table.",
+        "The comparison table ends with a `generic_murcko_supplementary` row: the most frequent generic Murcko",
+        "scaffold (all atoms carbon, all bonds single) and the members sharing it exactly. It is supplementary",
+        "information, not a selectable core rule, and its target columns are empty.",
         "Comparison ZIPs for non-build rules also live under `core_rules/` and include the rule in their names.", "",
         "## Optional own-data outputs and metadata", "",
         "Reference filenames retain the run's `<name>_` prefix and never change on insertion.",
@@ -551,11 +559,11 @@ def api_markdown() -> str:
             f"## `{name}`", "", "```python", f"{name}{signature}", "```", "",
             documentation, "",
         ])
-    from .cores import brics_candidate_cores, select_core
+    from .cores import brics_candidate_cores, generic_scaffold_summary, recap_candidate_cores, select_core
     from .comparison import summarize_group_core
     from .inspection import build_source_index
     from .app import AppSession
-    for value in (brics_candidate_cores, select_core, summarize_group_core, build_source_index,
+    for value in (brics_candidate_cores, recap_candidate_cores, generic_scaffold_summary, select_core, summarize_group_core, build_source_index,
                   AppSession.source_members, AppSession.set_core_rule, AppSession.group_cores):
         name = value.__module__ + "." + value.__qualname__
         lines.extend([f"## `{name}`", "", "```python", f"{name}{inspect.signature(value)}", "```", "",
@@ -568,10 +576,11 @@ def api_markdown() -> str:
         "Add `scope=new` to limit the index to the current inserted molecules and their batches.",
         "`GET /api/inspect` adds `map_molecule_count` to retained sources and a `source_union_molecule_count`;",
         "inserted molecules expose `new_molecule_sources`. Possible source-lookup matches are excluded.",
-        "`POST /api/core-rule` accepts `{\"rule\": \"coverage_brics\"}` (or `coverage`, `most_frequent`).",
+        "`POST /api/core-rule` accepts `{\"rule\": \"coverage_brics\"}` (or `coverage_recap`, `coverage`, `most_frequent`).",
         "It returns the current rule, build rule, group summaries, downloadable files and cache status.",
         "FMCS can be restored only when it was the build rule; global switching never starts new FMCS jobs.",
-        "`GET /api/group-cores?group=ID` returns four core summaries with SVGs, timing and the comparison CSV;",
+        "`GET /api/group-cores?group=ID` returns five core summaries with SVGs, timing and the comparison CSV,",
+        "plus `generic` (supplementary generic Murcko scaffold, member count and SVG); `GET /api/group` also returns `generic`;",
         "FMCS receives a fixed 10-second budget. Existing group membership and map coordinates are unchanged.", "",
     ])
     lines.extend([
@@ -636,8 +645,8 @@ def api_markdown() -> str:
         '',
         '## Saved sessions and core progress',
         '',
-        'Browser computation uses separate loky processes for `most_frequent`, `coverage`',
-        'and `coverage_brics` when there are at least 64 groups; smaller runs stay serial.',
+        'Browser computation uses separate loky processes for `most_frequent`, `coverage`,',
+        '`coverage_brics` and `coverage_recap` when there are at least 64 groups; smaller runs stay serial.',
         'Defaults use',
         '`min(8, os.cpu_count() - 1)`, at least 1; `CHEMGRIDMAP_JOBS` overrides the browser',
         'worker count only. `build_grid_map(..., jobs=1)` and CLI `--jobs 1` remain serial',

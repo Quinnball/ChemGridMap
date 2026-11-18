@@ -17,7 +17,7 @@ Use it from Python, the command line or a local browser interface.
 Python 3.10 or newer is required; Python 3.12 is recommended. UMAP is installed
 with the core package.
 
-After the 0.5.0 PyPI release:
+After the 0.6.0 PyPI release:
 
 ```bash
 python -m pip install chemgridmap
@@ -48,7 +48,9 @@ records the versions actually used. The exact dependency set used to prepare
 the revision environment is pinned in
 [`requirements-paper.lock.txt`](requirements-paper.lock.txt), including
 numba, pynndescent, llvmlite and UMAP. The versions in `pyproject.toml` are
-minimum bounds and have not been tested separately.
+minimum bounds; a separate CI job installs exactly those lowest versions
+([`ci/minimum-constraints.txt`](ci/minimum-constraints.txt)) on Python 3.10
+and runs the full test suite.
 
 ## Quick start
 
@@ -74,7 +76,7 @@ chemgridmap chembl205_ic50.csv \
   --output-dir caii_map
 ```
 
-The 0.5.0 defaults are UMAP, neighbor-refined grid placement,
+The defaults (unchanged since 0.5.0) are UMAP, neighbor-refined grid placement,
 coverage-target group cores, and Gaussian activity-class support. To launch the
 same workflow in the local browser:
 
@@ -87,12 +89,17 @@ all three reliability layers, and exports the source-record audit with the map.
 Select a structure group to highlight its members on any color layer in the grid
 or 2D projection, and see its selected core structure and coverage.
 Use the map-page **Core rule** selector to compare the most frequent scaffold,
-the default coverage core, and **coverage including BRICS fragments** without
-changing groups or coordinates. The group card's **Compare core rules** table
-also computes FMCS on demand with a 10-second budget. Rule results are cached
-and downloaded separately under `core_rules/`; original exports stay unchanged.
-The CLI accepts `--core-rule coverage_brics`, and the build form offers the same
-option. Default builds still use `coverage`.
+the default coverage core, **coverage including BRICS fragments** and
+**coverage including RECAP fragments** without changing groups or coordinates.
+The group card shows the group's generic Murcko scaffold (all atoms carbon, all
+bonds single) and how many members share it; this is supplementary information,
+not a core rule. The card's **Compare core rules** table also computes FMCS on
+demand with a 10-second budget and ends with the generic scaffold. Rule results
+are cached and downloaded separately under `core_rules/`; original exports stay
+unchanged. The CLI accepts `--core-rule coverage_brics` and
+`--core-rule coverage_recap`, and the build form offers the same options.
+RECAP decomposes members with at most 80 heavy atoms; larger members still count
+in coverage. Default builds still use `coverage`.
 For your own records, choose **Generic activity records**, select the activity
 unit or a unit column, and optionally supply evidence-unit identifiers or an
 assumed σ in Advanced settings. First build the **reference map**, then use
@@ -152,6 +159,31 @@ touched entries remain visible with a bottom-left marker, but `class_status`
 depends only on support. Use `--offset-display uncertain` to also display a
 touched entry as uncertain. A pale cell is not a missing measurement, and its
 class is not changed. Model probabilities are unchanged in either mode.
+
+Two probabilities are reported for each entry, and they answer different
+questions. **Class support** (output column `class_confidence`, kept under its
+0.5 name for compatibility) is the posterior probability that the consensus,
+the document-balanced mean, lies in the displayed class; it sets the pale or
+saturated colour. **Class reproducibility** (`class_reproducibility`) is the
+predictive probability that one new document reports the displayed class.
+Only class reproducibility was checked against later documents in the
+evaluation. The inspector shows both, labelled by the displayed class, together
+with the agreement that entries of the same class and status reached in the
+evaluation; the legend of the support layer repeats those rates. Saturated
+inactive cells agreed with later documents less often than saturated active
+cells, so the same colour strength does not mean the same reliability for the
+two classes.
+
+Entries reported only as bounds (for example `> 10000 nM`) are excluded from
+the median and from class support. The inspector lists the bound records of
+the selected entry, with the corresponding pActivity bound, so that a user can
+see whether other documents report the compound as weaker than a bound.
+
+The activity colours are separated under simulated colour-vision deficiency
+(see `paper/cvd_separations.py` for every pair), but the saturated active and
+inactive colours differ least under deuteranopia. **Emphasize class** fades all
+molecules of other classes, so that the classes can be told apart without
+relying on hue.
 
 All five settings are available in `annotate_activity_confidence`,
 `prepare_generic_activity_records`, the CLI and the browser:
@@ -297,7 +329,15 @@ The value 0.64 log units has the same source as the existing literature
 fallback: Landrum & Riniker, *J. Chem. Inf. Model.* **2024**, 64, 1560.
 Their observation that 27% of cross-assay IC50 pairs differ by more than one
 log unit gives approximately 0.64 per measurement under a Gaussian model.
-Supplying it explicitly is an assumption, not an estimate from your data:
+It describes differences between publications. When the evidence units are
+batches or experiment dates within one laboratory, the between-unit SD is
+usually smaller, and class support then describes repeatability within that
+laboratory rather than reproducibility across laboratories. Prefer an SD
+estimated from your own repeated measurements, for example the SD of a control
+compound measured in every batch; 0.64 is then only a conservative upper value.
+The evaluation of class support and class reproducibility used ChEMBL documents
+only; it does not cover batches or dates.
+Supplying an SD explicitly is an assumption, not an estimate from your data:
 fits distinguish `assumed_sigma` from automatic `literature_fallback` and
 record the evidence-unit source. Assumed SDs have no fitted degrees of freedom.
 This option requires records; a molecule-only table must first be supplied in
@@ -579,13 +619,28 @@ chemgridmap chembl205_ic50.csv --input-format chembl \
   --output-dir caii_fig2
 ```
 
+## Supported browsers and maintenance
+
+The browser interface uses standard HTML, SVG and JavaScript without external
+services. For 0.6.0 it was exercised in Chromium (headless, through Playwright)
+for the figures and interface checks; its JavaScript behaviour is covered by
+Node-based contract tests in `tests/*.cjs`. Current versions of Chrome, Edge,
+Firefox and Safari are expected to work; please report any that do not.
+
+Questions and bug reports go to the GitHub issue tracker. Fixes are made on the
+latest minor release. The bundled ChEMBL 37 document table
+(`src/chemgridmap/data/`) is used only to name and link source documents; maps,
+classes and support are computed from the user's own export and do not depend
+on it. It is regenerated when a new ChEMBL release adds documents that exports
+commonly cite, and the version used is recorded in every run manifest.
+
 ## Citation
 
 After the accompanying paper is published, use the preferred citation recorded
 in [`CITATION.cff`](CITATION.cff). Until then, cite the ChemGridMap software
 version used for the analysis:
 
-> Qiu, Zhenming. ChemGridMap 0.5.0.
+> Qiu, Zhenming. ChemGridMap 0.6.0.
 
 ## License
 

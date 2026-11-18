@@ -19,7 +19,7 @@ async function setup() {
     getJSON:async(url,options)=>{requests.push({url,options});return url.endsWith('/input')?input:url.endsWith('/clear')?{job}:job;},
     Blob,URL:{createObjectURL(blob){downloaded.push(blob);return 'blob:test';},revokeObjectURL(){}},
   });
-  const names=['updateNewNavigation','showQueryInput','selectColumns','loadQueryInput','newMoleculeOptions','insertNewMolecules','removeQueryInput','bindNewMolecules','newListColumns','visibleNewMolecules','newListValue','renderNewList','downloadNewList','centerOnCurrentCell','format','countLabel','percentage','table','measuredLabel','showQuerySelection','referenceMapDetails', 'renderReferenceMap', 'newMoleculeWarning', 'newMoleculeInsertedMessage', 'showDataAudit','showSources','status','fail','legendItem','renderColorLegend','renderLegend','colorMap','reliabilityColor','projectionSVG'];
+  const names=['updateNewNavigation','showQueryInput','selectColumns','loadQueryInput','newMoleculeOptions','insertNewMolecules','removeQueryInput','bindNewMolecules','newListColumns','visibleNewMolecules','newListValue','renderNewList','downloadNewList','centerOnCurrentCell','format','countLabel','percentage','table','measuredLabel','showQuerySelection','neighborEvidenceNote','neighborEvidenceAgreement','evaluationAgreement','referenceMapDetails', 'renderReferenceMap', 'newMoleculeWarning', 'newMoleculeInsertedMessage', 'showDataAudit','showSources','status','fail','legendItem','renderColorLegend','renderLegend','colorMap','reliabilityColor','projectionSVG'];
   vm.runInContext(names.map(realFunction).join('\n'),env.context);
   env.context.bindNewMolecules();
   return {...env,$,requests,downloaded};
@@ -30,7 +30,7 @@ const scenarios={
     assert.equal($('query-csv').closest('form').id,'new-molecules-form');
     assert.equal($('query-smiles-col').hasAttribute('required'),true);
     assert.equal($('options').querySelector('#query-csv'),null);
-    assert.equal(document.querySelectorAll('[data-help]').length,80);
+    assert.equal(document.querySelectorAll('[data-help]').length,81);
     for(const language of ['en','zh']){
       api.setLanguage(language);context.updateNewNavigation();$('open-new-molecules').click();assert.equal($('new-molecules-dialog').open,true);
       assert.equal($('open-new-molecules').textContent,api.t('u8.add'));$('new-molecules-dialog').close();
@@ -78,15 +78,15 @@ const scenarios={
       assert.equal(cells[0].cell.classList.contains('reference-evidence-faded'),mode==='neighbor_evidence');
       if(['support','reliability'].includes(mode))for(const c of cells.slice(1))assert.equal(c.mark.getAttribute('fill'),'#dfe4e9');
       if(mode==='activity'){assert.equal(cells[1].mark.getAttribute('fill'),'#FFFFFF');assert.equal(cells[2].mark.getAttribute('fill'),'#c44e52');}
-      if(mode==='neighbor_evidence'){assert.equal(cells[2].mark.style['--evidence-color'],'#2a9d8f');assert.equal(cells[2].mark.style['--evidence-width'],'3');}
+      if(mode==='neighbor_evidence'){assert.equal(cells[2].mark.style['--evidence-color'],'#1f2933');assert.equal(cells[2].mark.style['--evidence-width'],'5');const frame=cells[2].cell.children.find(n=>n.getAttribute&&n.getAttribute('data-evidence-frame'));assert.ok(frame,'consistent evidence gets a coloured inner frame');assert.equal(frame.getAttribute('stroke'),'#2a9d8f');}
     }
     for(const [key,width,dash] of [['mixed','3','6 4'],['insufficient','3','1 4'],['none','1.5','none']]){cells[2].point.neighbor_evidence=key;context.colorMap();assert.equal(cells[2].mark.style['--evidence-width'],width);assert.equal(cells[2].mark.style['--evidence-dash'],dash);}
-    const css=fs.readFileSync(path.join(process.argv[2],'app.css'),'utf8');assert.equal(Number(css.match(/\.reference-evidence-faded\s*\{\s*opacity:\s*([.\d]+)/)[1]),.25);assert.match(css,/new-molecule-outline>rect[^}]*#173e34[^}]*1\.5 \* var\(--zoom-inverse/);assert.match(css,/new-evidence-outline>rect[^}]*var\(--evidence-width, 3\) \* var\(--zoom-inverse/);
+    const css=fs.readFileSync(path.join(process.argv[2],'app.css'),'utf8');assert.equal(Number(css.match(/\.reference-evidence-faded\s*\{\s*opacity:\s*([.\d]+)/)[1]),.35);assert.match(css,/\.reference-evidence-faded\s*\{[^}]*grayscale\(1\)/);assert.match(css,/new-molecule-outline>rect[^}]*#173e34[^}]*1\.5 \* var\(--zoom-inverse/);assert.match(css,/new-evidence-outline>rect[^}]*var\(--evidence-width, 3\) \* var\(--zoom-inverse/);
   },
   async inspector(){
     const {context,$,api}=await setup();
     for(const language of ['en','zh']){api.setLanguage(language);context.showQuerySelection({molecule:added,query_neighbors:[{measured_id:'R1',rank:1,tanimoto:.9}],records:[{document_chembl_id:'R1',raw_activity_value:10,raw_activity_unit:'nM',relation:'='}]});
-      assert.equal($('new-placement').textContent,api.t('u8.placement',{id:'R1',distance:'1.0'}));assert.match($('query-summary').textContent,language==='en'?/Disagrees with similar reference molecules/:/与相近的参照分子不一致/);
+      assert.equal($('new-placement').textContent,api.t('u8.placement',{id:'R1',distance:'1.0'}));assert.match($('query-summary').textContent,language==='en'?/Different class from the supported similar reference molecules \(possible activity cliff/:/与有支持的相似参照分子类别不同（可能是活性悬崖/);
       assert.equal($('new-records').querySelectorAll('tbody tr').length,1);assert.ok($('query-neighbors').textContent.includes(api.t('u8.disclaimer')));
       context.showQuerySelection({molecule:{...added,reference_support_assessed:false},query_neighbors:[],records:[]});assert.equal($('new-support-note').hidden,false);assert.equal($('new-support-note').textContent,api.t('u8.supportNotAssessed'));
     }
@@ -106,6 +106,7 @@ const scenarios={
     cell.querySelector=selector=>selector===':scope > rect'?rect:null;
     Object.assign(context,{mapCells:[cell],points:[reference],currentCell:{row:0,col:0},neighborRelations:new Map(),highlightedGroup:'',transform:{x:0,y:0}});
     $('measurement-filter').value='all';vm.runInContext(realFunction('highlight'),context);context.highlight();
+    $('class-filter').value=reference.activity_class==='active'?'inactive':'active';context.highlight();assert.ok(cell.classList.contains('group-faded'),'class emphasis fades other classes');$('class-filter').value=reference.activity_class;context.highlight();assert.ok(!cell.classList.contains('group-faded'));$('class-filter').value='all';context.highlight();
     const outlines=svg.children.find(item=>item.dataset.mapOutlines);assert.ok(outlines);assert.equal(outlines.parentNode,svg);assert.equal(outlines.children[0].getAttribute('transform'),'translate(100,200)');
     cell.getBoundingClientRect=()=>({left:20,top:30,width:10,height:10});$('map-viewport').getBoundingClientRect=()=>({left:0,top:0,width:100,height:100});context.centerOnCurrentCell();assert.equal(context.transform.x,25);assert.equal(context.transform.y,15);
   },
@@ -216,7 +217,7 @@ const scenarios={
       {similar:3,supported:0,en:'3 similar reference molecules; 0 with supported classes.',zh:'相近的参照分子 3 个，其中类别可靠的 0 个。'},
       {similar:1,supported:1,classes:'active',en:'1 similar reference molecule; 1 with supported classes: active.',zh:'相近的参照分子 1 个，其中类别可靠的 1 个：活性。'},
       {similar:3,supported:2,en:'3 similar reference molecules; 2 with supported classes: active / inactive.',zh:'相近的参照分子 3 个，其中类别可靠的 2 个：活性 / 非活性。'},
-      {similar:1,supported:0,assessed:false,en:'Similar reference molecules: 1; observed classes: medium.',zh:'相近参照分子 1 个；实测类别 中等活性。'}
+      {similar:1,supported:0,assessed:false,en:'Similar reference molecules: 1; displayed classes: medium.',zh:'相近参照分子 1 个；显示类别 中等活性。'}
     ];
     for(const language of ['en','zh']){
       api.setLanguage(language);

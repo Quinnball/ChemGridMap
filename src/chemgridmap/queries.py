@@ -371,6 +371,39 @@ def _new_molecules_svg(reference_result, queries, path, *, rows, cols, lower, up
     Path(path).write_text("\n".join(parts), encoding="utf-8", newline="\n")
 
 
+def placement_recall(reference, queries, *, radius=2, n_bits=2048, k=10, reference_fingerprints=None):
+    """Recall of each placed molecule's fingerprint neighbours among its grid neighbours.
+
+    The same quantity as the neighbour recall of reference cells, restricted to reference
+    molecules: the share of the ``k`` most similar reference molecules (Morgan Tanimoto,
+    ties at the kth value retained) that are also among the ``k`` reference cells nearest
+    to the cell where the molecule was placed (Euclidean cell distance, ties retained).
+    A low value shows that the molecule sits away from its structural neighbours, for
+    example because their cluster had no empty cell left.
+    """
+    out = queries.copy()
+    generator = rdFingerprintGenerator.GetMorganGenerator(radius=int(radius), fpSize=int(n_bits))
+    fps = reference_fingerprints if reference_fingerprints is not None else [
+        generator.GetFingerprint(Chem.MolFromSmiles(s)) for s in reference.canonical_smiles]
+    cells = np.column_stack([reference.grid_row.astype(float), reference.grid_col.astype(float)])
+    k = int(min(k, len(reference)))
+    recall, shared, counted = [], [], []
+    for _, query in out.iterrows():
+        similarity = np.asarray(DataStructs.BulkTanimotoSimilarity(
+            generator.GetFingerprint(Chem.MolFromSmiles(query.canonical_smiles)), fps))
+        kth = np.sort(similarity)[::-1][k - 1]
+        fingerprint_set = set(np.flatnonzero(similarity >= kth - 1e-12))
+        distance = np.hypot(cells[:, 0] - float(query.grid_row), cells[:, 1] - float(query.grid_col))
+        kth_distance = np.sort(distance)[k - 1]
+        grid_set = set(np.flatnonzero(distance <= kth_distance + 1e-12))
+        common = len(fingerprint_set & grid_set)
+        recall.append(common / len(fingerprint_set)); shared.append(common); counted.append(len(fingerprint_set))
+    out["placement_recall"] = recall
+    out["placement_recall_shared"] = shared
+    out["placement_recall_fingerprint_count"] = counted
+    return out
+
+
 def insert_new_molecules(
     reference_result, query_data, *, output_dir=None, input_bytes=None,
     input_filename="new_molecules.csv", smiles_col=None, id_col=None, value_col=None,
@@ -546,6 +579,8 @@ def insert_new_molecules(
     rows = int(settings.get("grid_rows", reference_result.metrics.iloc[0].grid_side))
     cols = int(settings.get("grid_cols", rows))
     queries = place_new_molecules(reference, queries, grid_rows=rows, grid_cols=cols)
+    queries = placement_recall(reference, queries, radius=radius, n_bits=n_bits,
+                               reference_fingerprints=reference_fps)
     for group in groups:
         group["n_new_members"] = group["n_query_members"]
     report["reference_support_assessed"] = bool(support_assessed)
