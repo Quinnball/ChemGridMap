@@ -1,0 +1,54 @@
+target_id,symbol,pref_name,development_target
+CHEMBL1994,NR3C2,Mineralocorticoid receptor,False
+CHEMBL2599,SYK,Tyrosine-protein kinase SYK,False
+CHEMBL1829,HDAC3,Histone deacetylase 3,False
+CHEMBL206,ESR1,Estrogen receptor,False
+CHEMBL1991,IKBKB,Inhibitor of nuclear factor kappa-B kinase subunit beta,False
+CHEMBL2189121,KRAS,GTPase KRas,False
+CHEMBL2243,FAAH,Fatty-acid amide hydrolase 1,False
+CHEMBL284,DPP4,Dipeptidyl peptidase 4,False
+CHEMBL333,MMP2,72 kDa type IV collagenase,False
+CHEMBL4142,FGFR2,Fibroblast growth factor receptor 2,False
+CHEMBL1985,GCGR,Glucagon receptor,False
+CHEMBL2998,P2RX3,P2X purinoceptor 3,False
+CHEMBL298,CCKBR,Gastrin/cholecystokinin type B receptor,False
+CHEMBL4302,ABCB1,ATP-dependent translocase ABCB1,False
+CHEMBL2971,JAK2,Tyrosine-protein kinase JAK2,False
+CHEMBL2820,F11,Coagulation factor XI,False
+CHEMBL4235,HSD11B1,11-beta-hydroxysteroid dehydrogenase 1,False
+CHEMBL1163125,BRD4,Bromodomain-containing protein 4,False
+CHEMBL4625,BCL2L1,Bcl-2-like protein 1,False
+CHEMBL4550,ALOX5AP,Arachidonate 5-lipoxygenase-activating protein,False
+CHEMBL1862,ABL1,Tyrosine-protein kinase ABL1,False
+CHEMBL5903,ACVR1,Activin receptor type-1,False
+CHEMBL3830,AAK1,AP2-associated protein kinase 1,False
+CHEMBL1980,SCN5A,Sodium channel protein type 5 subunit alpha,False
+CHEMBL4441,CXCR3,C-X-C chemokine receptor type 3,False
+CHEMBL1906,RAF1,RAF proto-oncogene serine/threonine-protein kinase,False
+CHEMBL2276,MAPK8,Mitogen-activated protein kinase 8,False
+CHEMBL325,HDAC1,Histone deacetylase 1,False
+CHEMBL2000,KLKB1,Plasma kallikrein,False
+CHEMBL234,DRD3,D(3) dopamine receptor,False
+CHEMBL233,OPRM1,Mu-type opioid receptor,False
+CHEMBL5113,HCRTR1,Orexin/Hypocretin receptor type 1,False
+CHEMBL1833,HTR2B,5-hydroxytryptamine receptor 2B,False
+CHEMBL3371,HTR6,5-hydroxytryptamine receptor 6,False
+CHEMBL238,SLC6A3,Sodium-dependent dopamine transporter,False
+CHEMBL4005,PIK3CA,"Phosphatidylinositol 4,5-bisphosphate 3-kinase catalytic subunit alpha isoform",False
+CHEMBL1867,ADRA2A,Alpha-2A adrenergic receptor,False
+CHEMBL236,OPRD1,Delta-type opioid receptor,False
+CHEMBL3242,CA12,Carbonic anhydrase 12,False
+CHEMBL223,ADRA1D,Alpha-1D adrenergic receptor,False
+CHEMBL219,DRD4,D(4) dopamine receptor,False
+CHEMBL253,CNR2,Cannabinoid receptor 2,False
+CHEMBL217,DRD2,D(2) dopamine receptor,False
+CHEMBL245,CHRM3,Muscarinic acetylcholine receptor M3,False
+CHEMBL244,F10,Coagulation factor X,False
+CHEMBL229,ADRA1A,Alpha-1A adrenergic receptor,False
+CHEMBL224,HTR2A,5-hydroxytryptamine receptor 2A,False
+CHEMBL4429,TACR3,Neuromedin-K receptor,False
+CHEMBL261,CA1,Carbonic anhydrase 1,False
+CHEMBL5024,ATR,Serine/threonine-protein kinase ATR,False
+CHEMBL204,F2,Prothrombin,True
+CHEMBL205,CA2,Carbonic anhydrase 2,True
+CHEMBL240,KCNH2,Voltage-gated inwardly rectifying potassium channel KCNH2,True

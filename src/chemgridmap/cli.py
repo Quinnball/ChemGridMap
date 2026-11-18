@@ -4,26 +4,90 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import math
 import sys
+import zipfile
 from pathlib import Path
 from typing import Optional, Sequence
 
 import pandas as pd
 
 from .chembl import curate_chembl_activity_data, save_chembl_curation
+from .evidence import annotate_activity_confidence, prepare_generic_activity_records
 from .pipeline import build_grid_map
+
+
+def _core_min_coverage(value: str) -> float:
+    coverage = float(value)
+    if not 0.5 <= coverage <= 1:
+        raise argparse.ArgumentTypeError("Core coverage target must be between 0.5 and 1 (inclusive).")
+    return coverage
+
+
+def _support_level(value: str) -> float:
+    level = float(value)
+    if not 0.5 < level < 1:
+        raise argparse.ArgumentTypeError("Support level must be between 0.5 and 1 (exclusive).")
+    return level
+
+
+def _offset_min_shared(value: str) -> int:
+    count = int(value)
+    if count < 2:
+        raise argparse.ArgumentTypeError("Offset minimum shared entries must be at least 2.")
+    return count
+
+
+def _positive_float(value: str) -> float:
+    number = float(value)
+    if not number > 0:
+        raise argparse.ArgumentTypeError("Value must be greater than 0.")
+    return number
+
+
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("Value must be a positive integer.")
+    return number
+
+
+def _assumed_sigma(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number) or number <= 0:
+        raise argparse.ArgumentTypeError("Assumed sigma must be finite and greater than 0.")
+    return number
+
+
+def _offset_sign_agreement(value: str) -> float:
+    agreement = float(value)
+    if not 0.5 < agreement <= 1:
+        raise argparse.ArgumentTypeError("Offset sign agreement must lie in (0.5, 1].")
+    return agreement
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="chemgridmap",
+        usage="%(prog)s [inspect | compare] [options] [input]",
         description=(
             "Convert molecular representations or existing 2D coordinates into "
-            "a one-molecule-per-cell grid chemical map."
+            "a one-molecule-per-cell grid chemical map. Use 'chemgridmap inspect' "
+            "to retrieve the records behind an existing cell."
         ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         epilog="To retrieve measurements behind an existing cell, run: chemgridmap inspect --help",
     )
-    parser.add_argument("input", type=Path, help="Input CSV file.")
+    parser.add_argument("input", type=Path, nargs="?", help="Input CSV file.")
+    parser.add_argument(
+        "--example",
+        choices=["caii"],
+        help=(
+            "Use a packaged example instead of an input file. 'caii' selects the "
+            "CA II export and automatically uses ChEMBL input mode with CHEMBL205."
+        ),
+    )
     parser.add_argument(
         "--input-format",
         choices=["molecule", "chembl"],
@@ -34,19 +98,58 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "-o", "--output-dir", type=Path, default=Path("gridmap_output")
+        "-o", "--output-dir", type=Path, default=Path("gridmap_output"),
+        help="Directory for the map, audit tables and run manifest.",
     )
     parser.add_argument("--name", default="grid_map", help="Output file prefix.")
-    parser.add_argument("--smiles-col", default="smiles")
-    parser.add_argument("--value-col")
-    parser.add_argument("--label-col")
+    parser.add_argument(
+        "--smiles-col", "--smiles-column", dest="smiles_col", default="smiles",
+        help="SMILES column in molecule-table input.",
+    )
+    parser.add_argument(
+        "--value-col", "--value-column", dest="value_col",
+        help="Activity value column in molecule-table input.",
+    )
+    units = parser.add_mutually_exclusive_group()
+    units.add_argument(
+        "--value-unit", choices=["p", "M", "mM", "uM", "nM", "pM"], default=None,
+        help="Activity unit (default p); p means an existing -log10 molar value.",
+    )
+    units.add_argument(
+        "--unit-column", help="Per-record concentration unit column (M, mM, uM, nM, pM; micro signs are accepted for uM).",
+    )
+    parser.add_argument(
+        "--assumed-sigma", type=_assumed_sigma,
+        help="Use this positive finite log-unit SD for record-table class support; it is not estimated.",
+    )
+    parser.add_argument("--query-file", type=Path, help="New unmeasured molecules to insert into the completed reference grid (CSV/TSV).")
+    parser.add_argument("--query-smiles-column", help="Query SMILES column; detected automatically when omitted.")
+    parser.add_argument("--query-id-column", help="Query identifier column; otherwise generate N00001, N00002, ...")
+    parser.add_argument(
+        "--label-col",
+        help="Optional activity-class label column in molecule-table input.",
+    )
+    parser.add_argument(
+        "--compound-column",
+        help="Compound identifier column for a generic activity-record CSV.",
+    )
+    parser.add_argument(
+        "--document-column",
+        help="Evidence-unit column: document, batch, date or laboratory; repeats within one unit are not independent.",
+    )
+    parser.add_argument(
+        "--relation-column",
+        help="Optional relation column for a generic activity-record CSV; only '=' is retained.",
+    )
     parser.add_argument(
         "--representation",
         choices=["morgan", "descriptors", "embedding"],
         default="morgan",
+        help="Molecular representation used for projection and neighbour recall.",
     )
     parser.add_argument(
-        "--projection", choices=["pca", "tsne", "umap"], default="pca"
+        "--projection", choices=["pca", "tsne", "umap"], default="umap",
+        help="Two-dimensional projection method.",
     )
     parser.add_argument(
         "--umap-metric",
@@ -59,11 +162,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--x-col", help="Existing 2D x-coordinate column.")
     parser.add_argument("--y-col", help="Existing 2D y-coordinate column.")
-    parser.add_argument("--embedding-prefix", default="emb_")
-    parser.add_argument("--radius", type=int, default=2)
-    parser.add_argument("--n-bits", type=int, default=2048)
-    parser.add_argument("--lower-threshold", type=float, default=6.0)
-    parser.add_argument("--upper-threshold", type=float, default=7.0)
+    parser.add_argument(
+        "--embedding-prefix", default="emb_",
+        help="Column prefix for embedding representation input.",
+    )
+    parser.add_argument(
+        "--radius", type=int, default=2,
+        help="Morgan fingerprint radius.",
+    )
+    parser.add_argument(
+        "--n-bits", type=int, default=2048,
+        help="Morgan fingerprint bit-vector length.",
+    )
+    parser.add_argument(
+        "--grouping", choices=["butina", "external", "none"], default="butina",
+        help="Structure-grouping method.",
+    )
+    parser.add_argument("--group-similarity", type=float, default=.6,
+                        help="Morgan Tanimoto threshold to a Butina center; not an all-pairs bound.")
+    parser.add_argument("--cluster-col", help="Existing group column in molecule-table input.")
+    parser.add_argument("--cluster-source", help="Provenance of external group assignments.")
+    parser.add_argument(
+        "--lower-threshold", type=float, default=6.0,
+        help="Upper pActivity bound of the inactive class.",
+    )
+    parser.add_argument(
+        "--upper-threshold", type=float, default=7.0,
+        help="Lower pActivity bound of the active class.",
+    )
     parser.add_argument(
         "--target-id",
         help="Expected Target ChEMBL ID, for example CHEMBL205.",
@@ -77,7 +203,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--conflict-range-threshold",
         type=float,
         default=1.0,
-        help="pChEMBL range above which repeated measurements are flagged.",
+        help="pChEMBL range above which repeated measurements are marked as a wide record range.",
     )
     parser.add_argument(
         "--keep-potential-duplicates",
@@ -102,8 +228,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--structure-policy", choices=["auto", "parent", "as-recorded"],
                         default="auto", help="Normalize parent structures, or explicitly retain record forms.")
     parser.add_argument("--assay-types", nargs="+", help="Optional ChEMBL assay-type filter; not a reliability score.")
-    parser.add_argument("--random-state", type=int, default=42)
-    parser.add_argument("-k", type=int, default=10)
+    parser.add_argument(
+        "--random-state", type=int, default=42,
+        help="Random seed for projection and tie-breaking.",
+    )
+    parser.add_argument(
+        "-k", type=int, default=10,
+        help="Number of representation neighbours used for reliability.",
+    )
     parser.add_argument(
         "--trustworthiness-sample-size",
         type=int,
@@ -122,7 +254,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--grid-occupancy",
         type=float,
         default=0.40,
-        help="Target fraction of occupied candidate cells (default: 0.40).",
+        help="Target fraction of occupied candidate cells.",
     )
     parser.add_argument(
         "--coordinate-scaling",
@@ -144,12 +276,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=128,
         help=(
-            "Initial nearest candidate cells per molecule in adaptive sparse assignment "
-            "(default: 128)."
+            "Initial nearest candidate cells per molecule in adaptive sparse assignment."
         ),
     )
     parser.add_argument("--sparse-max-neighbors", type=int, default=1024,
-                        help="Candidate cap for adaptive sparse matching (default: 1024).")
+                        help="Candidate cap for adaptive sparse matching.")
     parser.add_argument("--fixed-sparse-candidates", action="store_true",
                         help="Disable candidate expansion, for explicit calibration only.")
     parser.add_argument(
@@ -168,19 +299,112 @@ def build_parser() -> argparse.ArgumentParser:
         default=["svg", "png", "pdf"],
         help="Map formats to write.",
     )
+    parser.add_argument(
+        "--grid-refinement", choices=["neighbors", "none"], default="neighbors",
+        help="Refine the minimum-displacement grid so representation neighbours sit closer "
+             "('none' reproduces 0.4.0 layouts).")
+    parser.add_argument(
+        "--core-rule", choices=["coverage", "coverage_brics", "coverage_recap", "most_frequent", "fmcs"], default="coverage",
+        help="Group core: largest scaffold or ring fragment (optionally including BRICS or RECAP fragments) "
+             "covering --core-min-coverage of members, "
+             "the most frequent scaffold (0.4.0 rule), or FMCS.")
+    parser.add_argument(
+        "--fmcs-timeout", type=int, default=1,
+        help="FMCS search budget in seconds. Timeout may make results machine-dependent.")
+    parser.add_argument(
+        "--jobs", type=_positive_int, default=1,
+        help="Core worker processes; small maps and FMCS remain serial. "
+             "Only the browser reads CHEMGRIDMAP_JOBS.")
+    parser.add_argument(
+        "--core-min-coverage", type=_core_min_coverage, default=0.8,
+        help="Coverage target for coverage/FMCS rules; range: 0.5–1.")
+    parser.add_argument(
+        "--no-activity-confidence", action="store_true",
+        help="Skip document-level class-support estimation.")
+    parser.add_argument(
+        "--evidence-model", choices=["gaussian", "exclude-flagged"], default="gaussian",
+        help="Activity evidence model.")
+    parser.add_argument(
+        "--support-level", type=_support_level, default=0.8,
+        help="Minimum class support for a supported display.")
+    parser.add_argument(
+        "--offset-display", choices=["uncertain", "none"], default="none",
+        help="Leave display unchanged, or show entries touched by systematic document offsets as uncertain.")
+    parser.add_argument(
+        "--offset-min-shared", type=_offset_min_shared, default=3,
+        help="Minimum shared entries for a document-offset comparison.")
+    parser.add_argument(
+        "--offset-min-difference", type=_positive_float, default=1.0,
+        help="Minimum absolute median offset in log units.")
+    parser.add_argument(
+        "--offset-sign-agreement", type=_offset_sign_agreement, default=0.8,
+        help="Minimum fraction of differences sharing the median sign.")
+    parser.add_argument(
+        "--no-merge-identical-documents", action="store_true",
+        help="Keep documents with identical entry medians as separate evidence units.")
+    parser.add_argument(
+        "--identity-conflicts", choices=["error", "exclude"], default="error",
+        help="Stop on parent identities with multiple structures, or exclude and report them.")
+    parser.add_argument(
+        "--identity-rule",
+        choices=["inchikey", "normalized-structure"],
+        default="inchikey",
+        help=(
+            "Identity-conflict rule. Use normalized-structure to reproduce "
+            "analyses that predate version 0.5."
+        ),
+    )
+    parser.add_argument(
+        "--map-color-modes", nargs="+", default=[],
+        choices=["activity", "class_support", "neighbor_recall", "structure_group"],
+        help="Additional map layers to export as SVG and, when requested in --output-formats, PNG.")
     return parser
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "compare":
+        from .comparison import main as compare_main
+        return compare_main(argv[1:])
     if argv and argv[0] == "inspect":
         from .inspection import main as inspect_main
         return inspect_main(argv[1:])
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    # The default is applied after parsing: with default="p", Python 3.10 and 3.11 do not report
+    # "--value-unit p --unit-column ..." as a conflict, because the value equals the default.
+    if args.value_unit is None:
+        args.value_unit = "p"
+    if args.example:
+        if args.input is not None:
+            parser.error("--example cannot be combined with an input file.")
+        args.input = Path(__file__).with_name("data") / "chembl205_ic50.csv"
+        args.input_format = "chembl"
+        args.target_id = "CHEMBL205"
+    elif args.input is None:
+        parser.error("an input file or --example is required.")
+    if args.assumed_sigma is not None:
+        if args.no_activity_confidence:
+            parser.error("--assumed-sigma cannot be combined with --no-activity-confidence.")
+        if args.input_format != "chembl" and not args.compound_column:
+            parser.error("--assumed-sigma requires an activity-record table; use --compound-column with record-table input.")
+    if args.input_format == "chembl" and (args.value_unit != "p" or args.unit_column):
+        parser.error("Unit conversion is for generic record or molecule tables; ChEMBL input uses its existing pChEMBL fields.")
+    if not args.query_file and (args.query_smiles_column or args.query_id_column):
+        parser.error("Query column options require --query-file.")
     data = pd.read_csv(args.input, sep=None, engine="python", encoding="utf-8-sig")
     source = {"input_file": args.input.name,
-              "input_file_sha256": hashlib.sha256(args.input.read_bytes()).hexdigest()}
+              "input_file_sha256": hashlib.sha256(args.input.read_bytes()).hexdigest(),
+            "reliability_parameters": {"activity_confidence": not args.no_activity_confidence,
+                                         "evidence_model": args.evidence_model,
+                                         "merge_identical_documents": not args.no_merge_identical_documents,
+                                         "confidence_threshold": args.support_level,
+                                         "offset_display": args.offset_display,
+                                         "offset_min_shared": args.offset_min_shared,
+                                         "offset_threshold": args.offset_min_difference,
+                                         "offset_sign_agreement": args.offset_sign_agreement}}
     curation_files = {}
+    query_structure_policy = "canonical"
     if args.input_format == "chembl":
         curation = curate_chembl_activity_data(
             data,
@@ -193,29 +417,114 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             molecule_identity=args.molecule_identity,
             structure_policy=args.structure_policy,
             assay_types=args.assay_types,
+            identity_conflicts=args.identity_conflicts,
+            identity_rule=args.identity_rule,
         )
         curation.report["input_file"] = str(args.input.resolve())
         curation.report["input_file_sha256"] = source["input_file_sha256"]
         source["curation_parameters"] = curation.report["parameters"]
+        query_structure_policy = curation.report["parameters"]["structure_policy"]
+        document_column = args.document_column or curation.report["detected_columns"].get("document_id")
+        if not args.no_activity_confidence and (document_column or args.assumed_sigma is not None):
+            try:
+                curation.molecules, fit = annotate_activity_confidence(
+                    curation.molecules, curation.retained_records, lower=args.lower_threshold,
+                    upper=args.upper_threshold, value="activity_pchembl_raw", document=document_column,
+                    merge_identical=not args.no_merge_identical_documents,
+                    model=args.evidence_model,
+                    confidence_threshold=args.support_level,
+                    offset_display=args.offset_display,
+                    offset_min_shared=args.offset_min_shared,
+                    offset_threshold=args.offset_min_difference,
+                    offset_sign_agreement=args.offset_sign_agreement,
+                    assumed_sigma=args.assumed_sigma)
+                curation.report["activity_confidence"] = fit
+                source["activity_confidence"] = fit
+                curation.report["warnings"].extend(fit.get("warnings", []))
+            except ValueError as exc:
+                if args.assumed_sigma is not None or args.document_column:
+                    raise
+                curation.report["warnings"].append(f"Activity class support was not estimated: {exc}")
+        elif not args.no_activity_confidence:
+            curation.report["warnings"].append(
+                "Activity class support was not estimated: the input has no document identifiers. "
+                "Use --assumed-sigma to calculate support with an explicitly assumed log-unit SD.")
         curation_files = save_chembl_curation(
             curation,
             output_dir=args.output_dir,
             name=args.name,
         )
         data = curation.molecules
+        from .provenance import file_digests
+        source["curation_outputs"] = file_digests(curation_files)
         smiles_col = "canonical_smiles"
         value_col = "activity_pchembl"
         label_col = "activity_class"
         duplicate_policy = "error"
     else:
         curation = None
+        generic_audit = None
         smiles_col = args.smiles_col
         value_col = args.value_col
         label_col = args.label_col
         duplicate_policy = args.duplicate_policy
+        if args.compound_column:
+            if not value_col:
+                raise ValueError("--value-column is required with --compound-column.")
+            confidence = bool((args.document_column or args.assumed_sigma is not None) and not args.no_activity_confidence)
+            data, records, fit, generic_report = prepare_generic_activity_records(
+                data,
+                compound_column=args.compound_column,
+                value_column=value_col,
+                document_column=args.document_column,
+                smiles_column=smiles_col,
+                relation_column=args.relation_column,
+                lower=args.lower_threshold,
+                upper=args.upper_threshold,
+                conflict_range_threshold=args.conflict_range_threshold,
+                confidence=confidence,
+                confidence_threshold=args.support_level,
+                merge_identical=not args.no_merge_identical_documents,
+                evidence_model=args.evidence_model,
+                offset_display=args.offset_display,
+                offset_min_shared=args.offset_min_shared,
+                offset_threshold=args.offset_min_difference,
+                offset_sign_agreement=args.offset_sign_agreement,
+                value_unit=args.value_unit,
+                unit_column=args.unit_column,
+                assumed_sigma=args.assumed_sigma,
+            )
+            source["generic_activity"] = generic_report
+            generic_audit = generic_report
+            if fit is not None:
+                source["activity_confidence"] = fit
+            smiles_col = "canonical_smiles"
+            value_col = "activity_pchembl"
+            label_col = "activity_class"
+            duplicate_policy = "error"
+            if args.value_unit != "p" or args.unit_column or args.assumed_sigma is not None :
+                args.output_dir.mkdir(parents=True, exist_ok=True)
+                if "activity_pchembl_raw" not in records:
+                    records["activity_pchembl_raw"] = records["pchembl_value"]
+                for key, table in (("retained_records", records), ("molecule_level", data)):
+                    path = args.output_dir / f"{args.name}_{key}.csv"
+                    table.to_csv(path, index=False, encoding="utf-8", lineterminator="\n")
+                    curation_files[key] = str(path)
+                path = args.output_dir / f"{args.name}_curation_report.json"
+                path.write_text(json.dumps(generic_report, indent=2), encoding="utf-8", newline="\n")
+                curation_files["curation_report"] = str(path)
+                from .provenance import file_digests
+                source["curation_outputs"] = file_digests(curation_files)
+
+    query_data = None
+    if args.query_file:
+        query_data = pd.read_csv(args.query_file, sep=None, engine="python", encoding="utf-8-sig",
+                                 dtype={args.query_id_column: str} if args.query_id_column else None)
 
     result = build_grid_map(
         data,
+        grouping=args.grouping, group_similarity=args.group_similarity,
+        cluster_col=args.cluster_col, cluster_source=args.cluster_source,
         output_dir=args.output_dir,
         name=args.name,
         smiles_col=smiles_col,
@@ -245,28 +554,80 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         render_detail=args.render_detail,
         output_formats=args.output_formats,
         provenance=source,
+        grid_refinement=args.grid_refinement,
+        core_rule=args.core_rule,
+        fmcs_timeout=args.fmcs_timeout,
+        jobs=args.jobs,
+        core_min_coverage=args.core_min_coverage,
+        confidence_threshold=args.support_level,
+        offset_display=args.offset_display,
+        offset_min_shared=args.offset_min_shared,
+        offset_threshold=args.offset_min_difference,
+        offset_sign_agreement=args.offset_sign_agreement,
+        map_color_modes=args.map_color_modes,
+        value_unit=args.value_unit if args.input_format == "molecule" and not args.compound_column else "p",
+        unit_column=args.unit_column if args.input_format == "molecule" and not args.compound_column else None,
     )
     result.output_files.update(curation_files)
+    archive = args.output_dir / (args.name + "_results.zip")
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+        for path in result.output_files.values():
+            bundle.write(path, Path(path).name)
+    result.output_files["results_zip"] = str(archive)
+    if query_data is not None:
+        from .queries import insert_new_molecules
+        result.new_molecules = insert_new_molecules(
+            result, query_data, output_dir=args.output_dir,
+            input_bytes=args.query_file.read_bytes(), input_filename=args.query_file.name,
+            smiles_col=args.query_smiles_column, id_col=args.query_id_column,
+            structure_policy=query_structure_policy,
+            reference_target_id=curation.report["parameters"]["target_id"] if curation else None)
+        result.query_report = result.new_molecules.report
 
     report = result.preprocessing
     print(
         "Prepared {output_rows} molecules from {input_rows} input rows "
         "({invalid_smiles} invalid SMILES).".format(**report)
     )
+    if report.get("excluded_reasons"):
+        print("Activity/structure exclusions: " + json.dumps(report["excluded_reasons"], sort_keys=True))
+    if result.query_report:
+        print("Query checks: " + json.dumps({key: result.query_report[key] for key in (
+            "input_rows", "mapped", "invalid_smiles", "duplicate_query", "in_reference")}, sort_keys=True))
+        for warning in result.query_report.get("warnings", []):
+            print("Warning: {}".format(warning))
     if curation is not None:
         audit = curation.report
         print(
             "ChEMBL curation retained {retained_activity_records} records and "
             "produced {unique_molecules} unique molecules "
-            "({repeated_conflicted_molecules} conflicted repeats).".format(
+            "({repeated_conflicted_molecules} with a wide record range).".format(
                 **audit
             )
         )
         for warning in audit["warnings"]:
             print("Warning: {}".format(warning))
+    elif generic_audit is not None:
+        for warning in generic_audit.get("warnings", []):
+            print("Warning: {}".format(warning))
+    fit = source.get("activity_confidence")
+    if fit is not None:
+        max_df_share = fit.get("max_entry_degrees_of_freedom_share")
+        max_sumsq_share = fit.get("max_entry_sum_of_squares_share")
+        max_entry = fit.get("max_entry_id")
+        if max_entry is not None and fit.get("method") != "literature_fallback":
+            print(
+                "Largest sigma_doc contribution: {} (degrees of freedom {:.1%}; "
+                "pooled sum of squares {:.1%}).".format(
+                    max_entry, max_df_share, max_sumsq_share
+                )
+            )
     print("Saved files:")
     for key, path in result.output_files.items():
         print("  {:12s} {}".format(key, path))
+    if result.new_molecules is not None:
+        for key, path in result.new_molecules.output_files.items():
+            print("  {:12s} {}".format(key, path))
     return 0
 
 

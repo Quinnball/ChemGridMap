@@ -4,526 +4,652 @@
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg)](https://www.python.org/)
 
-ChemGridMap turns a ChEMBL activity export into an inspectable
-one-molecule-per-cell chemical map. A single command can validate the downloaded
-records, aggregate repeated measurements to molecule-level median pChEMBL
-values, calculate a molecular representation and two-dimensional projection,
-assign every molecule to a unique grid cell, and export the final map.
+ChemGridMap turns molecular structures and pActivity measurements into an
+auditable one-molecule-per-cell chemical map. It preserves source records,
+separates structure groups from map position, and exposes activity support,
+neighbor recall and group-core coverage as distinct reliability layers.
+Use it from Python, the command line or a local browser interface.
 
-The same program also accepts already curated molecule tables, external learned
-embedding columns, and existing two-dimensional coordinates. Representation,
-projection, curation reports, and final grid coordinates remain separate in the
-outputs so that the transformation can be audited.
+![Three reliability layers and core-aligned structural comparison](docs/structure_comparison.png)
 
-ChemGridMap implements and extends the established molecular-grid-map concept;
-it does not claim the regular-grid layout or linear-assignment method as new.
-Its contribution is the open, auditable ChEMBL-to-map workflow and explicit
-projection-to-grid validation. See Yoshimori, Tanoue, and Bajorath,
-https://doi.org/10.1021/acsomega.9b00595.
+## Install
 
-[![ChemGridMap: 889 CA II molecules with an enlarged, source-matched nine-cell structure view](docs/chemgridmap_demo.png)](docs/chemgridmap_demo.svg)
+Python 3.10 or newer is required; Python 3.12 is recommended. UMAP is installed
+with the core package.
 
-The blue box and the enlarged panel show the same nine cells from the archived
-CHEMBL205 map. Pale activity fills keep the molecular structures visible;
-identifiers and median pChEMBL values remain attached to each molecule.
-[Open the vector figure](docs/chemgridmap_demo.svg) to zoom without losing detail.
-The [plotting table](docs/chemgridmap_demo_data.csv) and
-[drawing script](scripts/build_readme_figure.py) reproduce this preview without
-recomputing the projection or changing cell positions.
-
-## Installation
-
-Version 0.3.0 adds source-record inspection, parent-structure handling, and
-adaptive sparse matching, with a local browser interface using the same core.
-Archived analyses record the version actually used;
-later interface fixes do not overwrite their original manifests.
-
-Use Python 3.10 or 3.12 in a virtual environment; Python 3.12 is recommended.
-Download the source from [GitHub Releases](https://github.com/Quinnball/ChemGridMap/releases),
-extract it, and install from that directory:
+After the 0.6.0 PyPI release:
 
 ```bash
+python -m pip install chemgridmap
+```
+
+For the current GitHub source:
+
+```bash
+python -m pip install "git+https://github.com/Quinnball/ChemGridMap.git"
+```
+
+For development:
+
+```bash
+git clone https://github.com/Quinnball/ChemGridMap.git
+cd ChemGridMap
 python -m venv .venv
-# macOS / Linux
 source .venv/bin/activate
-# Windows PowerShell: .venv\Scripts\Activate.ps1
-python -m pip install ".[umap]"
-chemgridmap --help
+python -m pip install -e ".[dev]"
 ```
 
-Alternatively, install the tagged source directly, without cloning the repository:
+On Windows PowerShell, activate the environment with
+`.venv\Scripts\Activate.ps1`.
+
+The CI suite is configured for Python 3.10 and 3.12 on Linux, macOS and
+Windows. CI resolves current compatible dependency versions; each run manifest
+records the versions actually used. The exact dependency set used to prepare
+the revision environment is pinned in
+[`requirements-paper.lock.txt`](requirements-paper.lock.txt), including
+numba, pynndescent, llvmlite and UMAP. The versions in `pyproject.toml` are
+minimum bounds; a separate CI job installs exactly those lowest versions
+([`ci/minimum-constraints.txt`](ci/minimum-constraints.txt)) on Python 3.10
+and runs the full test suite.
+
+## Quick start
+
+Generate a map from the CA II export bundled in the installed package:
 
 ```bash
-python -m pip install "chemgridmap[umap] @ https://github.com/Quinnball/ChemGridMap/archive/refs/tags/v0.3.0.zip"
+chemgridmap --example caii --output-dir caii_map
 ```
 
-The release contains a Python package, not a separate desktop app or a hosted
-service. RDKit and the other dependencies are installed by pip. UMAP is optional;
-omit `[umap]` for a smaller installation using PCA. No GitHub account or API key
-is needed to use the downloaded tool. ChEMBL data are supplied as local CSV files.
+`--example caii` selects the packaged data and sets
+`--input-format chembl --target-id CHEMBL205`; it cannot be combined with an
+input-file argument.
 
-### Try the real dataset
-
-The installed package contains a ChEMBL 37 / CHEMBL205 IC50 example with 2,281
-raw records. Run the complete pipeline, including source-record retrieval:
+To use your own export, download the activities for ChEMBL target CA II
+(`CHEMBL205`), include
+`pChEMBL Value`, `Standard Relation`, `Standard Units`, document and
+quality-flag fields, then run:
 
 ```bash
-python -m chemgridmap.app --smoke-test --smoke-projection umap --output-dir example_result
+chemgridmap chembl205_ic50.csv \
+  --input-format chembl \
+  --target-id CHEMBL205 \
+  --output-dir caii_map
 ```
 
-The default policy retains 1,100 records and maps 889 molecules. This check
-also verifies that CHEMBL20 links to 54 source records and median pChEMBL 7.185.
-It does not open a browser. To use your own data, follow
-[ChEMBL CSV to chemical map](#chembl-csv-to-chemical-map) below.
-
-### Optional browser interface
-
-If you prefer not to type plotting commands, start the English interface:
+The defaults (unchanged since 0.5.0) are UMAP, neighbor-refined grid placement,
+coverage-target group cores, and Gaussian activity-class support. To launch the
+same workflow in the local browser:
 
 ```bash
 chemgridmap-app
 ```
 
-This opens a local browser page using the same curation and plotting code.
+The browser keeps files on the computer, lets you choose CSV columns, displays
+all three reliability layers, and exports the source-record audit with the map.
+Select a structure group to highlight its members on any color layer in the grid
+or 2D projection, and see its selected core structure and coverage.
+Use the map-page **Core rule** selector to compare the most frequent scaffold,
+the default coverage core, **coverage including BRICS fragments** and
+**coverage including RECAP fragments** without changing groups or coordinates.
+The group card shows the group's generic Murcko scaffold (all atoms carbon, all
+bonds single) and how many members share it; this is supplementary information,
+not a core rule. The card's **Compare core rules** table also computes FMCS on
+demand with a 10-second budget and ends with the generic scaffold. Rule results
+are cached and downloaded separately under `core_rules/`; original exports stay
+unchanged. The CLI accepts `--core-rule coverage_brics` and
+`--core-rule coverage_recap`, and the build form offers the same options.
+RECAP decomposes members with at most 80 heavy atoms; larger members still count
+in coverage. Default builds still use `coverage`.
+For your own records, choose **Generic activity records**, select the activity
+unit or a unit column, and optionally supply evidence-unit identifiers or an
+assumed σ in Advanced settings. First build the **reference map**, then use
+**Add new molecules** on the map page to upload AI-generated candidates or your
+own measurements. **Show** filters all, reference or new molecules and combines
+with structure-group highlighting. New molecules occupy empty grid cells;
+reference molecules and the original reference outputs remain unchanged.
+Select a new molecule to inspect its nearest reference molecules and their
+**neighbor evidence**. This is evidence auditing and exploration, not activity
+prediction. Grid adjacency itself is not evidence.
 
-1. **Import data:** drop a CSV, browse files, or select **Try a real ChEMBL dataset**.
-2. **Configure map:** review the target and endpoint, select a projection, and
-   choose **Generate map**. Activity thresholds and identity policies are under
-   **Advanced settings**.
-3. **Explore & export:** switch between grid and projection views. Click a cell
-   or find its ChEMBL ID to open the molecule inspector. **Data audit** contains
-   exclusions and diagnostics; **Export** contains figures, tables and the full ZIP.
+If a new molecule has the same structure as a reference molecule, searching its
+uploaded ID opens that reference molecule and its source documents. Matching
+uses the reference data's structure policy; stereoisomers remain distinct.
+**Data audit** lists these matches and their source counts. Repeated structures
+open the first occurrence; invalid SMILES are identified in the lookup error.
+For your measurements, the matched reference also shows both medians and their
+difference, which can help check agreement between assay systems.
 
-The English interface uses three separate steps rather than exposing every
-setting at once. The welcome-page preview is a real CHEMBL205 Morgan/UMAP grid,
-not the output of the current session; its molecule inset is CHEMBL20. Detailed
-source records and the local grid neighborhood open only when requested.
-At small on-screen scales, the grid shows activity-colored cells; zooming in
-reveals molecular structures. This display setting does not alter exported maps.
+Use **EN / 中文** in the upper-right corner to switch the interface language.
+The question-mark buttons beside settings explain their defaults, choices and
+effects. Exported files always use English, regardless of the interface language.
 
-Files stay on your computer. The server binds only to `127.0.0.1`, has no
-telemetry and does not upload molecular data. Runs are saved under
-`~/ChemGridMap/runs` with the original CSV, parameters, provenance and outputs.
-Use **Quit** to stop the local server; simply closing the browser tab does not
-stop it. Refreshing a tab restores the active session; restarting the application
-starts a new session but does not remove saved runs.
+For measured molecules, the inspector's **Sources** section lists each source
+document and its retained-record count. DOI, PubMed, patent and ChEMBL links
+come from the bundled **ChEMBL 37 document table** (101,100 documents), so no
+network request is needed to look them up. Clicking a link opens its destination
+in a new browser tab. Documents without another identifier retain their ChEMBL
+document-page link; laboratory evidence units without references are shown as
+having no available links. Inspector source-record CSV downloads and evidence
+ZIPs include the document identifiers and ChEMBL document-page URL.
+Each retained source can highlight its distinct molecules on the map; sources
+shared with the selected molecule can also be highlighted as a union. A source
+represented by only that molecule shows a note instead of a button. Uploaded
+batch identifiers highlight only the current new molecules. Source highlighting
+and structure-group highlighting are mutually exclusive. **Possible sources**
+found by structure lookup are excluded from these source counts and controls.
 
-The built-in ChEMBL 37 / CHEMBL205 IC50 example contains 2,281 public raw
-records. The default policy retains 1,100 records and maps 889 molecules.
-Searching `CHEMBL20` retrieves 54 source records and a median pChEMBL of 7.185.
-Its conflict flag remains visible. The nearby 3 x 3 cells are a **grid
-neighborhood**, not a guarantee of the exact high-dimensional kNN set.
-Source URL, SHA-256 and CC BY-SA 3.0 attribution accompany the packaged CSV in
-`src/chemgridmap/data/chembl205_source.json`.
-
-The source archive also includes `Start ChemGridMap.command` (macOS) and
-`Start ChemGridMap.bat` (Windows). These scripts require Python 3.10+ and internet
-access on their first launch to create a local environment. Subsequent launches
-use that environment. They are conveniences, not standalone installers.
-
-### Development and validation
-
-CI checks Python 3.10 and 3.12 on Linux, macOS and Windows, then installs the
-built wheel and runs the bundled PCA and UMAP example outside the source checkout
-on all three operating systems. These are correctness and installation checks,
-not a claim of identical numerical projections across different platforms.
-
-For local development, enter the extracted source directory:
-
-```bash
-cd chemgridmap-0.3.0
-python3.12 -m venv .venv
-.venv/bin/python -m pip install -e ".[umap,dev,paper]"
-make test
-```
-
-`make test` checks the active project interpreter and required imports before
-running pytest. It does not use a previously activated conda environment.
-On Windows, use `.venv\Scripts\python -m pytest -q` after installing the same extras.
-The manuscript environment is recorded in `requirements-paper.lock.txt`; it is
-a Python 3.12 environment snapshot, not a promise of bitwise agreement on every OS.
-
-## ChEMBL CSV to chemical map
-
-On the ChEMBL target page, filter the activities to the endpoint of interest,
-include the pChEMBL and activity-quality columns, and download the results as a
-CSV. For example, a CHEMBL205 IC50 export can be processed directly:
+The package also contains a CA II smoke test:
 
 ```bash
-chemgridmap chembl205_activities.csv \
-  --input-format chembl \
-  --target-id CHEMBL205 \
-  --activity-type IC50 \
-  --representation morgan \
-  --projection pca \
-  --output-dir chembl205_map \
-  --name chembl205
+python -m chemgridmap.app --smoke-test --output-dir caii_smoke
 ```
 
-PCA works with the base installation. For UMAP:
+This uses UMAP by default and verifies that CHEMBL20 resolves to its retained
+source records and median pChEMBL value.
+
+## Reading the three reliability layers
+
+**Activity evidence.** The main activity layer keeps the observed
+molecule-level median and class. In the separate class-support layer, a pale
+(`uncertain`) cell means that document-balanced evidence does not reach the
+configured support level. A document pair is flagged when it meets the
+configured minimum shared-entry, median-difference and sign-agreement criteria
+(defaults: 3, 1 log unit and 80%). In the default `--offset-display none` mode,
+touched entries remain visible with a bottom-left marker, but `class_status`
+depends only on support. Use `--offset-display uncertain` to also display a
+touched entry as uncertain. A pale cell is not a missing measurement, and its
+class is not changed. Model probabilities are unchanged in either mode.
+
+Two probabilities are reported for each entry, and they answer different
+questions. **Class support** (output column `class_confidence`, kept under its
+0.5 name for compatibility) is the posterior probability that the consensus,
+the document-balanced mean, lies in the displayed class; it sets the pale or
+saturated colour. **Class reproducibility** (`class_reproducibility`) is the
+predictive probability that one new document reports the displayed class.
+Only class reproducibility was checked against later documents in the
+evaluation. The inspector shows both, labelled by the displayed class, together
+with the agreement that entries of the same class and status reached in the
+evaluation; the legend of the support layer repeats those rates. Saturated
+inactive cells agreed with later documents less often than saturated active
+cells, so the same colour strength does not mean the same reliability for the
+two classes.
+
+Entries reported only as bounds (for example `> 10000 nM`) are excluded from
+the median and from class support. The inspector lists the bound records of
+the selected entry, with the corresponding pActivity bound, so that a user can
+see whether other documents report the compound as weaker than a bound.
+
+The activity colours are separated under simulated colour-vision deficiency
+(see `paper/cvd_separations.py` for every pair), but the saturated active and
+inactive colours differ least under deuteranopia. **Emphasize class** fades all
+molecules of other classes, so that the classes can be told apart without
+relying on hue.
+
+All five settings are available in `annotate_activity_confidence`,
+`prepare_generic_activity_records`, the CLI and the browser:
+`--support-level`, `--offset-display`, `--offset-min-shared`,
+`--offset-min-difference` and `--offset-sign-agreement`. Fits and run manifests
+record the settings. Inspect a cell to compare document counts, evidence units,
+σ_doc and its degrees of freedom, class probabilities, all touching offset
+pairs and the number of entries each pair touches.
+Fits and manifests also report the entry with the largest share of σ_doc
+degrees of freedom and pooled sum of squares; a warning is emitted when either
+share exceeds 30%.
+
+**Neighbor recall.** The neighbor-recall layer reports how many
+fingerprint-space neighbors also appear among the selected cell's tie-aware
+grid neighbors. The default `neighbor_recall` retains every distance tie, so a
+neighbor set can contain more than k members. `neighbor_recall_fixed_k`
+reports the expected recall after independently breaking each row's ties at
+random, with total weight k. A dark cell has better local neighborhood
+agreement; a pale cell is a warning that the 2D layout does not preserve that
+local fingerprint neighborhood. Grid adjacency by itself is not evidence of
+chemical or biological similarity. `neighbor_kth_similarity` gives the kth
+Morgan neighbor's Tanimoto similarity; descriptor/embedding maps instead write
+`neighbor_kth_distance`.
+
+Exported reliability layers use opaque cell colors. Full-detail structure cells
+have a colored frame occupying 8% of each side, a white inset, and the structure
+inside that inset. At overview scale the white inset, structure and frame
+decoration hide together, leaving the full cell color visible. The five
+neighbor-recall colors and corner markers are identical in SVG, PNG/PDF and the
+browser.
+
+**Core coverage.** For each representation-defined structure group, the default
+core is the largest member scaffold or scaffold-network ring fragment that
+matches at least 80% of members. The comparison reports the actual coverage
+count and fraction. `coverage`, `most_frequent` and optional `fmcs` cores are
+selectable; an FMCS timeout is recorded because a partial search can depend on
+machine speed and load. `core_smiles_attached` is a valid SMILES drawing of the
+core with `[*]` at bonds cut from its matched parent molecule; the browser uses
+it when drawing the selected core. `core_smiles_attached_source` is
+`matched_member`, `matched_member_kekule`, or empty when no attached core could
+be built. FMCS cores contain no stereochemical information; their containment
+checks use the same chirality-aware matching rule as the other core methods.
+
+`is_conflicted` remains in exported tables for compatibility. Its alias
+`wide_record_range` has the same value and names the rule directly: records
+span more than one log unit or lie on both sides of the class thresholds.
+
+To reproduce the earlier 0.4 layout and core policy explicitly:
 
 ```bash
-python -m pip install "chemgridmap[umap] @ https://github.com/Quinnball/ChemGridMap/archive/refs/tags/v0.3.0.zip"
-chemgridmap chembl205_activities.csv \
-  --input-format chembl \
-  --target-id CHEMBL205 \
-  --activity-type IC50 \
-  --representation morgan \
-  --projection umap \
-  --output-dir chembl205_map \
-  --name chembl205
+chemgridmap chembl205_ic50.csv --input-format chembl \
+  --projection pca --grid-refinement none --core-rule most_frequent \
+  --no-activity-confidence --output-dir legacy_0_4
 ```
 
-Morgan fingerprints use Jaccard distance with UMAP by default. Continuous
-descriptor and external-vector inputs use Euclidean distance. Override this
-choice with `--umap-metric` when the scientific use case requires it. The
-representation-level neighborhood metric also uses Jaccard for Morgan
-fingerprints, and the chosen representation and projection distances are
-written to `*_metrics.csv`.
+## Generic activity records
 
-The ChEMBL importer recognizes common web-export and API column names,
-including `Molecule ChEMBL ID`, `Smiles`, `pChEMBL Value`,
-`Target ChEMBL ID`, `Standard Type`, `Standard Relation`, `Standard Units`,
-`Data Validity Comment`, and `Potential Duplicate`.
+Non-ChEMBL CSVs can be used directly when they contain a compound ID, SMILES,
+pActivity value (`-log10 M`) and source-document ID:
 
-The default curation policy:
-
-- retains the requested target and activity type;
-- requires finite pChEMBL values;
-- retains exact (`=`) activities in nM when those columns are present;
-- retains blank or `Manually validated` data-validity comments;
-- removes rows flagged by ChEMBL as potential duplicate citations;
-- removes missing or invalid SMILES;
-- standardizes structures and extracts parents with the ChEMBL Structure Pipeline;
-- uses available ChEMBL parent identifiers, with normalized representation SMILES
-  as the identity fallback when identifiers are absent;
-- aggregates repeated measurements by median pChEMBL;
-- records the number, minimum, maximum, standard deviation, and range of measurements;
-- flags repeated molecules when the pChEMBL range is greater than 1.0 or measurements
-  span the inactive (`<=6`) and active (`>=7`) cores.
-
-Original SMILES and record identifiers are preserved. All retained forms under
-one parent identity must resolve to one representation structure; ambiguous
-groups raise an error rather than silently choosing a drawing. Use
-`--molecule-identity canonical-smiles --structure-policy as-recorded` for an
-explicit form-specific analysis. Tautomers are not automatically collapsed.
-The separate `has_class_boundary_crossing` field records any crossing of the
-display classes, including crossings that do not trigger the conflict rule.
-`repeated_unflagged` means no rule was triggered, not proven experimental agreement.
-Assay types are retained by default; `--assay-types B` is an optional restriction,
-not a universal measure of assay quality. Median aggregation does not harmonize
-experimental conditions. Missing audit fields are reported as warnings.
-
-Use `--keep-potential-duplicates` only when retaining ChEMBL duplicate-citation
-flags is an intentional analysis decision. If an audit column is absent, the
-program continues but records a warning in the curation report.
-
-## Output files
-
-A ChEMBL run writes:
-
-- `*_molecule_level.csv`: curated one-row-per-molecule table;
-- `*_retained_records.csv`: activity records used for aggregation;
-- `*_excluded_records.csv`: excluded rows and explicit reasons;
-- `*_curation_report.json`: detected columns, parameters, counts, and warnings;
-- `*_grid_coordinates.csv`: normalized projection and assigned grid cells;
-- `*_metrics.csv`: projection-to-grid fidelity and local annotation metrics;
-- `*.svg`, `*.png`, and `*.pdf`: chemical maps in full-detail or overview mode.
-
-Automatic rendering draws a structure in every occupied cell for up to 2,000
-molecules. Larger maps use a color-coded overview by default because whole-map
-molecular thumbnails are not readable at manuscript width and consume
-substantial memory. The exact molecule assigned to every cell remains in the
-coordinate table. Use `--render-detail full` to force complete structure
-rendering, or render a selected local subset at full detail.
-
-## Inspect the records behind a cell
-
-Use a map's coordinate and retained-record tables together. No projection or
-assignment is rerun during inspection:
+```csv
+compound_id,smiles,p_activity,document_id,relation
+CMP-001,CCO,6.3,DOC-A,=
+CMP-001,OCC,5.9,DOC-B,=
+CMP-002,c1ccccc1,7.2,DOC-A,=
+```
 
 ```bash
-chemgridmap inspect chembl205_map/chembl205_grid_coordinates.csv \
-  --records chembl205_map/chembl205_retained_records.csv \
-  --molecule-id CHEMBL20 --output-dir acetazolamide_audit
+chemgridmap records.csv \
+  --compound-column compound_id \
+  --smiles-column smiles \
+  --value-column p_activity \
+  --document-column document_id \
+  --relation-column relation \
+  --output-dir generic_map
 ```
 
-Alternatively, replace `--molecule-id CHEMBL20` with `--cell ROW COL`, using the
-zero-based `grid_row` and `grid_col` in the coordinate table (rows increase
-upwards). Empty cells are rejected rather than silently selecting a neighbor.
-The export contains a readable molecular SVG, the selected molecular summary,
-all contributing records, and a JSON audit that verifies record count and median.
-The JSON also records input digests and available assay/document counts.
-Native SVG maps mark conflicted entries with a dark corner triangle. An active
-color can therefore coexist with a conflict marker: the median is active, but
-the underlying measurements still require review.
+Rows are grouped by compound ID and the displayed pActivity is the median.
+With a document column, class support is calculated by default with the same
+evidence-unit and variance code used for ChEMBL input. `--evidence-model
+gaussian` is the default; `exclude-flagged` is the explicit alternative that
+removes evidence units containing documents in systematic offset pairs and
+falls back to Gaussian support where no unit remains. Use
+`--no-merge-identical-documents` to keep re-reported identical values as
+separate evidence units. The support and offset criteria described above apply
+to generic records as well.
 
-Source rows always refer to the supplied file. ChEMBL activity identifiers are
-available only when the export includes them; the program does not invent
-identifiers missing from a web CSV. Neither inspection nor aggregation resolves
-experimental differences or certifies biological comparability.
+In the browser, the optional **Reference column (DOI, PubMed ID or URL)** adds
+source links to generic records. Choose a column containing DOI values (bare or
+with a DOI URL/prefix), PubMed IDs (digits or `PMID:`), or `http`/`https` URLs.
+References are listed under their evidence unit, or grouped by reference value
+when no evidence-unit column is selected. Other values remain plain text.
+The reference column defaults to None and does not change evidence units,
+activity, σ or class support; it is recorded in `app_options.json` only when
+selected.
 
-## Historical coordinate example
+If your generic records have no document identifiers, the optional browser
+**Source lookup: ChEMBL export** accepts an activity export for the same target.
+Matching uses standardized parent structures: salts can match their parent,
+while stereoisomers remain distinct. **Possible sources** lists documents that
+measured the same structure; it does not prove that your data came from them.
+**Same value** means that a document reports a pChEMBL within 0.005 of at least
+one retained record for that molecule, after your activity values are converted
+to pChEMBL. All matching runs locally, usually adding a few seconds for a single
+target export. The file is used only for the browser inspector and Data audit;
+it does not change the map, calculations or exports. See
+[`docs/SOURCE_DOCUMENTS.md`](docs/SOURCE_DOCUMENTS.md) for matching details.
 
-The `examples/` directory contains a historical 770-molecule ChEMBL-derived demonstration,
-not the dataset analyzed in the revised manuscript. It contains molecule-level pChEMBL values, activity
-classes, a 128-dimensional external embedding, and the corresponding
-precomputed UMAP coordinates.
+A curated one-row-per-molecule table remains supported through `--smiles-col`,
+`--value-col` and `--label-col`.
+
+## Your own data and unmeasured molecules
+
+Generic records and one-row-per-molecule tables accept concentration values:
+`--value-unit M`, `mM`, `uM`, `nM` or `pM` converts each value to
+`pActivity = -log10(value × molar unit factor)`. The default `p` keeps existing
+pActivity values. For mixed units, use `--unit-column unit` instead; it also
+accepts `µM` and `μM`, trims whitespace and distinguishes case. Do not combine
+the two options. Invalid/nonfinite values, nonpositive concentrations and
+unrecognized units are excluded with separate reason counts. Generic retained
+records preserve `raw_activity_value` and `raw_activity_unit`; converted values
+enter the existing pActivity fields. A relation column still retains only `=`.
+
+`--document-column` may identify a publication, batch, experiment date or
+laboratory. Repeated measurements within one evidence unit are not independent
+evidence. If an appropriate between-unit SD is known, `--assumed-sigma S` uses
+that finite positive SD instead of estimating it. With no evidence-unit
+column, each compound's record median forms one unit (`m = 1`); document-offset
+detection is then not applicable. With an evidence-unit column, offset checks
+continue normally. Without this option, the existing estimation and fallback
+rules remain in effect, and no support is calculated without evidence units.
+
+For example, an IC50 record table without document identifiers can be mapped as:
 
 ```bash
-chemgridmap examples/chembl205_embedding_umap.csv \
-  --smiles-col smiles \
-  --value-col activity_pchembl \
-  --label-col activity_class \
-  --x-col projection_x \
-  --y-col projection_y \
-  --grid-occupancy 0.40 \
-  --output-dir gridmap_output \
-  --name chembl205_embedding_umap
+chemgridmap measurements.csv --compound-column compound_id \
+  --smiles-column smiles --value-column IC50 --value-unit nM \
+  --assumed-sigma 0.64 --map-color-modes activity class_support \
+  --output-dir own_data_map
 ```
 
-The original 966-row project table is also supplied as
-`examples/chembl205_raw_activity_legacy.csv`. It can be processed end to end:
+The value 0.64 log units has the same source as the existing literature
+fallback: Landrum & Riniker, *J. Chem. Inf. Model.* **2024**, 64, 1560.
+Their observation that 27% of cross-assay IC50 pairs differ by more than one
+log unit gives approximately 0.64 per measurement under a Gaussian model.
+It describes differences between publications. When the evidence units are
+batches or experiment dates within one laboratory, the between-unit SD is
+usually smaller, and class support then describes repeatability within that
+laboratory rather than reproducibility across laboratories. Prefer an SD
+estimated from your own repeated measurements, for example the SD of a control
+compound measured in every batch; 0.64 is then only a conservative upper value.
+The evaluation of class support and class reproducibility used ChEMBL documents
+only; it does not cover batches or dates.
+Supplying an SD explicitly is an assumption, not an estimate from your data:
+fits distinguish `assumed_sigma` from automatic `literature_fallback` and
+record the evidence-unit source. Assumed SDs have no fitted degrees of freedom.
+This option requires records; a molecule-only table must first be supplied in
+record-table form with `--compound-column`.
+
+### 先建参照图，再加入新分子 / Reference first, then new molecules
+
+先选择参照数据并生成地图，再在地图页点击“加入新分子”。上传 CSV/TSV，
+选择 SMILES、可选 ID 和标签；不选 ID 时按 `N00001`、`N00002` 编号。
+选活性列后按自己的测定记录处理，可指定统一单位或单位列、关系符列和
+证据单元列。自己的数据仍可作为主数据独立建图。
+
+Build a reference map first, then choose **Add new molecules** on the map page.
+Upload CSV/TSV and select SMILES plus optional ID and label columns. IDs default
+to `N00001`, `N00002`, etc. Selecting an activity column enables measured-record
+aggregation, with a fixed unit or unit column, an optional relation column and
+an optional evidence-unit column. Your own data can still be the main input.
+
+Only maps arranged using **Morgan fingerprints** accept new molecules. Checked
+new molecules are limited to **1,000**; tens to hundreds are recommended. New
+molecules appear **only in the grid**, never in the 2D projection. One set is
+active at a time. Uploading another set replaces the displayed set; removing it
+restores the reference-only display. Refreshing retains the set, rebuilding
+re-inserts it, and changing the reference input clears it. Saved output folders
+are preserved.
+
+Placement uses the reference map's Morgan radius and bit count. For each new
+molecule, choose the reference with the highest Tanimoto score; tied references
+favor the lexicographically smallest ID. Process new molecules by decreasing
+best score, then ID. Choose the nearest empty cell within the original grid
+bounds by Euclidean distance; ties favor row, then column. No reference cell
+moves. An error is raised when there are too few empty cells.
+
+**Neighbor evidence** uses the five most similar reference molecules, including
+all ties at fifth place. Only neighbors with Tanimoto at least `group_similarity`
+(default `0.6`) count as similar. Supported similar neighbors yield consistent
+active, medium or inactive evidence, or conflicting evidence if classes differ.
+Similar neighbors without supported classes yield insufficient evidence; no
+similar neighbors yield no similar reference molecule. When reference class
+support was not assessed, observed classes are used and this limitation is
+shown. For measured new molecules, the app compares their own class with a
+consistent neighbor class. **This summarizes evidence from similar reference
+molecules; it is not a prediction for this molecule.**
+
+The CLI keeps its existing query arguments and inserts after finishing the
+reference map:
 
 ```bash
-chemgridmap examples/chembl205_raw_activity_legacy.csv \
-  --input-format chembl \
-  --target-id CHEMBL205 \
-  --activity-type IC50 \
-  --representation morgan \
-  --projection pca \
-  --output-dir gridmap_output \
-  --name chembl205_direct
+chemgridmap --example caii --query-file virtual_library.csv \
+  --query-smiles-column smiles --query-id-column query_id \
+  --output-dir query_map
 ```
 
-This legacy file predates retention of the complete ChEMBL export metadata, so
-the audit report correctly warns that target, relation, units, validity, and
-potential-duplicate fields cannot be rechecked from that file.
+CLI queries are treated as unmeasured molecules. **Measured new-molecule input
+is supported in the browser only**, not through CLI query arguments.
+`build_grid_map(..., query_data=...)` likewise builds the reference first and
+then inserts unmeasured molecules. The public `insert_new_molecules` function
+is shared by the browser and CLI.
 
-## ChEMBL 37 validation
+New results are saved under `new_molecules/<input-stem>/`; existing names receive
+`-2`, `-3`, etc. The folder contains the byte-preserved input, structure checks,
+one-row-per-molecule results, tie-inclusive neighbors, an activity SVG,
+a manifest and a ZIP. Original reference files are not changed. See
+[新分子详细规则与输出文件](docs/NEW_MOLECULES.md).
 
-The direct-download workflow was tested against the archived official
-ChEMBL 37 REST API export for CHEMBL205 IC50 activities. That snapshot
-contained 2,281 raw records; the default audit retained 1,100 records and
-generated 889 parent-level molecules without curation warnings.
-The revision applies parent normalization before fingerprinting and drawing.
-It changes 81 representative structures relative to the as-recorded policy,
-without changing any of the 889 median-derived activity labels. This is a
-structural consistency correction, not a guarantee of improved map metrics.
-The 62 repeated groups without a conflict flag include 12 that cross a display
-class boundary; they must not all be called repeated-consistent.
+“加入新分子”也提供“单个分子”页签：输入 SMILES 后预览结构，填写可选 ID、
+标签、备注及实测结果，再追加到当前集合。未填 ID 时自动使用 `M001`、`M002`
+等不重复编号；已有分子的字段和格子保持不变。没有集合时写入
+`new_molecules/manual/`。数值结果支持 pActivity、M、mM、µM、nM、pM，
+按参照图阈值分类；只有定性或截尾结果时可直接选择类别。
 
-The actual ChEMBL website CSV download was also tested: 2,281 rows produced
-1,100 retained records and the same 889 normalized structures and median
-annotations. The importer accepts the website's apostrophe-wrapped `'='`
-operators while still rejecting inequality measurements. This web export lacks
-parent and activity IDs; it uses structure identity fallback and retains file
-row, assay and document references. The archive's richer provenance is not
-silently assumed. A fresh virtual environment with the independently installed
-wheel passed 38 tests and reproduced the web-CSV-to-UMAP and inspection routes.
-This validation covers one macOS arm64 host, not all supported platforms.
+**One molecule** previews a SMILES and appends it to the current set. Optional
+fields include ID, label, batch, note and a measured result. Existing molecules
+keep their cells. The new-molecule inspector can record, edit or remove a manual
+result; measurements imported from a file remain read-only. Disagreement with
+consistent neighbor evidence gets an upper-left marker on every color layer.
+The list can filter these molecules and download the measured-result comparison.
+This evidence is not an activity prediction, and recording a result changes
+neither the reference map nor other molecules' neighbor evidence.
 
-The archived validation input is under `validation_data/chembl37_chembl205/`;
-baseline experiment outputs are under `paper/output/revision_v4/`, and the added
-record-retrieval, web-download and clean-install checks are under
-`paper/output/revision_v5/`. The UMAP
-example can be reproduced with:
+Manual changes update the current collection's outputs and ZIP, adding
+`manual_entries.csv` for manually added molecules and
+`neighbor_evidence_feedback.csv` for measured results. The original uploaded
+input stays byte-identical. Refreshing the browser retains these changes in the
+running session. After restarting, choose **Open a previous result** on the import
+page to restore the saved reference map, core-rule caches and active new-molecule
+collection, including manual additions and recorded results.
+Uploading a replacement file asks for confirmation when manual work is present,
+and keeps its saved output folder. Endpoint details are in [API.md](docs/API.md).
 
-```bash
-chemgridmap validation_data/chembl37_chembl205/chembl37_chembl205_ic50_raw.csv \
-  --input-format chembl \
-  --target-id CHEMBL205 \
-  --activity-type IC50 \
-  --representation morgan \
-  --projection umap \
-  --molecule-identity parent-id \
-  --grid-occupancy 0.40 \
-  --coordinate-scaling isotropic \
-  --output-dir validation_data/chembl37_chembl205/chemgridmap_output_umap \
-  --name chembl37_chembl205_ic50_umap
-```
+### Saved results and parallel cores
 
-### Large-scale validation
+The import page lists the latest 20 compatible results in this launcher's output
+folder, with creation time, input filename, reference-map description, molecule
+count, original build rule and new-molecule count. Opening a result restores the
+input and settings without regenerating the map; generating again creates a new
+run. Older runs without a snapshot are summarized separately. A changed software
+or dependency version, changed CSV or missing output prevents opening: regenerate
+that result. Moving the entire run folder to another output folder is supported.
 
-The scalable assignment path was additionally tested on the ChEMBL 37 human
-KCNH2/hERG target (CHEMBL240). The official REST API returned 11,709 IC50
-records with non-null pChEMBL values. The archived audit retained 10,509 records
-and, with the revised parent-normalization policy, yielded 9,581 molecular
-entries. The full-scale UMAP run reached the 1,024-candidate cap without
-satisfying the stopping criterion (median assignment time 86.98 s, three runs).
-Increasing the cap to 2,048 eliminated fallback-edge use and satisfied the
-criterion in 126.75 s for one run. Full-data tie-aware recall and precision
-were 0.536 and 0.453. This is an empirical convergence check, not comparison
-with a full dense optimum or a cross-hardware benchmark.
+Browser builds and map-page core switches compute independent structure-group
+cores in separate `joblib`/loky processes when there are at least 64 groups.
+Smaller runs stay serial. The default is
+`min(8, os.cpu_count() - 1)`, with at least one worker; `CHEMGRIDMAP_JOBS` overrides
+it. The Python API's `jobs=1` and CLI's `--jobs 1` keep the default serial and do
+not read this browser-only environment override.
+For example, `chemgridmap input.csv --jobs 4` explicitly opts the CLI into parallel
+cores. Python scripts enabling multiple workers should use an
+`if __name__ == "__main__":` guard. FMCS always stays serial because CPU load can
+change its time-limited intermediate solution. While a rule is switching, the
+map remains interactive and completed/total group counts refresh every second.
 
-The historical `v0.2.0` bundle used 9,628 as-recorded entries and different
-assignment settings; those figures must not be substituted for the current
-results. Current raw inputs are included in the local reproduction archive.
-After the main validation, run:
+Each successful browser run adds a compressed `session/` cache beside the existing
+exports; the active new-molecule collection has its own `session/`. These snapshots
+store the complete session and core caches, with file hashes, source and dependency
+versions. They occupy additional disk space, are excluded from result ZIPs and run
+manifests, and are validated before restricted deserialization. Removing only
+`session/` retains scientific exports but removes reopening support. When a result
+is no longer needed, delete the entire run folder. Opening does not rewrite it.
 
-```bash
-.venv/bin/python paper/validate_adaptive_assignment.py --large
-.venv/bin/python paper/extend_large_candidate_check.py
-```
+## Python API
 
-The ChEMBL-derived validation files retain the ChEMBL data license. See
-`validation_data/README.md` for attribution and redistribution terms.
-
-## Curated tables and existing coordinates
-
-Existing coordinates can be passed directly:
-
-```bash
-chemgridmap molecules.csv \
-  --smiles-col smiles \
-  --x-col umap_x \
-  --y-col umap_y \
-  --label-col activity_class \
-  --output-dir gridmap_output
-```
-
-## Python
+The public functions for evidence units, σ_doc, class probabilities, offset
+pairs, both neighbour-recall definitions, structure groups and cores are listed
+in `chemgridmap.__all__`. This example is kept executable in
+[`examples/python_api.py`](examples/python_api.py).
 
 ```python
-import pandas as pd
-from chemgridmap import build_grid_map
+from pathlib import Path
 
-data = pd.read_csv("examples/chembl205_embedding_umap.csv")
-result = build_grid_map(
-    data,
-    output_dir="gridmap_output",
-    name="chembl205_embedding_umap",
-    value_col="activity_pchembl",
-    label_col="activity_class",
-    x_col="projection_x",
-    y_col="projection_y",
-    grid_occupancy=0.40,
-    coordinate_scaling="isotropic",
+import pandas as pd
+
+from chemgridmap import (
+    annotate_activity_confidence,
+    build_grid_map,
+    curate_chembl_activity_data,
 )
 
-print(result.metrics)
+
+def run(input_path, output_dir, *, target_id="CHEMBL205",
+        activity_type="IC50", projection="umap"):
+    raw = pd.read_csv(input_path, encoding="utf-8-sig")
+    curated = curate_chembl_activity_data(
+        raw, target_id=target_id, activity_type=activity_type
+    )
+    document_column = curated.report["detected_columns"]["document_id"]
+    molecules = curated.molecules
+    if document_column:
+        molecules, fit = annotate_activity_confidence(
+            molecules,
+            curated.retained_records,
+            value="activity_pchembl_raw",
+            document=document_column,
+        )
+        curated.report["activity_confidence"] = fit
+    result = build_grid_map(
+        molecules,
+        output_dir=output_dir,
+        name="caii",
+        smiles_col="canonical_smiles",
+        value_col="activity_pchembl",
+        label_col="activity_class",
+        projection=projection,
+        map_color_modes=(
+            ["class_support", "neighbor_recall"]
+            if "class_status" in molecules else ["neighbor_recall"]
+        ),
+    )
+    columns = [
+        "molecule_identity_key", "activity_pchembl", "class_confidence",
+        "class_status", "status_reason", "offset_pair_touched",
+        "neighbor_recall", "neighbor_recall_fixed_k",
+        "neighbor_kth_similarity", "structure_group",
+    ]
+    result.data[columns].to_csv(
+        Path(output_dir) / "entry_reliability.csv", index=False
+    )
+    core_columns = [
+        "structure_group", "size", "core_smiles", "core_smiles_attached",
+        "core_coverage_count", "core_coverage_fraction",
+    ]
+    pd.DataFrame(result.structure_groups)[core_columns].to_csv(
+        Path(output_dir) / "group_cores.csv", index=False
+    )
+    return result
+
+
+if __name__ == "__main__":
+    run("chembl205_ic50.csv", "caii_map")
 ```
 
-To recompute the two-dimensional layout from the supplied 128-dimensional
-embedding:
+## Outputs
+
+A run writes:
+
+- `<name>_grid_coordinates.csv`: molecule annotations, evidence support,
+  projection coordinates and grid cells;
+- `<name>_metrics.csv`: projection/grid fidelity and neighbor metrics;
+- `<name>.svg`, `.png` and `.pdf`: the main activity-colored map;
+- optional `<name>_class_support`, `_neighbor_recall` and
+  `_structure_group` layers;
+- structure-group summaries and a trimmed member table containing identifiers,
+  grid positions and group/scaffold/core fields;
+- an inspector-compatible source-record table for ChEMBL input;
+- `<name>_run_manifest.json`: parameters, software versions, diagnostics and
+  SHA-256 digests;
+- `<name>_results.zip`: the files from one run.
+
+For additional map layers:
 
 ```bash
-pip install -e ".[umap]"
-chemgridmap examples/chembl205_embedding_umap.csv \
-  --value-col activity_pchembl \
-  --label-col activity_class \
-  --representation embedding \
-  --projection umap \
-  --grid-occupancy 0.40 \
-  --output-dir gridmap_output \
-  --name chembl205_recomputed_umap
+chemgridmap chembl205_ic50.csv --input-format chembl \
+  --map-color-modes activity class_support neighbor_recall structure_group \
+  --output-dir caii_layers
 ```
 
-## Input notes
+Main exported columns:
 
-The default input is a CSV file with one molecule per row and a `smiles`
-column. Repeated canonical structures raise an error by default because the
-generic input route should not silently decide how measurements are aggregated.
-Use `--duplicate-policy first` only when keeping the first row is scientifically
-appropriate. Use `--input-format chembl` for the explicit, audited ChEMBL
-median-aggregation workflow.
+- `grid_coordinates.csv`: `molecule_identity_key`, `canonical_smiles`,
+  `activity_pchembl`, `activity_class`, `n_records`, `pchembl_min`,
+  `pchembl_max`, `is_conflicted`, `wide_record_range`, `class_confidence`,
+  `class_reproducibility`, `class_status`, `status_reason`,
+  `offset_pair_touched`, `n_documents`, `n_evidence_units`, `neighbor_recall`,
+  `neighbor_recall_fixed_k`, `neighbor_kth_similarity`,
+  `neighbor_shared_count`, `grid_neighbor_count`,
+  `projection_x`, `projection_y`, `grid_row`, `grid_col`, `structure_group`.
+- `metrics.csv`: representation and projection names, projection/grid
+  diagnostics, assignment method, tie-aware mean recall and fixed-k mean
+  recall.
+- `structure_groups.json`: group size and members, `core_smiles`,
+  `core_smiles_attached`, core rule and coverage, scaffold counts, and FMCS
+  timeout status.
+- `structure_members.csv`: identifier, grid, group, scaffold and core fields;
+  activity columns and the full map annotation set are not duplicated here.
+- `document_offsets.csv`: evaluated document pairs, shared entries, median,
+  mean and SD offsets, sign agreement, systematic-offset status and the number
+  of entries touched by the union of both documents.
+- `run_manifest.json`: software version and source-tree SHA-256, Git commit and
+  dirty state when available, parameters, dependency versions, σ_doc fit,
+  assignment/refinement diagnostics, timings and output SHA-256 digests. Git
+  dirty state covers only the package directory; commit is empty when the
+  software is not in a tracked repository.
 
-Activity colors are recognized automatically for labels named `inactive`,
-`medium`, and `active`. Other labels receive a categorical palette. If a
-continuous value is supplied without a label column, the default activity
-classes are `<= 6`, `6-7`, and `>= 7`; both thresholds can be changed from the
-command line.
-
-Grid assignment removes overlap but is not lossless. For up to 20 million
-point-cell pairs, automatic mode uses the complete dense assignment problem.
-Larger problems use sparse minimum-weight matching with local candidate cells
-and a deterministic unique fallback matching. The sparse solution is optimal
-for that candidate graph, not necessarily for the complete dense cost matrix.
-Sparse matching starts with 128 nearest cells and doubles this number until the
-relative objective change is at most 0.1% and no fallback edge is used. The
-default cap is 1024 cells; reaching it without convergence issues a warning.
-Use `--sparse-max-neighbors 2048` to allow a larger graph or
-`--fixed-sparse-candidates` for a fixed-candidate calibration. The run manifest
-records every candidate expansion, objective, and fallback-edge count. This
-stopping rule is an empirical diagnostic, not a dense-optimality certificate.
-Inspect projection-to-grid trustworthiness, tie-aware neighborhood recall and
-precision, displacement, and the continuous projection coordinates together
-with the final map. Tie-aware metrics include the complete kth-neighbor distance
-shell because square grids contain many exactly equidistant neighbors. Legacy
-exact k-nearest-neighbor overlap remains in the metrics table for compatibility.
-Activity differences and class purity also include complete distance ties.
-High trustworthiness does not imply identical local neighborhoods across UMAP
-seeds. Inspect seed sensitivity before interpreting a specific neighborhood.
-By default, `--grid-occupancy` controls map compactness independently of data
-set size. The side length is `ceil(sqrt(N / occupancy))`; the default target is
-0.40. Lower occupancy creates a larger, less crowded lattice and generally
-reduces grid distortion. `--grid-padding` remains available as an explicit
-legacy override. Isotropic coordinate scaling is the default so that projection
-aspect ratio and relative Euclidean distances are not distorted before
-assignment.
-
-## Paper example
-
-Revision experiments use complete archived IC50 exports from CHEMBL205,
-CHEMBL204, and CHEMBL240. The independent-target dense comparisons use fixed
-1200-molecule subsets; full curation counts are reported separately.
+Every emitted column is defined in
+[`docs/OUTPUT_COLUMNS.md`](docs/OUTPUT_COLUMNS.md); public signatures and
+complete docstrings are in [`docs/API.md`](docs/API.md). The mapping between
+CLI options, Python arguments, manifest fields and output columns is in
+[`docs/NAMES.md`](docs/NAMES.md). Regenerate the reference files with:
 
 ```bash
-make paper
-# Optional full-size hERG timing check and candidate-cap sensitivity:
-.venv/bin/python paper/validate_adaptive_assignment.py --large
-.venv/bin/python paper/extend_large_candidate_check.py
-.venv/bin/python paper/build_revision_figures.py
+python -m chemgridmap.columns \
+  --write docs/OUTPUT_COLUMNS.md \
+  --write-api docs/API.md
 ```
 
-All revised tables, native-vector figures, and manifests are written to
-`paper/output/revision_v4/`. The tests use a synthetic semicolon-delimited
-web-format fixture and real API-export validation; a browser download session
-is not implied by that fixture. Preserve the raw CSV and its SHA-256 digest
-when reproducing an analysis from a newer ChEMBL release.
+Exact grouping is checked against the 10,000-entry limit before projection or
+assignment. Larger maps must use `--grouping none` in the CLI or **No grouping**
+in the browser. For ChEMBL parent identities that map to multiple normalized
+structures, `--identity-conflicts exclude` removes all associated records,
+writes `identity_conflicts.csv`, and records the count and warning in the
+curation report.
 
-The script in `paper/run_comparisons.py` rebuilds the projection and
-representation comparisons from the included molecule-level table:
+## Paper reproduction
+
+The commands for the main application analyses, E1-A/E1-B reliability analyses,
+E2 multi-target evidence evaluation and E2c layout evaluation are in
+[`paper/README.md`](paper/README.md). The analysis sources are included under
+[`paper/strengthening/`](paper/strengthening/), with target selection rules in
+[`paper/strengthening/SELECTION_RULES.md`](paper/strengthening/SELECTION_RULES.md).
+
+To reproduce the manuscript Figure 2 reliability layers with the software's
+own overview renderer:
 
 ```bash
-python paper/run_comparisons.py \
-  examples/chembl205_embedding_umap.csv \
-  --output paper/output
+chemgridmap chembl205_ic50.csv --input-format chembl \
+  --target-id CHEMBL205 \
+  --render-detail overview \
+  --map-color-modes activity class_support neighbor_recall \
+  --output-dir caii_fig2
 ```
 
-The raw legacy activity table, molecule-level example, and provenance notes are
-provided in `examples/`.
+## Supported browsers and maintenance
 
-### Source-record task checks
+The browser interface uses standard HTML, SVG and JavaScript without external
+services. For 0.6.0 it was exercised in Chromium (headless, through Playwright)
+for the figures and interface checks; its JavaScript behaviour is covered by
+Node-based contract tests in `tests/*.cjs`. Current versions of Chrome, Edge,
+Firefox and Safari are expected to work; please report any that do not.
 
-The [0.3.0 release](https://github.com/Quinnball/ChemGridMap/releases/tag/v0.3.0)
-includes archived inputs and saved layouts. `paper/run_record_tasks.py` compares
-all 3289 mapped entries with an explicit, metadata-preserving pandas baseline.
-Both routes recover the same evidence; this is not a human-efficiency test.
+Questions and bug reports go to the GitHub issue tracker. Fixes are made on the
+latest minor release. The bundled ChEMBL 37 document table
+(`src/chemgridmap/data/`) is used only to name and link source documents; maps,
+classes and support are computed from the user's own export and do not depend
+on it. It is regenerated when a new ChEMBL release adds documents that exports
+commonly cite, and the version used is recorded in every run manifest.
 
-An additional controlled comparison uses unmodified MolCompassView visualization
-callbacks with the same saved coordinates and molecular metadata. Nine selected
-cases cover 103 source records. The viewer displays structures and supplied row
-links; an external pandas bridge recovers the same records as `chemgridmap inspect`.
-This demonstrates the packaged evidence-retrieval boundary, not superiority to
-the complete MolCompass application. The
-[task archive](validation_data/viewer_task_comparison_2026-09-10.zip) contains the
-protocol, results, and evidence exports.
+## Citation
 
-To repeat the component comparison in a separate environment:
+After the accompanying paper is published, use the preferred citation recorded
+in [`CITATION.cff`](CITATION.cff). Until then, cite the ChemGridMap software
+version used for the analysis:
 
-```bash
-python -m pip install -r paper/requirements-viewer-comparison.txt
-# Extract https://github.com/sergsb/molcompview/archive/27c19943a256d4791984944293999b389eb42e17.zip
-python paper/run_viewer_tasks.py --source paper/output/revision_v6 \
-  --comparator /path/to/molcompview-27c19943a256d4791984944293999b389eb42e17
-```
-
-The adapter bypasses MolCompass's projection calculation and checks the viewer
-source hashes before running. Dash and MolCompass are not ChemGridMap dependencies.
+> Qiu, Zhenming. ChemGridMap 0.6.0.
 
 ## License
 
-ChemGridMap source code is released under the BSD 3-Clause License. The
-ChEMBL-derived example table is provided separately under the ChEMBL
-Attribution-ShareAlike terms described in `examples/DATASET.md`.
+ChemGridMap source code is released under the BSD 3-Clause License; see
+[`LICENSE`](LICENSE). The bundled CA II example and ChEMBL 37 document table
+are ChEMBL-derived data, distributed under the ChEMBL data license,
+[CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/), with attribution
+to [ChEMBL at EMBL-EBI](https://www.ebi.ac.uk/chembl/). The document table comes
+from the ChEMBL web service document resource, version ChEMBL_37 (released
+2026-05-01), downloaded on 2026-11-07. Its source, checksum and license are
+recorded in `chemgridmap/data/chembl37_documents.json`. Check each source snapshot
+and attribution before redistributing derived tables or maps.

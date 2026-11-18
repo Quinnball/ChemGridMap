@@ -29,6 +29,90 @@ def test_id_and_cell_recover_the_same_measurements(case):
     assert summary["median_pchembl"] == 7.2
     assert summary["is_conflicted"]
     assert summary["n_assays"] is None
+    assert summary["offset_pair_touched"] is None
+    assert summary["status_reason"] is None
+
+
+def test_inspector_reports_kth_fingerprint_neighbor(case):
+    grid, records = case
+    grid = grid.copy()
+    grid["neighbor_kth_similarity"] = [0.42, 0.51]
+    _, _, summary = inspect_entry(grid, records, molecule_id="CHEMBL20", k=10)
+    assert summary["neighbor_kth_label"] == "10th fingerprint neighbor: Tanimoto 0.510"
+
+
+@pytest.mark.parametrize(("offset_display", "expected_rule"), [
+    ("uncertain", "This entry has records from DOC_A, so it is shown as uncertain."),
+    ("none", "This entry has records from DOC_A; the display is unchanged because the offset rule is off."),
+])
+def test_inspector_reports_each_touching_offset_pair_with_present_documents(
+        offset_display, expected_rule):
+    records = pd.DataFrame({
+        "source_row": [0],
+        "molecule_identity_key": ["CHEMBL4"],
+        "activity_pchembl_raw": [6.5],
+        "document_chembl_id": ["DOC_A"],
+    })
+    grid = pd.DataFrame({
+        "molecule_identity_key": ["CHEMBL4"], "source_rows": ["0"],
+        "n_records": [1], "activity_pchembl": [6.5],
+        "grid_row": [0], "grid_col": [0],
+        "offset_pair_touched": [True], "status_reason": ["offset_pair"],
+    })
+    activity_confidence = {
+        "confidence_threshold": 0.8,
+        "offset_display": offset_display,
+        "document_offsets": [{
+            "document_a": "DOC_A", "document_b": "DOC_B",
+            "median_offset": 3.0, "shared_entries": 3, "touched_entry_count": 7,
+        }],
+    }
+
+    _, _, summary = inspect_entry(
+        grid, records, molecule_id="CHEMBL4",
+        activity_confidence=activity_confidence,
+    )
+    assert len(summary["document_offsets"]) == 1
+    assert summary["status_reason"] == "offset_pair"
+    assert summary["confidence_threshold"] == 0.8
+    assert (
+        "Offset document pair: DOC_A vs DOC_B, median difference 3 log units, "
+        "n shared 3; the pair touches 7 entries. "
+        + expected_rule
+    ) in summary["warnings"]
+
+    _, _, unavailable = inspect_entry(
+        grid, records, molecule_id="CHEMBL4"
+    )
+    assert unavailable["document_offsets"] == []
+    assert "Offset document pair details are unavailable for this map." in unavailable["warnings"]
+
+
+def test_inspector_uses_uncertain_fallback_for_legacy_maps():
+    records = pd.DataFrame({
+        "source_row": [0],
+        "molecule_identity_key": ["CHEMBL4"],
+        "activity_pchembl_raw": [6.5],
+        "document_chembl_id": ["DOC_A"],
+    })
+    grid = pd.DataFrame({
+        "molecule_identity_key": ["CHEMBL4"], "source_rows": ["0"],
+        "n_records": [1], "activity_pchembl": [6.5],
+        "grid_row": [0], "grid_col": [0],
+        "offset_pair_touched": [True], "status_reason": ["offset_pair"],
+    })
+    confidence = {
+        "confidence_threshold": 0.8,
+        "document_offsets": [{
+            "document_a": "DOC_A", "document_b": "DOC_B",
+            "median_offset": 3.0, "shared_entries": 3, "touched_entry_count": 7,
+        }],
+    }
+    _, _, summary = inspect_entry(
+        grid, records, molecule_id="CHEMBL4", activity_confidence=confidence
+    )
+    assert summary["offset_display"] is None
+    assert any("so it is shown as uncertain." in warning for warning in summary["warnings"])
 
 
 def test_id_is_exact_not_substring(case):
@@ -79,8 +163,10 @@ def test_inspect_cli_exports_auditable_native_svg(case, tmp_path):
     records.to_csv(tmp_path / "records.csv", index=False)
     assert main(["inspect", str(tmp_path / "grid.csv"), "--records", str(tmp_path / "records.csv"),
                  "--molecule-id", "CHEMBL20", "--output-dir", str(tmp_path / "audit")]) == 0
-    summary = json.loads((tmp_path / "audit/audit_summary.json").read_text())
+    summary = json.loads(
+        (tmp_path / "audit/audit_summary.json").read_text(encoding="utf-8")
+    )
     assert summary["median_verified"] and summary["record_count_verified"]
-    svg = (tmp_path / "audit/selected_molecule.svg").read_text()
+    svg = (tmp_path / "audit/selected_molecule.svg").read_text(encoding="utf-8")
     assert "data-conflict-marker" in svg and "<image" not in svg
     assert len(summary["inputs"]["coordinates"]["sha256"]) == 64

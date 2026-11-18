@@ -1,0 +1,5 @@
+panel,comparison_id,core_matched,exact_scaffold,pchembl
+C1,CHEMBL81688,True,True,8.7
+C2,CHEMBL79340,True,False,8.4
+C3,CHEMBL309608,True,True,8.85
+D,CHEMBL85636,False,False,8.4

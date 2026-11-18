@@ -1,0 +1,22 @@
+{
+  "source": "ChEMBL web services, document resource (https://www.ebi.ac.uk/chembl/api/data/document)",
+  "chembl_db_version": "ChEMBL_37",
+  "chembl_release_date": "2026-05-01",
+  "fetched_utc": "2026-11-07T07:29:04Z",
+  "rows": 101100,
+  "fields": [
+    "document_chembl_id",
+    "doc_type",
+    "doi",
+    "pubmed_id",
+    "patent_id",
+    "journal",
+    "year",
+    "src_id"
+  ],
+  "file": "chembl37_documents.csv.gz",
+  "bytes": 997982,
+  "sha256": "436bbdf1ce80433ebe382adcba1f1456912a50ac43747ec74f2546286d58eaef",
+  "uncompressed_bytes": 8090322,
+  "license": "CC BY-SA 3.0 (ChEMBL, EMBL-EBI); this file keeps a subset of the document fields"
+}
